@@ -1,0 +1,687 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Private user account profile storing role, preferences, and identity metadata.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "role": {
+          "type": "string",
+          "enum": ["viewer", "creator", "admin"]
+        },
+        "preferredLocale": {
+          "type": "string",
+          "enum": ["en", "id"]
+        },
+        "preferredCurrency": {
+          "type": "string",
+          "enum": ["USD", "IDR"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "photoURL",
+        "role",
+        "preferredLocale",
+        "preferredCurrency",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Creator": {
+      "title": "Creator",
+      "description": "Public creator studio profile and verification state.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 40,
+          "pattern": "^@[a-zA-Z0-9_]+$"
+        },
+        "role": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "location": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "avatarUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "bio": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 600
+        },
+        "bioId": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "specialty": {
+          "type": "string",
+          "enum": ["Movies", "Education", "Documentary", "Events", "Creator Exclusives"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "suspended"]
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "contentCount": {
+          "type": "integer"
+        },
+        "joinedYear": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "name",
+        "handle",
+        "role",
+        "location",
+        "avatarUrl",
+        "bio",
+        "specialty",
+        "status",
+        "verified",
+        "contentCount",
+        "joinedYear",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Publicly cataloged or creator-submitted video release metadata.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "subtitle": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 220
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        },
+        "descriptionId": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Movies", "Education", "Documentary", "Events", "Creator Exclusives"]
+        },
+        "creatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creatorName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "thumbnailUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "backdropUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "durationMinutes": {
+          "type": "integer"
+        },
+        "previewSeconds": {
+          "type": "integer"
+        },
+        "priceUsd": {
+          "type": "number"
+        },
+        "priceIdr": {
+          "type": "integer"
+        },
+        "creditCost": {
+          "type": "integer"
+        },
+        "releaseYear": {
+          "type": "integer"
+        },
+        "publishedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "resolution": {
+          "type": "string",
+          "enum": ["4K HDR", "4K UHD", "1080p HD"]
+        },
+        "audioFormat": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "languages": {
+          "type": "string",
+          "description": "Bounded list of up to 8 audio/subtitle languages"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "pending_review", "approved", "rejected", "published", "archived"]
+        },
+        "moderationNote": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "viewCount": {
+          "type": "integer"
+        },
+        "rating": {
+          "type": "number"
+        },
+        "reviewCount": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "title",
+        "subtitle",
+        "description",
+        "category",
+        "creatorId",
+        "creatorName",
+        "thumbnailUrl",
+        "backdropUrl",
+        "durationMinutes",
+        "previewSeconds",
+        "priceUsd",
+        "priceIdr",
+        "creditCost",
+        "releaseYear",
+        "resolution",
+        "audioFormat",
+        "languages",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "VideoAsset": {
+      "title": "VideoAsset",
+      "description": "Private source video asset reference strictly isolated from public viewers.",
+      "type": "object",
+      "properties": {
+        "videoId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["cloudflare_stream", "private_storage"]
+        },
+        "assetRef": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["videoId", "creatorId", "provider", "assetRef", "createdAt", "updatedAt"]
+    },
+    "Wallet": {
+      "title": "Wallet",
+      "description": "Viewer credit wallet balance; monetary updates are strictly server-controlled.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "balanceCredits": {
+          "type": "integer"
+        },
+        "totalSpentCredits": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "balanceCredits", "totalSpentCredits", "createdAt", "updatedAt"]
+    },
+    "WalletTransaction": {
+      "title": "WalletTransaction",
+      "description": "Immutable credit wallet transaction record.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "enum": ["topup", "spend", "refund", "bonus"]
+        },
+        "creditsDelta": {
+          "type": "integer"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "type", "creditsDelta", "description", "createdAt"]
+    },
+    "Purchase": {
+      "title": "Purchase",
+      "description": "Server-verified Pay-Per-View or Credit Wallet purchase record.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "videoId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "videoTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "method": {
+          "type": "string",
+          "enum": ["paypal", "qris", "credits"]
+        },
+        "amount": {
+          "type": "number"
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["USD", "IDR", "CREDITS"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "completed", "failed", "refunded"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "videoId", "videoTitle", "method", "amount", "currency", "status", "createdAt"]
+    },
+    "Entitlement": {
+      "title": "Entitlement",
+      "description": "Server-granted 30-day streaming entitlement for a purchased title.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "videoId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "videoTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "thumbnailUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "expired", "revoked"]
+        },
+        "resumeSeconds": {
+          "type": "integer"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "videoId", "videoTitle", "status", "expiresAt", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Content or creator moderation report submitted by an authenticated viewer.",
+      "type": "object",
+      "properties": {
+        "reporterId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "targetType": {
+          "type": "string",
+          "enum": ["video", "creator"]
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 500
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "resolved", "dismissed"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["reporterId", "targetType", "targetId", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "PlatformSetting": {
+      "title": "PlatformSetting",
+      "description": "Global platform configuration managed exclusively by admins.",
+      "type": "object",
+      "properties": {
+        "commissionPercent": {
+          "type": "integer"
+        },
+        "previewSecondsLimit": {
+          "type": "integer"
+        },
+        "accessDaysDuration": {
+          "type": "integer"
+        },
+        "minPriceUsd": {
+          "type": "number"
+        },
+        "minPriceIdr": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "commissionPercent",
+        "previewSecondsLimit",
+        "accessDaysDuration",
+        "minPriceUsd",
+        "minPriceIdr",
+        "updatedAt"
+      ]
+    },
+    "AdminRegistry": {
+      "title": "AdminRegistry",
+      "description": "Trusted admin role registry keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "grantedAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Server-verified PayPal or Indonesian QRIS payment transaction.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "purpose": { "type": "string", "enum": ["video_unlock", "credit_topup"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "method": { "type": "string", "enum": ["paypal", "qris", "credits"] },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["USD", "IDR", "CREDITS"] },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed", "expired", "refunded"] },
+        "gatewayOrderId": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "purpose", "targetId", "method", "amount", "currency", "status", "createdAt"]
+    },
+    "CreatorEarning": {
+      "title": "CreatorEarning",
+      "description": "Creator net revenue split calculated server-side per verified purchase.",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string", "maxLength": 128 },
+        "videoId": { "type": "string", "maxLength": 128 },
+        "purchaseId": { "type": "string", "maxLength": 128 },
+        "commissionPercent": { "type": "integer" },
+        "netUsd": { "type": "number" },
+        "netIdr": { "type": "integer" },
+        "status": { "type": "string", "enum": ["available", "reversed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["creatorId", "videoId", "purchaseId", "commissionPercent", "netUsd", "netIdr", "status", "createdAt"]
+    },
+    "Payout": {
+      "title": "Payout",
+      "description": "Creator payout withdrawal request and admin settlement status.",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string", "maxLength": 128 },
+        "currency": { "type": "string", "enum": ["USD", "IDR"] },
+        "amountUsd": { "type": "number" },
+        "amountIdr": { "type": "integer" },
+        "method": { "type": "string", "enum": ["bank_transfer_idr", "ewallet_idr", "paypal_usd"] },
+        "destination": { "type": "string", "maxLength": 160 },
+        "status": { "type": "string", "enum": ["requested", "processing", "paid", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["creatorId", "currency", "method", "destination", "status", "createdAt"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Verified viewer review for a published video release.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "contentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "rating": { "type": "integer" },
+        "comment": { "type": "string", "minLength": 5, "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "contentId", "authorName", "rating", "comment", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Private user profiles isolated to the owner and admins."
+    },
+    "/creators/{creatorId}": {
+      "schema": { "$ref": "#/entities/Creator" },
+      "description": "Public creator profiles and verification status."
+    },
+    "/videos/{videoId}": {
+      "schema": { "$ref": "#/entities/Video" },
+      "description": "Catalog metadata for published videos and creator submissions."
+    },
+    "/video_assets/{videoId}": {
+      "schema": { "$ref": "#/entities/VideoAsset" },
+      "description": "Private video source asset references hidden from viewers."
+    },
+    "/wallets/{userId}": {
+      "schema": { "$ref": "#/entities/Wallet" },
+      "description": "Viewer credit wallet balances."
+    },
+    "/wallet_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/WalletTransaction" },
+      "description": "Immutable wallet credit/debit ledger."
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "PayPal and QRIS gateway transaction logs."
+    },
+    "/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/Purchase" },
+      "description": "Pay-Per-View and credit purchase history."
+    },
+    "/entitlements/{entitlementId}": {
+      "schema": { "$ref": "#/entities/Entitlement" },
+      "description": "Active 30-day streaming entitlements."
+    },
+    "/creator_earnings/{earningId}": {
+      "schema": { "$ref": "#/entities/CreatorEarning" },
+      "description": "Creator net earnings ledger."
+    },
+    "/payouts/{payoutId}": {
+      "schema": { "$ref": "#/entities/Payout" },
+      "description": "Creator payout withdrawal requests."
+    },
+    "/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/Review" },
+      "description": "Published viewer reviews."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/Report" },
+      "description": "Content and creator moderation reports."
+    },
+    "/platform_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/PlatformSetting" },
+      "description": "Global platform configuration managed by admins."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRegistry" },
+      "description": "Trusted admin UID registry."
+    }
+  }
+}

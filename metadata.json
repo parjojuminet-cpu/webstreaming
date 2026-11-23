@@ -1,0 +1,6 @@
+{
+  "name": "VYORA",
+  "description": "Watch More. Experience More. International Pay-Per-View video streaming platform and creator marketplace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
