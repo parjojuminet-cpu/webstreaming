@@ -5,10 +5,12 @@ import {
   CheckCircle2,
   Film,
   Image as ImageIcon,
+  Link2,
   Send,
   Upload,
   UserCheck,
   Video,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -17,6 +19,7 @@ import {
   creatorPublishApprovedVideo,
   creatorSubmitForReview,
   subscribeCreatorVideos,
+  updateVideoCover,
   upsertCreatorProfile,
 } from '../services/firestoreService';
 import {
@@ -32,10 +35,19 @@ import {
   type StreamCapabilities,
 } from '../services/streamService';
 import {
+  extractYouTubeVideoId,
+  getYouTubeThumbnailUrl,
+} from '../utils/youtube';
+import { extractFacebookVideoUrl } from '../utils/facebook';
+import { autoCaptureCoverFromVideoFile } from '../utils/videoThumbnail';
+import { CoverPicker } from '../components/creator/CoverPicker';
+import {
   CATEGORY_LIST,
   formatDuration,
   formatLocalizedDate,
   formatPrice,
+  formatReleasePrice,
+  isFreeContent,
 } from '../i18n/translations';
 import type {
   ContentCategory,
@@ -62,7 +74,19 @@ type CreatorTab = 'content' | 'upload' | 'analytics' | 'profile';
 
 const THUMBNAIL_PRESETS = [
   {
-    label: 'Obsidian Observatory',
+    label: 'Woodworking Craft Workshop',
+    url: '/src/assets/images/deloken_woodworking_workshop_1795504288328.jpg',
+  },
+  {
+    label: 'Traditional Culinary Documentary',
+    url: '/src/assets/images/deloken_traditional_food_doc_1795504288538.jpg',
+  },
+  {
+    label: 'Electrical Repair Lab',
+    url: '/src/assets/images/deloken_electrical_repair_1795504290568.jpg',
+  },
+  {
+    label: 'Coastal Observatory Cinema',
     url: '/src/assets/images/hero_featured_film_1794930897673.jpg',
   },
   {
@@ -70,7 +94,7 @@ const THUMBNAIL_PRESETS = [
     url: '/src/assets/images/thumb_archipelago_doc_1794930897547.jpg',
   },
   {
-    label: 'Tokyo Nocturne',
+    label: 'Nocturnal City Street',
     url: '/src/assets/images/thumb_tokyo_nocturne_1794930898628.jpg',
   },
   {
@@ -87,25 +111,20 @@ const THUMBNAIL_PRESETS = [
   },
 ];
 
-const AVATAR_PRESETS = [
-  '/src/assets/images/creator_portrait_aria_1794930901280.jpg',
-  '/src/assets/images/creator_portrait_kenji_1794930900668.jpg',
-  '/src/assets/images/creator_portrait_elena_1794930901501.jpg',
-  '/src/assets/images/creator_portrait_dimas_1794930901730.jpg',
-];
+const inputClass =
+  'w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-600';
 
 export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   locale,
   currency,
   onNavigate,
 }) => {
-  const { firebaseUser, userProfile, creatorProfile, authReady } = useAuth();
+  const { firebaseUser, userProfile, creatorProfile, authReady, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<CreatorTab>('content');
   const [videos, setVideos] = useState<ContentItem[]>([]);
   const [uploadHighlight, setUploadHighlight] = useState(false);
   const uploadSectionRef = useRef<HTMLElement | null>(null);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
-  const thumbFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Creator Onboarding / Profile state
   const [cName, setCName] = useState(
@@ -120,7 +139,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
     creatorProfile?.specialty || 'Movies'
   );
   const [cAvatar, setCAvatar] = useState(
-    creatorProfile?.avatarUrl || AVATAR_PRESETS[3]
+    creatorProfile?.avatarUrl || userProfile?.photoURL || firebaseUser?.photoURL || ''
   );
   const [cBio, setCBio] = useState(creatorProfile?.bio || '');
   const [savingCreator, setSavingCreator] = useState(false);
@@ -133,19 +152,27 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   const [vCategory, setVCategory] = useState<ContentCategory>('Movies');
   const [vDescription, setVDescription] = useState('');
   const [vThumbnail, setVThumbnail] = useState(THUMBNAIL_PRESETS[0].url);
+  const [vHasExplicitCover, setVHasExplicitCover] = useState(false);
+  const [vVideoPreviewUrl, setVVideoPreviewUrl] = useState<string | null>(null);
+  const [autoCapturingCover, setAutoCapturingCover] = useState(false);
   const [vDuration, setVDuration] = useState(65);
   const [vResolution, setVResolution] = useState<'4K HDR' | '4K UHD' | '1080p HD'>(
     '4K HDR'
   );
   const [vAudio, setVAudio] = useState('Dolby Atmos');
+  const [vPricingMode, setVPricingMode] = useState<'paid' | 'free'>('paid');
   const [vPriceUsd, setVPriceUsd] = useState(4.99);
   const [vPriceIdr, setVPriceIdr] = useState(75000);
   const [vCreditCost, setVCreditCost] = useState(5);
-  const [vSourceMode, setVSourceMode] = useState<'file' | 'preset' | 'manual'>('file');
-  const [vProvider, setVProvider] = useState<'cloudflare_stream' | 'private_storage'>(
-    'private_storage'
-  );
+  const [vSourceMode, setVSourceMode] = useState<
+    'file' | 'youtube' | 'facebook' | 'preset' | 'manual'
+  >('file');
+  const [vProvider, setVProvider] = useState<
+    'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook'
+  >('private_storage');
   const [vAssetRef, setVAssetRef] = useState('');
+  const [vYoutubeUrl, setVYoutubeUrl] = useState('');
+  const [vFacebookUrl, setVFacebookUrl] = useState('');
   const [vUploadedFileName, setVUploadedFileName] = useState<string | null>(null);
   const [vUploadedMimeType, setVUploadedMimeType] = useState<string | undefined>(undefined);
   const [uploadingVideoFile, setUploadingVideoFile] = useState(false);
@@ -154,10 +181,15 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
     cloudflareStreamConfigured: false,
     cloudflareSigningConfigured: false,
   });
-  const [uploadingThumbFile, setUploadingThumbFile] = useState(false);
   const [submittingVideo, setSubmittingVideo] = useState(false);
   const [videoMsg, setVideoMsg] = useState<string | null>(null);
   const [videoErr, setVideoErr] = useState<string | null>(null);
+
+  // Edit Cover Modal state (Kelola Konten)
+  const [editingCoverItem, setEditingCoverItem] = useState<ContentItem | null>(null);
+  const [editingCoverUrl, setEditingCoverUrl] = useState('');
+  const [savingEditedCover, setSavingEditedCover] = useState(false);
+  const [editingCoverErr, setEditingCoverErr] = useState<string | null>(null);
 
   // Earnings & Payouts state
   const [earningsSummary, setEarningsSummary] = useState<CreatorEarningsSummary | null>(
@@ -185,10 +217,15 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
       setCSpecialty(creatorProfile.specialty);
       setCAvatar(creatorProfile.avatarUrl);
       setCBio(creatorProfile.bio);
-    } else if (userProfile?.displayName && !cName) {
-      setCName(userProfile.displayName);
+    } else {
+      if (userProfile?.displayName && !cName) {
+        setCName(userProfile.displayName);
+      }
+      if (!cAvatar && (userProfile?.photoURL || firebaseUser?.photoURL)) {
+        setCAvatar(userProfile?.photoURL || firebaseUser?.photoURL || '');
+      }
     }
-  }, [creatorProfile, userProfile]);
+  }, [creatorProfile, userProfile, firebaseUser]);
 
   useEffect(() => {
     if (!authReady || !firebaseUser || !creatorProfile) return;
@@ -199,6 +236,14 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   useEffect(() => {
     void fetchStreamCapabilities().then(setStreamCaps);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (vVideoPreviewUrl) {
+        URL.revokeObjectURL(vVideoPreviewUrl);
+      }
+    };
+  }, [vVideoPreviewUrl]);
 
   useEffect(() => {
     if (!authReady || !firebaseUser || !creatorProfile) {
@@ -256,10 +301,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
           title={locale === 'id' ? 'Masuk Diperlukan' : 'Sign In Required'}
           description={
             locale === 'id'
-              ? 'Masuk terlebih dahulu untuk mengakses Studio Kreator VYORA.'
-              : 'Sign in with your VYORA account to open or apply for Creator Studio.'
+              ? 'Masuk terlebih dahulu untuk mengakses Studio Kreator DELOKEN.'
+              : 'Sign in with your DELOKEN account to open or apply for Creator Studio.'
           }
-          actionLabel={locale === 'id' ? 'Masuk ke VYORA' : 'Sign In'}
+          actionLabel={locale === 'id' ? 'Masuk ke DELOKEN' : 'Sign In'}
           onAction={() => onNavigate('login')}
         />
       </div>
@@ -350,8 +395,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
     setVideoUploadProgress(null);
 
     const maxBytes = streamCaps.cloudflareStreamConfigured
-      ? 10 * 1024 * 1024 * 1024 // 10 GB direct via Cloudflare Stream TUS
-      : 100 * 1024 * 1024; // 100 MB fallback on server disk
+      ? 10 * 1024 * 1024 * 1024
+      : 100 * 1024 * 1024;
 
     if (file.size > maxBytes) {
       setVideoErr(
@@ -369,20 +414,41 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
 
     setUploadingVideoFile(true);
 
-    // Best-effort read duration locally from video metadata
+    if (vVideoPreviewUrl) {
+      URL.revokeObjectURL(vVideoPreviewUrl);
+    }
+    const nextPreviewUrl = URL.createObjectURL(file);
+    setVVideoPreviewUrl(nextPreviewUrl);
+
     try {
-      const objectUrl = URL.createObjectURL(file);
       const probe = document.createElement('video');
       probe.preload = 'metadata';
       probe.onloadedmetadata = () => {
         if (Number.isFinite(probe.duration) && probe.duration > 0) {
           setVDuration(Math.max(1, Math.round(probe.duration / 60)));
         }
-        URL.revokeObjectURL(objectUrl);
       };
-      probe.src = objectUrl;
+      probe.src = nextPreviewUrl;
     } catch {
       // Ignore duration probe errors
+    }
+
+    // Auto-extract a cover frame from the uploaded video when creator has not picked a custom cover yet
+    if (!vHasExplicitCover) {
+      setAutoCapturingCover(true);
+      void autoCaptureCoverFromVideoFile(file)
+        .then((frameFile) => uploadCreatorMedia(frameFile))
+        .then((uploadedThumb) => {
+          if (uploadedThumb.kind === 'thumbnail') {
+            setVThumbnail(uploadedThumb.thumbnailUrl);
+          }
+        })
+        .catch(() => {
+          // Non-fatal fallback to current thumbnail if browser codec fails frame capture
+        })
+        .finally(() => {
+          setAutoCapturingCover(false);
+        });
     }
 
     try {
@@ -409,41 +475,6 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
     } finally {
       setUploadingVideoFile(false);
       setVideoUploadProgress(null);
-      e.target.value = '';
-    }
-  };
-
-  const handleThumbnailFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setVideoErr(null);
-
-    if (file.size > 5 * 1024 * 1024) {
-      setVideoErr(
-        locale === 'id'
-          ? 'Ukuran gambar sampul maksimal 5MB.'
-          : 'Cover thumbnail image must be 5MB or smaller.'
-      );
-      e.target.value = '';
-      return;
-    }
-
-    setUploadingThumbFile(true);
-    try {
-      const uploaded = await uploadCreatorMedia(file);
-      if (uploaded.kind === 'thumbnail') {
-        setVThumbnail(uploaded.thumbnailUrl);
-      }
-    } catch (err) {
-      setVideoErr(
-        formatFriendlyError(
-          err,
-          'Gagal mengunggah gambar sampul.',
-          'Failed to upload cover thumbnail.'
-        )
-      );
-    } finally {
-      setUploadingThumbFile(false);
       e.target.value = '';
     }
   };
@@ -478,26 +509,64 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
       return;
     }
 
-    const effectiveProvider =
-      vSourceMode === 'preset' ? 'private_storage' : vProvider;
+    const parsedYoutubeId =
+      vSourceMode === 'youtube' ? extractYouTubeVideoId(vYoutubeUrl) : null;
+    const parsedFacebookUrl =
+      vSourceMode === 'facebook' ? extractFacebookVideoUrl(vFacebookUrl) : null;
+
+    if (vSourceMode === 'youtube' && !parsedYoutubeId) {
+      setVideoErr(
+        locale === 'id'
+          ? 'Link atau ID video YouTube tidak valid. Tempel link seperti https://www.youtube.com/watch?v=... atau https://youtu.be/...'
+          : 'Invalid YouTube link or video ID. Paste a link like https://www.youtube.com/watch?v=... or https://youtu.be/...'
+      );
+      return;
+    }
+
+    if (vSourceMode === 'facebook' && !parsedFacebookUrl) {
+      setVideoErr(
+        locale === 'id'
+          ? 'Link video Facebook tidak valid. Gunakan link publik seperti facebook.com/.../videos/..., facebook.com/watch?v=..., facebook.com/reel/..., atau fb.watch/...'
+          : 'Invalid Facebook video URL. Paste a public link like facebook.com/.../videos/..., facebook.com/watch?v=..., facebook.com/reel/..., or fb.watch/...'
+      );
+      return;
+    }
+
+    const effectiveProvider:
+      | 'cloudflare_stream'
+      | 'private_storage'
+      | 'youtube'
+      | 'facebook' =
+      vSourceMode === 'preset'
+        ? 'private_storage'
+        : vSourceMode === 'youtube'
+        ? 'youtube'
+        : vSourceMode === 'facebook'
+        ? 'facebook'
+        : vProvider;
     const effectiveAssetRef =
       vSourceMode === 'preset' && vAssetRef.trim().length < 3
         ? vCategory === 'Documentary' || vCategory === 'Education'
           ? 'stream-doc'
           : 'stream-cinema'
+        : vSourceMode === 'youtube' && parsedYoutubeId
+        ? parsedYoutubeId
+        : vSourceMode === 'facebook' && parsedFacebookUrl
+        ? parsedFacebookUrl
         : vAssetRef.trim();
 
     if (effectiveAssetRef.length < 3) {
       setVideoErr(
         locale === 'id'
-          ? 'Silakan unggah file video terlebih dahulu, atau pilih tab "Stream Studio" jika ingin memakai master siap tayang.'
-          : 'Please upload a video file first, or select "Ready Studio Stream" / enter a stream UID.'
+          ? 'Silakan unggah file video, masukkan link YouTube/Facebook, atau pilih tab "Stream Studio".'
+          : 'Please upload a video file, paste a YouTube/Facebook link, or select "Studio Stream".'
       );
       return;
     }
 
     setSubmittingVideo(true);
     try {
+      const isFreeUpload = vPricingMode === 'free';
       const videoId = await createCreatorVideo(firebaseUser.uid, creatorProfile.name, {
         title: vTitle,
         subtitle: vSubtitle,
@@ -506,9 +575,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
         category: vCategory,
         thumbnailUrl: vThumbnail,
         durationMinutes: Number(vDuration),
-        priceUsd: Number(vPriceUsd),
-        priceIdr: Number(vPriceIdr),
-        creditCost: Number(vCreditCost),
+        isFree: isFreeUpload,
+        priceUsd: isFreeUpload ? 0 : Number(vPriceUsd),
+        priceIdr: isFreeUpload ? 0 : Number(vPriceIdr),
+        creditCost: isFreeUpload ? 0 : Number(vCreditCost),
         releaseYear: new Date().getFullYear(),
         resolution: vResolution,
         audioFormat: vAudio,
@@ -522,17 +592,29 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
         videoId,
         provider: effectiveProvider,
         assetRef: effectiveAssetRef,
-        mimeType: vUploadedMimeType,
-      }).catch(() => {
-        // Non-blocking fallback
+        mimeType:
+          effectiveProvider === 'youtube'
+            ? 'video/youtube'
+            : effectiveProvider === 'facebook'
+            ? 'video/facebook'
+            : vUploadedMimeType,
       });
 
       setVTitle('');
       setVSubtitle('');
       setVDescription('');
+      setVPricingMode('paid');
       setVAssetRef('');
+      setVYoutubeUrl('');
+      setVFacebookUrl('');
       setVUploadedFileName(null);
       setVUploadedMimeType(undefined);
+      setVThumbnail(THUMBNAIL_PRESETS[0].url);
+      setVHasExplicitCover(false);
+      if (vVideoPreviewUrl) {
+        URL.revokeObjectURL(vVideoPreviewUrl);
+      }
+      setVVideoPreviewUrl(null);
       setVideoMsg(
         initialStatus === 'pending_review'
           ? locale === 'id'
@@ -609,27 +691,27 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   if (!creatorProfile) {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-6">
-        <div className="bg-[#1B1C27] border border-white/10 rounded-2xl p-5 sm:p-9 space-y-6">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-9 space-y-6 shadow-xs">
           <div className="space-y-2">
-            <p className="text-xs font-semibold text-[#A78BFA]">
-              {locale === 'id' ? 'Studio Kreator VYORA' : 'VYORA Creator Studio'}
+            <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+              {locale === 'id' ? 'Studio Kreator DELOKEN' : 'DELOKEN Creator Studio'}
             </p>
-            <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#F5F5F7]">
+            <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
               {locale === 'id'
                 ? 'Aktifkan Profil Kreator Anda'
                 : 'Set Up Your Creator Studio Profile'}
             </h1>
-            <p className="text-sm text-[#A5A6B2] leading-relaxed">
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
               {locale === 'id'
-                ? 'Buat profil studio kreator Anda untuk mulai menyusun draf dan mengajukan film, dokumenter, kelas master, atau acara langsung ke moderasi.'
-                : 'Register your studio profile to draft and submit films, documentaries, masterclasses, or live events for moderation.'}
+                ? 'Buat profil studio kreator Anda untuk mulai menyusun draf dan mengajukan film, dokumenter, kelas praktis, atau acara langsung ke moderasi.'
+                : 'Register your studio profile to draft and submit films, documentaries, practical workshops, or live events for moderation.'}
             </p>
           </div>
 
           {creatorErr && (
             <div
               role="alert"
-              className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300"
+              className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300"
             >
               {creatorErr}
             </div>
@@ -638,7 +720,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
           <form onSubmit={handleSaveCreatorProfile} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   {locale === 'id' ? 'Nama Kreator / Studio' : 'Creator / Studio Name'}
                 </label>
                 <input
@@ -646,11 +728,11 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   required
                   value={cName}
                   onChange={(e) => setCName(e.target.value)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className={inputClass}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   Handle (@username)
                 </label>
                 <input
@@ -659,14 +741,14 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   value={cHandle}
                   onChange={(e) => setCHandle(e.target.value)}
                   placeholder="@studio_name"
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className={inputClass}
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   {locale === 'id' ? 'Peran / Bidang' : 'Role / Craft'}
                 </label>
                 <input
@@ -674,11 +756,11 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   required
                   value={cRole}
                   onChange={(e) => setCRole(e.target.value)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className={inputClass}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   {locale === 'id' ? 'Lokasi' : 'Location'}
                 </label>
                 <input
@@ -686,17 +768,17 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   required
                   value={cLocation}
                   onChange={(e) => setCLocation(e.target.value)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className={inputClass}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   {locale === 'id' ? 'Kategori Utama' : 'Primary Category'}
                 </label>
                 <select
                   value={cSpecialty}
                   onChange={(e) => setCSpecialty(e.target.value as ContentCategory)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className={inputClass}
                 >
                   {CATEGORY_LIST.map((cat) => (
                     <option key={cat} value={cat}>
@@ -709,10 +791,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-[#A5A6B2]">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
                   {locale === 'id' ? 'Bio Kreator' : 'Creator Bio'}
                 </label>
-                <span className="text-[11px] font-mono text-[#A5A6B2]">
+                <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
                   {cBio.trim().length}/10+ {locale === 'id' ? 'karakter' : 'chars'}
                 </span>
               </div>
@@ -724,10 +806,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                 onChange={(e) => setCBio(e.target.value)}
                 placeholder={
                   locale === 'id'
-                    ? 'Ceritakan profil film, dokumenter, atau kelas master Anda (minimal 10 karakter)...'
+                    ? 'Ceritakan profil film, dokumenter, atau kelas praktis Anda (minimal 10 karakter)...'
                     : 'Tell viewers about your filmmaking, educational focus, or studio work (min. 10 characters)...'
                 }
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
 
@@ -747,9 +829,9 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-white/8">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
-          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full overflow-hidden border border-white/15 shrink-0">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 shrink-0">
             <MediaImage
               src={creatorProfile.avatarUrl}
               alt={creatorProfile.name}
@@ -758,8 +840,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
             />
           </div>
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-[#A78BFA] font-semibold">
-              <span>{locale === 'id' ? 'Studio Kreator' : 'Creator Studio'}</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
+              <span>{locale === 'id' ? 'Studio Kreator DELOKEN' : 'DELOKEN Creator Studio'}</span>
               <span aria-hidden="true">·</span>
               <span className="capitalize">
                 {creatorProfile.verified
@@ -769,10 +851,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   : `Status: ${creatorProfile.status ?? 'pending'}`}
               </span>
             </div>
-            <h1 className="font-display text-xl sm:text-3xl font-bold text-[#F5F5F7] truncate">
+            <h1 className="font-display text-xl sm:text-3xl font-bold text-slate-900 dark:text-white truncate">
               {creatorProfile.name}
             </h1>
-            <p className="text-xs text-[#A5A6B2] truncate">
+            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
               {creatorProfile.handle} · {creatorProfile.location}
             </p>
           </div>
@@ -789,11 +871,11 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
         </Button>
       </header>
 
-      {/* Navigation Tabs (placed directly below header so tab switches stay above the fold) */}
+      {/* Navigation Tabs */}
       <div
         role="tablist"
         aria-label="Creator studio sections"
-        className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 vyora-scroll"
+        className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 deloken-scroll"
       >
         {[
           {
@@ -831,8 +913,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
             }}
             className={`min-h-[44px] sm:min-h-[40px] inline-flex items-center gap-2 px-4 py-2 rounded-xl sm:rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
               activeTab === tab.id
-                ? 'bg-[#7957ED] text-[#F5F5F7]'
-                : 'bg-[#1B1C27] text-[#A5A6B2] hover:text-[#F5F5F7] border border-white/8'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
             }`}
           >
             {tab.icon}
@@ -841,38 +923,38 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
         ))}
       </div>
 
-      {/* KPI Strip (shown on content & analytics views so upload form stays immediately in view) */}
+      {/* KPI Strip */}
       {(activeTab === 'content' || activeTab === 'analytics') && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5">
-            <p className="text-xs text-[#A5A6B2]">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {locale === 'id' ? 'Total Konten' : 'Total Submissions'}
             </p>
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
               {videos.length}
             </p>
           </div>
-          <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5">
-            <p className="text-xs text-[#A5A6B2]">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {locale === 'id' ? 'Tayang Publik' : 'Published'}
             </p>
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#A78BFA] mt-1">
+            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1">
               {publishedCount}
             </p>
           </div>
-          <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5">
-            <p className="text-xs text-[#A5A6B2]">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {locale === 'id' ? 'Menunggu Moderasi' : 'Pending Moderation'}
             </p>
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
               {pendingCount}
             </p>
           </div>
-          <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5">
-            <p className="text-xs text-[#A5A6B2]">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {locale === 'id' ? 'Total Penayangan' : 'Total Views'}
             </p>
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
               {totalViews}
             </p>
           </div>
@@ -883,8 +965,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
       {activeTab === 'content' && (
         <section className="space-y-4">
           {videoMsg && (
-            <div className="p-4 rounded-xl bg-[#7957ED]/15 border border-[#7957ED]/40 text-xs text-[#F5F5F7] flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-[#A78BFA] shrink-0" />
+            <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>{videoMsg}</span>
             </div>
           )}
@@ -908,10 +990,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
               {videos.map((vid) => (
                 <article
                   key={vid.id}
-                  className="bg-[#1B1C27] border border-white/8 rounded-xl p-3.5 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 sm:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4"
                 >
                   <div className="flex items-start gap-3 sm:gap-4 min-w-0">
-                    <div className="w-24 sm:w-36 aspect-video rounded-lg overflow-hidden shrink-0 bg-[#11121A]">
+                    <div className="w-24 sm:w-36 aspect-video rounded-lg overflow-hidden shrink-0 bg-slate-100 dark:bg-slate-800">
                       <MediaImage
                         src={vid.thumbnailUrl}
                         alt={vid.title}
@@ -920,8 +1002,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                       />
                     </div>
                     <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] sm:text-xs text-[#A5A6B2]">
-                        <span className="text-[#A78BFA] font-semibold uppercase tracking-wide">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
+                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold uppercase tracking-wide">
                           {vid.status.replace('_', ' ')}
                         </span>
                         <span aria-hidden="true">·</span>
@@ -931,16 +1013,22 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                           {formatDuration(vid.durationMinutes, locale)}
                         </span>
                         <span aria-hidden="true">·</span>
-                        <span className="font-mono tabular-nums">
-                          {formatPrice(vid.priceUsd, vid.priceIdr, currency)}
+                        <span
+                          className={`font-mono tabular-nums ${
+                            isFreeContent(vid)
+                              ? 'text-emerald-700 dark:text-emerald-400 font-semibold'
+                              : ''
+                          }`}
+                        >
+                          {formatReleasePrice(vid, locale, currency)}
                         </span>
                       </div>
-                      <h3 className="text-sm sm:text-base font-semibold text-[#F5F5F7] break-words line-clamp-2 sm:line-clamp-none">
+                      <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white break-words line-clamp-2 sm:line-clamp-none">
                         {vid.title}
                       </h3>
-                      <p className="text-xs text-[#A5A6B2] line-clamp-1">{vid.subtitle}</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-1">{vid.subtitle}</p>
                       {vid.moderationNote && (
-                        <p className="text-xs text-amber-300 mt-1">
+                        <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/70 rounded-lg px-2.5 py-1 mt-1 inline-block">
                           {locale === 'id' ? 'Catatan moderasi: ' : 'Moderation note: '}
                           {vid.moderationNote}
                         </p>
@@ -948,7 +1036,24 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-white/6 md:border-t-0 md:pt-0 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-200 dark:border-slate-800 md:border-t-0 md:pt-0 shrink-0">
+                    {(vid.status === 'draft' ||
+                      vid.status === 'rejected' ||
+                      (isAdmin && vid.status !== 'archived')) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 sm:flex-none"
+                        leftIcon={<ImageIcon className="w-3.5 h-3.5" />}
+                        onClick={() => {
+                          setEditingCoverItem(vid);
+                          setEditingCoverUrl(vid.thumbnailUrl);
+                          setEditingCoverErr(null);
+                        }}
+                      >
+                        {locale === 'id' ? 'Ganti Cover' : 'Edit Cover'}
+                      </Button>
+                    )}
                     {(vid.status === 'draft' || vid.status === 'rejected') && (
                       <Button
                         variant="primary"
@@ -995,29 +1100,29 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
       {activeTab === 'upload' && (
         <section
           ref={uploadSectionRef}
-          className={`max-w-3xl bg-[#1B1C27] border rounded-2xl p-5 sm:p-8 space-y-6 scroll-mt-20 transition-all duration-300 ${
+          className={`max-w-3xl bg-white dark:bg-slate-900 border rounded-2xl p-5 sm:p-8 space-y-6 scroll-mt-20 shadow-xs transition-all duration-300 ${
             uploadHighlight
-              ? 'border-[#A78BFA] ring-2 ring-[#7957ED]/60'
-              : 'border-white/10'
+              ? 'border-emerald-600 ring-2 ring-emerald-600/30'
+              : 'border-slate-200 dark:border-slate-800'
           }`}
         >
           <div>
-            <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+            <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
               {locale === 'id'
                 ? 'Unggah Video & Ajukan Tayangan Baru'
                 : 'Upload Video & Submit New Release'}
             </h2>
-            <p className="text-xs text-[#A5A6B2] mt-1">
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
               {locale === 'id'
-                ? 'Unggah file video (.MP4 / .WebM / .MOV) langsung dari perangkat Anda atau pilih Stream Master Studio. Metadata tersimpan di Firestore dan berkas video diamankan di penyimpanan privat.'
-                : 'Upload a video file (.MP4 / .WebM / .MOV) directly from your device or select a ready Studio Stream. Metadata writes to Firestore while video assets stay strictly private.'}
+                ? 'Unggah file video (.MP4 / .WebM / .MOV), tempel link YouTube atau Facebook, atau pilih Stream Studio.'
+                : 'Upload a video file (.MP4 / .WebM / .MOV), paste a YouTube or Facebook link, or select a Studio Stream.'}
             </p>
           </div>
 
           {videoErr && (
             <div
               role="alert"
-              className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300"
+              className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300"
             >
               {videoErr}
             </div>
@@ -1025,16 +1130,24 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
 
           <div className="space-y-5">
             {/* Step 1: Video Media Source Picker */}
-            <div className="p-4 rounded-xl bg-[#11121A] border border-white/10 space-y-3.5">
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-[#F5F5F7]">
+                <span className="text-xs font-semibold text-slate-900 dark:text-white">
                   {locale === 'id' ? '1. Sumber Berkas Video' : '1. Video Media Source'}
                 </span>
-                <div className="grid grid-cols-3 gap-1 p-1 rounded-lg bg-[#1B1C27] border border-white/10">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1 p-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
                   {[
                     {
                       id: 'file' as const,
                       label: locale === 'id' ? 'Unggah File' : 'Upload File',
+                    },
+                    {
+                      id: 'youtube' as const,
+                      label: locale === 'id' ? 'Link YouTube' : 'YouTube',
+                    },
+                    {
+                      id: 'facebook' as const,
+                      label: locale === 'id' ? 'Link Facebook' : 'Facebook',
                     },
                     {
                       id: 'preset' as const,
@@ -1057,17 +1170,26 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                               ? 'stream-doc'
                               : 'stream-cinema'
                           );
+                        } else if (modeOpt.id === 'youtube') {
+                          setVProvider('youtube');
+                        } else if (modeOpt.id === 'facebook') {
+                          setVProvider('facebook');
                         } else if (modeOpt.id === 'manual') {
                           setVProvider('cloudflare_stream');
                           if (vAssetRef === 'stream-cinema' || vAssetRef === 'stream-doc') {
                             setVAssetRef('');
                           }
+                        } else if (
+                          modeOpt.id === 'file' &&
+                          (vProvider === 'youtube' || vProvider === 'facebook')
+                        ) {
+                          setVProvider('private_storage');
                         }
                       }}
-                      className={`min-h-[34px] px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer ${
+                      className={`min-h-[34px] px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                         vSourceMode === modeOpt.id
-                          ? 'bg-[#7957ED] text-[#F5F5F7]'
-                          : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
                       {modeOpt.label}
@@ -1078,7 +1200,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
 
               {vSourceMode === 'file' && (
                 <div className="space-y-3">
-                  <div className="relative flex flex-col items-center justify-center gap-2 p-5 rounded-xl border border-dashed border-[#7957ED]/50 bg-[#1B1C27]/60 hover:bg-[#1B1C27] transition-colors text-center">
+                  <div className="relative flex flex-col items-center justify-center gap-2 p-5 rounded-xl border border-dashed border-emerald-500 bg-white dark:bg-slate-900 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/30 transition-colors text-center">
                     <input
                       ref={videoFileInputRef}
                       type="file"
@@ -1093,8 +1215,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
                     />
                     <div className="pointer-events-none flex flex-col items-center gap-1.5">
-                      <Video className="w-6 h-6 text-[#A78BFA]" aria-hidden="true" />
-                      <span className="text-xs font-semibold text-[#F5F5F7]">
+                      <Video className="w-6 h-6 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                      <span className="text-xs font-semibold text-slate-900 dark:text-white">
                         {uploadingVideoFile
                           ? videoUploadProgress !== null
                             ? locale === 'id'
@@ -1115,7 +1237,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                           ? 'Pilih File Video dari HP / Laptop (.MP4, .WebM, .MOV · maks 100MB)'
                           : 'Select Video File from Device (.MP4, .WebM, .MOV · max 100MB)'}
                       </span>
-                      <span className="text-[11px] text-[#A5A6B2]">
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
                         {vAssetRef && vUploadedFileName
                           ? vProvider === 'cloudflare_stream'
                             ? locale === 'id'
@@ -1136,9 +1258,9 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   </div>
                   {uploadingVideoFile && videoUploadProgress !== null && (
                     <div className="space-y-1">
-                      <div className="h-2 w-full rounded-full bg-[#1B1C27] overflow-hidden border border-white/10">
+                      <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
                         <div
-                          className="h-full bg-[#7957ED] transition-all duration-200"
+                          className="h-full bg-emerald-600 transition-all duration-200"
                           style={{ width: `${videoUploadProgress}%` }}
                         />
                       </div>
@@ -1147,7 +1269,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
                       type="button"
-                      variant="secondary"
+                      variant="outline"
                       size="sm"
                       leftIcon={<Upload className="w-3.5 h-3.5" />}
                       isLoading={uploadingVideoFile}
@@ -1162,7 +1284,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                         : 'Browse Video File'}
                     </Button>
                     {vUploadedFileName && (
-                      <span className="text-[11px] font-mono text-[#A78BFA] truncate max-w-xs">
+                      <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400 font-semibold truncate max-w-xs">
                         ✓ {vUploadedFileName}
                         {vProvider === 'cloudflare_stream' ? ' · Cloudflare HLS' : ''}
                       </span>
@@ -1171,9 +1293,161 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                 </div>
               )}
 
+              {vSourceMode === 'youtube' && (() => {
+                const parsedYtId = extractYouTubeVideoId(vYoutubeUrl);
+                const ytThumb = parsedYtId ? getYouTubeThumbnailUrl(parsedYtId) : '';
+                return (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1.5">
+                        {locale === 'id'
+                          ? 'URL Video YouTube (Disarankan status Unlisted / Tidak Publik)'
+                          : 'YouTube Video URL (Unlisted or Public recommended)'}
+                      </label>
+                      <div className="relative">
+                        <Link2
+                          className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                          aria-hidden="true"
+                        />
+                        <input
+                          type="text"
+                          value={vYoutubeUrl}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setVYoutubeUrl(val);
+                            setVProvider('youtube');
+                            const id = extractYouTubeVideoId(val);
+                            setVAssetRef(id || '');
+                          }}
+                          placeholder="https://www.youtube.com/watch?v=... atau https://youtu.be/..."
+                          className={`${inputClass} pl-10 font-mono text-xs`}
+                        />
+                      </div>
+                    </div>
+
+                    {vYoutubeUrl.trim().length > 0 && (
+                      parsedYtId ? (
+                        <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/70 flex flex-col sm:flex-row sm:items-center gap-3">
+                          <div className="w-full sm:w-32 aspect-video rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0">
+                            <img
+                              src={ytThumb}
+                              alt="YouTube preview thumbnail"
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-4 h-4 shrink-0" />
+                              <span>
+                                {locale === 'id'
+                                  ? `ID Video YouTube valid: ${parsedYtId}`
+                                  : `Valid YouTube Video ID: ${parsedYtId}`}
+                              </span>
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                              {locale === 'id'
+                                ? 'Pastikan di YouTube Studio opsi "Izinkan penyematan / Allow embedding" aktif dan visibilitas disetel Unlisted atau Publik.'
+                                : 'Ensure "Allow embedding" is enabled in YouTube Studio and visibility is set to Unlisted or Public.'}
+                            </p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setVThumbnail(ytThumb)}
+                            >
+                              {locale === 'id'
+                                ? 'Gunakan Thumbnail YouTube Ini'
+                                : 'Use This YouTube Thumbnail'}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-rose-600 dark:text-rose-400">
+                          {locale === 'id'
+                            ? 'Format link belum dikenali. Gunakan tautan youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., atau ID 11 karakter.'
+                            : 'Unrecognized link format. Paste a youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., or 11-char ID.'}
+                        </p>
+                      )
+                    )}
+
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                      {locale === 'id'
+                        ? 'Video YouTube diputar melalui YouTube IFrame Player API tanpa memakan kuota server, dengan pembatasan pratinjau 5 menit di pemutar DELOKEN sebelum transaksi selesai.'
+                        : 'YouTube videos stream via the official YouTube IFrame Player API with zero server storage overhead and a 5-minute preview gate in the DELOKEN player.'}
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {vSourceMode === 'facebook' && (() => {
+                const parsedFbUrl = extractFacebookVideoUrl(vFacebookUrl);
+                return (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1.5">
+                        {locale === 'id'
+                          ? 'URL Video / Reel Facebook (Wajib berstatus Publik)'
+                          : 'Facebook Video / Reel URL (Must be Public)'}
+                      </label>
+                      <div className="relative">
+                        <Link2
+                          className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                          aria-hidden="true"
+                        />
+                        <input
+                          type="text"
+                          value={vFacebookUrl}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setVFacebookUrl(val);
+                            setVProvider('facebook');
+                            const canonical = extractFacebookVideoUrl(val);
+                            setVAssetRef(canonical || '');
+                          }}
+                          placeholder="https://www.facebook.com/.../videos/1234567890 atau https://fb.watch/..."
+                          className={`${inputClass} pl-10 font-mono text-xs`}
+                        />
+                      </div>
+                    </div>
+
+                    {vFacebookUrl.trim().length > 0 && (
+                      parsedFbUrl ? (
+                        <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/70 space-y-1">
+                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4 shrink-0" />
+                            <span className="truncate">
+                              {locale === 'id'
+                                ? `Link Facebook valid: ${parsedFbUrl}`
+                                : `Valid Facebook URL: ${parsedFbUrl}`}
+                            </span>
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {locale === 'id'
+                              ? 'Pastikan postingan video Facebook disetel "Publik" (bukan Teman/Privat) dan pilih thumbnail sampul di bawah.'
+                              : 'Ensure the Facebook video post privacy is set to Public (not Friends/Private) and pick a cover thumbnail below.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-rose-600 dark:text-rose-400">
+                          {locale === 'id'
+                            ? 'Format link Facebook belum dikenali. Gunakan tautan facebook.com/.../videos/..., facebook.com/watch?v=..., facebook.com/reel/..., atau fb.watch/...'
+                            : 'Unrecognized Facebook URL. Paste a facebook.com/.../videos/..., facebook.com/watch?v=..., facebook.com/reel/..., or fb.watch/... link.'}
+                        </p>
+                      )
+                    )}
+
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                      {locale === 'id'
+                        ? 'Video Facebook disematkan melalui Facebook Embedded Video Player. Catatan: sebagian browser HP atau pemblokir iklan dapat membatasi embed Facebook; untuk kontrol lebih stabil disarankan YouTube Unlisted atau unggahan langsung.'
+                        : 'Facebook videos embed via the official Facebook Video Plugin. Note: privacy blockers or mobile browsers may prompt Facebook login; YouTube Unlisted or direct upload is recommended for stricter paywalls.'}
+                    </p>
+                  </div>
+                );
+              })()}
+
               {vSourceMode === 'preset' && (
                 <div className="space-y-2">
-                  <label className="block text-xs text-[#A5A6B2]">
+                  <label className="block text-xs text-slate-600 dark:text-slate-300">
                     {locale === 'id'
                       ? 'Pilih Master Stream HLS Terenkripsi (Siap Uji Tayang Instan)'
                       : 'Choose Encrypted Studio HLS Master (Instant Playback Ready)'}
@@ -1184,7 +1458,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                       setVProvider('private_storage');
                       setVAssetRef(e.target.value);
                     }}
-                    className="w-full min-h-[44px] px-3.5 py-2 rounded-xl bg-[#1B1C27] border border-white/12 text-sm text-[#F5F5F7]"
+                    className={inputClass}
                   >
                     <option value="stream-cinema">
                       {locale === 'id'
@@ -1203,7 +1477,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
               {vSourceMode === 'manual' && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                       {locale === 'id' ? 'Penyedia Stream' : 'Stream Provider'}
                     </label>
                     <select
@@ -1213,14 +1487,14 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                           e.target.value as 'cloudflare_stream' | 'private_storage'
                         )
                       }
-                      className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[#1B1C27] border border-white/12 text-sm text-[#F5F5F7]"
+                      className={inputClass}
                     >
                       <option value="cloudflare_stream">Cloudflare Stream</option>
                       <option value="private_storage">Private Object Storage</option>
                     </select>
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                       {locale === 'id'
                         ? 'Referensi Aset / Stream UID'
                         : 'Private Video Asset Reference / Stream UID'}
@@ -1231,7 +1505,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                       value={vAssetRef}
                       onChange={(e) => setVAssetRef(e.target.value)}
                       placeholder="cf-stream-uid-9482a7... / private/masters/film.mp4"
-                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#1B1C27] border border-white/12 text-sm font-mono text-[#F5F5F7]"
+                      className={`${inputClass} font-mono`}
                     />
                   </div>
                 </div>
@@ -1240,7 +1514,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   {locale === 'id' ? 'Judul Tayangan' : 'Title'}
                 </label>
                 <input
@@ -1253,17 +1527,17 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                       ? 'Contoh: Horizon di Atas Sulawesi'
                       : 'e.g., Horizon Over Sulawesi'
                   }
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className={inputClass}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   {locale === 'id' ? 'Kategori' : 'Category'}
                 </label>
                 <select
                   value={vCategory}
                   onChange={(e) => setVCategory(e.target.value as ContentCategory)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className={inputClass}
                 >
                   {CATEGORY_LIST.map((cat) => (
                     <option key={cat} value={cat}>
@@ -1275,7 +1549,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                 {locale === 'id' ? 'Subjudul / Tagline Singkat' : 'Subtitle / Logline'}
               </label>
               <input
@@ -1288,12 +1562,12 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                     ? 'Ringkasan 1 baris yang tampil di bawah judul (min. 4 karakter)'
                     : 'Short one-line hook shown below the title'
                 }
-                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                className={inputClass}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                 {locale === 'id'
                   ? 'Sinopsis / Deskripsi Lengkap (min. 10 karakter)'
                   : 'Description / Synopsis (min. 10 characters)'}
@@ -1308,106 +1582,102 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                     ? 'Ceritakan alur film, dokumenter, atau materi kelas master Anda...'
                     : 'Describe the film, documentary, or educational curriculum...'
                 }
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-[#A5A6B2]">
-                  {locale === 'id' ? 'Poster / Cover Tayangan' : 'Thumbnail Artwork'}
-                </label>
-                <div className="flex items-center gap-3">
-                  <div className="w-20 aspect-video rounded-lg overflow-hidden bg-[#11121A] border border-white/10 shrink-0">
-                    <MediaImage
-                      src={vThumbnail}
-                      alt="Cover preview"
-                      fallbackTitle={vTitle || 'VYORA'}
-                      className="w-full h-full"
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <select
-                      value={
-                        THUMBNAIL_PRESETS.some((p) => p.url === vThumbnail)
-                          ? vThumbnail
-                          : ''
-                      }
-                      onChange={(e) => {
-                        if (e.target.value) setVThumbnail(e.target.value);
-                      }}
-                      className="w-full min-h-[40px] px-3 py-1.5 rounded-xl bg-[#11121A] border border-white/12 text-xs text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
-                    >
-                      {!THUMBNAIL_PRESETS.some((p) => p.url === vThumbnail) && (
-                        <option value="">
-                          {locale === 'id' ? 'Gambar Kustom Terunggah' : 'Custom Uploaded Cover'}
-                        </option>
-                      )}
-                      {THUMBNAIL_PRESETS.map((preset) => (
-                        <option key={preset.url} value={preset.url}>
-                          {preset.label}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="flex items-center gap-2">
-                      <input
-                        ref={thumbFileInputRef}
-                        type="file"
-                        accept="image/*,.jpg,.jpeg,.png,.webp"
-                        disabled={uploadingThumbFile}
-                        onChange={(e) => void handleThumbnailFileChange(e)}
-                        className="hidden"
-                      />
-                      <button
-                        type="button"
-                        disabled={uploadingThumbFile}
-                        onClick={() => thumbFileInputRef.current?.click()}
-                        className="inline-flex items-center gap-1.5 min-h-[34px] px-2.5 py-1 rounded-lg bg-[#11121A] border border-white/12 text-[11px] font-semibold text-[#A78BFA] hover:text-[#F5F5F7] hover:border-[#7957ED]/60 transition-colors cursor-pointer disabled:opacity-50"
-                      >
-                        <ImageIcon className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>
-                          {uploadingThumbFile
-                            ? locale === 'id'
-                              ? 'Mengunggah sampul...'
-                              : 'Uploading cover...'
-                            : locale === 'id'
-                            ? 'Atau Unggah Cover Sendiri (JPG/PNG)'
-                            : 'Or Upload Custom Cover (JPG/PNG)'}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
+            <CoverPicker
+              locale={locale}
+              value={vThumbnail}
+              titleHint={vTitle}
+              presets={THUMBNAIL_PRESETS}
+              youtubeVideoId={
+                vSourceMode === 'youtube' ? extractYouTubeVideoId(vYoutubeUrl) : null
+              }
+              videoPreviewUrl={vSourceMode === 'file' ? vVideoPreviewUrl : null}
+              videoFileName={vUploadedFileName}
+              autoCapturing={autoCapturingCover}
+              onChange={(nextUrl, isExplicit) => {
+                setVThumbnail(nextUrl);
+                if (isExplicit) setVHasExplicitCover(true);
+              }}
+            />
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                {locale === 'id' ? 'Resolusi & Format Audio' : 'Resolution & Audio'}
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <select
+                  value={vResolution}
+                  onChange={(e) =>
+                    setVResolution(e.target.value as '4K HDR' | '4K UHD' | '1080p HD')
+                  }
+                  className={inputClass}
+                >
+                  <option value="4K HDR">4K HDR</option>
+                  <option value="4K UHD">4K UHD</option>
+                  <option value="1080p HD">1080p HD</option>
+                </select>
+                <input
+                  type="text"
+                  value={vAudio}
+                  onChange={(e) => setVAudio(e.target.value)}
+                  className={inputClass}
+                />
               </div>
-              <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
-                  {locale === 'id' ? 'Resolusi & Format Audio' : 'Resolution & Audio'}
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <select
-                    value={vResolution}
-                    onChange={(e) =>
-                      setVResolution(e.target.value as '4K HDR' | '4K UHD' | '1080p HD')
-                    }
-                    className="min-h-[44px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7]"
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <span className="block text-xs font-semibold text-slate-900 dark:text-white">
+                    {locale === 'id' ? 'Model Akses & Harga' : 'Access & Pricing Model'}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {locale === 'id'
+                      ? 'Pilih apakah tayangan ini berbayar (PPV + pratinjau 5 menit) atau gratis penuh.'
+                      : 'Choose whether viewers pay per view (5-min preview) or stream completely free.'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setVPricingMode('paid')}
+                    className={`min-h-[36px] px-3 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      vPricingMode === 'paid'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
                   >
-                    <option value="4K HDR">4K HDR</option>
-                    <option value="4K UHD">4K UHD</option>
-                    <option value="1080p HD">1080p HD</option>
-                  </select>
-                  <input
-                    type="text"
-                    value={vAudio}
-                    onChange={(e) => setVAudio(e.target.value)}
-                    className="min-h-[44px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7]"
-                  />
+                    {locale === 'id' ? 'Berbayar (PPV)' : 'Paid (PPV)'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVPricingMode('free')}
+                    className={`min-h-[36px] px-3 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      vPricingMode === 'free'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {locale === 'id' ? 'Gratis (Bebas Akses)' : 'Free Release'}
+                  </button>
                 </div>
               </div>
+
+              {vPricingMode === 'free' && (
+                <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/70 text-xs text-emerald-800 dark:text-emerald-300">
+                  {locale === 'id'
+                    ? 'Mode Gratis aktif (Rp 0 / $0.00 · 0 Kredit). Penonton dapat menonton tayangan penuh tanpa batas pratinjau 5 menit dan tanpa pembayaran.'
+                    : 'Free Release active ($0.00 / Rp 0 · 0 Credits). Viewers can watch the full release immediately with no 5-minute paywall or checkout.'}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   {locale === 'id' ? 'Durasi (menit)' : 'Duration (min)'}
                 </label>
                 <input
@@ -1416,48 +1686,52 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   max={600}
                   value={vDuration}
                   onChange={(e) => setVDuration(Number(e.target.value))}
-                  className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm font-mono tabular-nums text-[#F5F5F7]"
+                  className={`${inputClass} font-mono tabular-nums`}
                 />
               </div>
-              <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
-                  {locale === 'id' ? 'Harga (USD)' : 'Price (USD)'}
-                </label>
-                <input
-                  type="number"
-                  step="0.50"
-                  min={0.99}
-                  value={vPriceUsd}
-                  onChange={(e) => setVPriceUsd(Number(e.target.value))}
-                  className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm font-mono tabular-nums text-[#F5F5F7]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
-                  {locale === 'id' ? 'Harga (IDR)' : 'Price (IDR)'}
-                </label>
-                <input
-                  type="number"
-                  step="1000"
-                  min={10000}
-                  value={vPriceIdr}
-                  onChange={(e) => setVPriceIdr(Number(e.target.value))}
-                  className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm font-mono tabular-nums text-[#F5F5F7]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
-                  {locale === 'id' ? 'Harga Kredit' : 'Credit Cost'}
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={500}
-                  value={vCreditCost}
-                  onChange={(e) => setVCreditCost(Number(e.target.value))}
-                  className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm font-mono tabular-nums text-[#F5F5F7]"
-                />
-              </div>
+              {vPricingMode === 'paid' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                      {locale === 'id' ? 'Harga (USD)' : 'Price (USD)'}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.50"
+                      min={0.99}
+                      value={vPriceUsd}
+                      onChange={(e) => setVPriceUsd(Number(e.target.value))}
+                      className={`${inputClass} font-mono tabular-nums`}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                      {locale === 'id' ? 'Harga (IDR)' : 'Price (IDR)'}
+                    </label>
+                    <input
+                      type="number"
+                      step="1000"
+                      min={10000}
+                      value={vPriceIdr}
+                      onChange={(e) => setVPriceIdr(Number(e.target.value))}
+                      className={`${inputClass} font-mono tabular-nums`}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                      {locale === 'id' ? 'Harga Kredit' : 'Credit Cost'}
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={vCreditCost}
+                      onChange={(e) => setVCreditCost(Number(e.target.value))}
+                      className={`${inputClass} font-mono tabular-nums`}
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 pt-2">
@@ -1466,17 +1740,17 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                 size="md"
                 className="w-full sm:w-auto"
                 isLoading={submittingVideo}
-                disabled={uploadingVideoFile || uploadingThumbFile}
+                disabled={uploadingVideoFile || autoCapturingCover}
                 onClick={() => void handleSubmitVideo('pending_review')}
               >
                 {locale === 'id' ? 'Ajukan ke Moderasi' : 'Submit for Moderation'}
               </Button>
               <Button
-                variant="secondary"
+                variant="outline"
                 size="md"
                 className="w-full sm:w-auto"
                 isLoading={submittingVideo}
-                disabled={uploadingVideoFile || uploadingThumbFile}
+                disabled={uploadingVideoFile || autoCapturingCover}
                 onClick={() => void handleSubmitVideo('draft')}
               >
                 {locale === 'id' ? 'Simpan sebagai Draf' : 'Save as Draft'}
@@ -1498,57 +1772,57 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
             />
           )}
 
-          <div className="bg-[#1B1C27] border border-white/10 rounded-2xl p-5 sm:p-8 space-y-5">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-8 space-y-5 shadow-xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+                <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
                   {locale === 'id'
                     ? 'Analitik, Pendapatan & Penarikan Dana'
                     : 'Analytics, Earnings & Payouts'}
                 </h2>
-                <p className="text-xs text-[#A5A6B2] mt-1">
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
                   {locale === 'id'
                     ? `Komisi platform aktif: ${earningsSummary?.commissionPercent ?? 20}%. Pendapatan bersih dihitung otomatis di server pada setiap pembelian.`
                     : `Active platform commission: ${earningsSummary?.commissionPercent ?? 20}%. Net creator revenue calculates server-side on every verified purchase.`}
                 </p>
               </div>
-              <span className="text-xs font-mono text-[#A78BFA] font-semibold">
+              <span className="text-xs font-mono text-emerald-700 dark:text-emerald-400 font-semibold">
                 {creatorProfile.verified ? 'Verified Creator' : 'Pending Verification'}
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              <div className="p-4 rounded-xl bg-[#11121A] border border-white/8">
-                <p className="text-xs text-[#A5A6B2]">Available Net (USD)</p>
-                <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                <p className="text-xs text-slate-500 dark:text-slate-400">Available Net (USD)</p>
+                <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                   {formatPrice(earningsSummary?.availableUsd ?? 0, 0, 'USD')}
                 </p>
-                <p className="text-[11px] font-mono text-[#A5A6B2] mt-1">
+                <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 mt-1">
                   Gross: {formatPrice(earningsSummary?.grossUsd ?? 0, 0, 'USD')}
                 </p>
               </div>
-              <div className="p-4 rounded-xl bg-[#11121A] border border-white/8">
-                <p className="text-xs text-[#A5A6B2]">Available Net (IDR)</p>
-                <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#A78BFA] mt-1">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                <p className="text-xs text-slate-500 dark:text-slate-400">Available Net (IDR)</p>
+                <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1">
                   {formatPrice(0, earningsSummary?.availableIdr ?? 0, 'IDR')}
                 </p>
-                <p className="text-[11px] font-mono text-[#A5A6B2] mt-1">
+                <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 mt-1">
                   Gross: {formatPrice(0, earningsSummary?.grossIdr ?? 0, 'IDR')}
                 </p>
               </div>
-              <div className="p-4 rounded-xl bg-[#11121A] border border-white/8">
-                <p className="text-xs text-[#A5A6B2]">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {locale === 'id' ? 'Rilisan Tayang Aktif' : 'Active Published Releases'}
                 </p>
-                <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+                <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                   {publishedCount}
                 </p>
               </div>
-              <div className="p-4 rounded-xl bg-[#11121A] border border-white/8">
-                <p className="text-xs text-[#A5A6B2]">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {locale === 'id' ? 'Akumulasi Penayangan' : 'Cumulative Stream Views'}
                 </p>
-                <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+                <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                   {totalViews}
                 </p>
               </div>
@@ -1557,18 +1831,18 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Request Payout Form */}
-            <div className="lg:col-span-5 bg-[#1B1C27] border border-white/10 rounded-2xl p-6 space-y-4">
-              <h3 className="font-display text-lg font-bold text-[#F5F5F7]">
+            <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4 shadow-xs">
+              <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white">
                 {locale === 'id' ? 'Ajukan Penarikan Dana (Payout)' : 'Request Payout'}
               </h3>
 
               {payoutErr && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300">
                   {payoutErr}
                 </div>
               )}
               {payoutMsg && (
-                <div className="p-3 rounded-xl bg-[#7957ED]/15 border border-[#7957ED]/40 text-xs text-[#F5F5F7]">
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 text-xs text-emerald-800 dark:text-emerald-300">
                   {payoutMsg}
                 </div>
               )}
@@ -1576,7 +1850,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
               <form onSubmit={handleRequestPayout} className="space-y-3.5">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-[#A5A6B2] mb-1">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
                       Currency
                     </label>
                     <select
@@ -1588,14 +1862,14 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                           nextCur === 'IDR' ? 'bank_transfer_idr' : 'paypal_usd'
                         );
                       }}
-                      className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7]"
+                      className={inputClass}
                     >
                       <option value="USD">USD ($)</option>
                       <option value="IDR">IDR (Rp)</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-[#A5A6B2] mb-1">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
                       Amount
                     </label>
                     <input
@@ -1605,13 +1879,13 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                       value={payoutAmount}
                       onChange={(e) => setPayoutAmount(e.target.value)}
                       placeholder={payoutCurrency === 'USD' ? '25.00' : '250000'}
-                      className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm font-mono tabular-nums text-[#F5F5F7]"
+                      className={`${inputClass} font-mono tabular-nums`}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-[#A5A6B2] mb-1">
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
                     Payout Channel
                   </label>
                   <select
@@ -1624,7 +1898,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                           | 'paypal_usd'
                       )
                     }
-                    className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7]"
+                    className={inputClass}
                   >
                     {payoutCurrency === 'USD' ? (
                       <option value="paypal_usd">PayPal Business / Personal (USD)</option>
@@ -1638,7 +1912,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-[#A5A6B2] mb-1">
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
                     Account / Destination
                   </label>
                   <input
@@ -1646,7 +1920,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                     value={payoutDest}
                     onChange={(e) => setPayoutDest(e.target.value)}
                     placeholder="PayPal email or BCA 1234567890"
-                    className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7]"
+                    className={inputClass}
                   />
                 </div>
 
@@ -1664,8 +1938,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
 
             {/* Earnings & Payout History Ledgers */}
             <div className="lg:col-span-7 space-y-6">
-              <div className="bg-[#1B1C27] border border-white/10 rounded-2xl p-6 space-y-3">
-                <h3 className="font-display text-lg font-bold text-[#F5F5F7]">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-3 shadow-xs">
+                <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white">
                   {locale === 'id' ? 'Riwayat Pendapatan Konten' : 'Earnings Ledger'}
                 </h3>
                 {loadingEarnings && !earningsSummary ? (
@@ -1673,25 +1947,25 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                     <ListRowSkeleton />
                   </div>
                 ) : !earningsSummary || earningsSummary.earnings.length === 0 ? (
-                  <p className="text-xs text-[#A5A6B2]">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     {locale === 'id'
                       ? 'Belum ada pendapatan tercatat untuk karya Anda.'
                       : 'Verified Pay-Per-View and Credit unlocks on your published titles will appear here.'}
                   </p>
                 ) : (
-                  <div className="divide-y divide-white/8">
+                  <div className="divide-y divide-slate-200 dark:divide-slate-800">
                     {earningsSummary.earnings.map((e) => (
                       <div key={e.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-[#F5F5F7] break-words">
+                          <p className="text-sm font-medium text-slate-900 dark:text-white break-words">
                             {e.videoTitle}
                           </p>
-                          <p className="text-xs text-[#A5A6B2] font-mono mt-0.5">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">
                             {e.status.toUpperCase()} · Fee {e.commissionPercent}% ·{' '}
                             {formatLocalizedDate(e.createdAt, locale)}
                           </p>
                         </div>
-                        <span className="text-sm font-mono tabular-nums font-semibold text-[#A78BFA] shrink-0">
+                        <span className="text-sm font-mono tabular-nums font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
                           +
                           {e.method === 'qris'
                             ? formatPrice(0, e.netIdr, 'IDR')
@@ -1703,33 +1977,33 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                 )}
               </div>
 
-              <div className="bg-[#1B1C27] border border-white/10 rounded-2xl p-5 sm:p-6 space-y-3">
-                <h3 className="font-display text-lg font-bold text-[#F5F5F7]">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 space-y-3 shadow-xs">
+                <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white">
                   {locale === 'id' ? 'Riwayat Payout' : 'Payout History'}
                 </h3>
                 {!earningsSummary || earningsSummary.payouts.length === 0 ? (
-                  <p className="text-xs text-[#A5A6B2]">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     {locale === 'id'
                       ? 'Belum ada pengajuan penarikan dana.'
                       : 'Your submitted payout requests and settlement status will appear here.'}
                   </p>
                 ) : (
-                  <div className="divide-y divide-white/8">
+                  <div className="divide-y divide-slate-200 dark:divide-slate-800">
                     {earningsSummary.payouts.map((po) => (
                       <div key={po.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-[#F5F5F7] break-words">
+                          <p className="text-sm font-medium text-slate-900 dark:text-white break-words">
                             {po.destination}
                           </p>
-                          <p className="text-xs text-[#A5A6B2] font-mono mt-0.5">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">
                             {po.method} · {po.status.toUpperCase()} ·{' '}
                             {formatLocalizedDate(po.createdAt, locale)}
                           </p>
                           {po.adminNote && (
-                            <p className="text-xs text-[#A78BFA] mt-0.5">{po.adminNote}</p>
+                            <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">{po.adminNote}</p>
                           )}
                         </div>
-                        <span className="text-sm font-mono tabular-nums font-semibold text-[#F5F5F7] shrink-0">
+                        <span className="text-sm font-mono tabular-nums font-semibold text-slate-900 dark:text-white shrink-0">
                           {po.currency === 'USD'
                             ? formatPrice(po.amountUsd, 0, 'USD')
                             : formatPrice(0, po.amountIdr, 'IDR')}
@@ -1746,54 +2020,54 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
 
       {/* CREATOR PROFILE */}
       {activeTab === 'profile' && (
-        <section className="max-w-2xl bg-[#1B1C27] border border-white/10 rounded-2xl p-5 sm:p-8 space-y-5">
-          <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+        <section className="max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-8 space-y-5 shadow-xs">
+          <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Edit Profil Publik Kreator' : 'Edit Public Creator Profile'}
           </h2>
           {creatorMsg && (
-            <div className="p-3.5 rounded-xl bg-[#7957ED]/15 border border-[#7957ED]/40 text-xs text-[#F5F5F7]">
+            <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 text-xs text-emerald-800 dark:text-emerald-300">
               {creatorMsg}
             </div>
           )}
           {creatorErr && (
-            <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
+            <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300">
               {creatorErr}
             </div>
           )}
           <form onSubmit={handleSaveCreatorProfile} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   {locale === 'id' ? 'Nama Kreator' : 'Creator Name'}
                 </label>
                 <input
                   type="text"
                   value={cName}
                   onChange={(e) => setCName(e.target.value)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7]"
+                  className={inputClass}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   {locale === 'id' ? 'Lokasi' : 'Location'}
                 </label>
                 <input
                   type="text"
                   value={cLocation}
                   onChange={(e) => setCLocation(e.target.value)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7]"
+                  className={inputClass}
                 />
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                 Bio
               </label>
               <textarea
                 rows={3}
                 value={cBio}
                 onChange={(e) => setCBio(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7]"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
             <Button type="submit" variant="primary" size="md" className="w-full sm:w-auto" isLoading={savingCreator}>
@@ -1801,6 +2075,96 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
             </Button>
           </form>
         </section>
+      )}
+
+      {/* Edit Existing Cover Modal */}
+      {editingCoverItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 dark:bg-slate-950/85 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-cover-modal-title"
+        >
+          <div className="w-full max-w-2xl max-h-[90dvh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                  {locale === 'id' ? 'Perbarui Tampilan Galeri' : 'Update Gallery Cover'}
+                </p>
+                <h3
+                  id="edit-cover-modal-title"
+                  className="text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate"
+                >
+                  {editingCoverItem.title}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingCoverItem(null)}
+                aria-label="Close cover editor"
+                className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              {editingCoverErr && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300">
+                  {editingCoverErr}
+                </div>
+              )}
+
+              <CoverPicker
+                locale={locale}
+                value={editingCoverUrl}
+                titleHint={editingCoverItem.title}
+                presets={THUMBNAIL_PRESETS}
+                onChange={(nextUrl) => setEditingCoverUrl(nextUrl)}
+              />
+            </div>
+
+            <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setEditingCoverItem(null)}
+              >
+                {locale === 'id' ? 'Batal' : 'Cancel'}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                isLoading={savingEditedCover}
+                onClick={async () => {
+                  setEditingCoverErr(null);
+                  setSavingEditedCover(true);
+                  try {
+                    await updateVideoCover(editingCoverItem.id, editingCoverUrl);
+                    setVideoMsg(
+                      locale === 'id'
+                        ? `Cover "${editingCoverItem.title}" berhasil diperbarui di galeri!`
+                        : `Gallery cover for "${editingCoverItem.title}" updated!`
+                    );
+                    setEditingCoverItem(null);
+                  } catch (err) {
+                    setEditingCoverErr(
+                      formatFriendlyError(
+                        err,
+                        'Gagal memperbarui cover tayangan.',
+                        'Unable to update cover.'
+                      )
+                    );
+                  } finally {
+                    setSavingEditedCover(false);
+                  }
+                }}
+              >
+                {locale === 'id' ? 'Simpan Cover Baru' : 'Save New Cover'}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -3,8 +3,11 @@ import type { ContentCategory, EntitlementRecord } from '../types/vyora';
 
 export interface StreamAuthorizationResponse {
   mode: 'preview' | 'full';
-  streamType?: 'hls' | 'file';
-  provider?: 'cloudflare_stream' | 'private_storage';
+  isFree?: boolean;
+  streamType?: 'hls' | 'file' | 'youtube' | 'facebook';
+  provider?: 'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook';
+  youtubeVideoId?: string;
+  facebookVideoUrl?: string;
   signedHls?: boolean;
   videoId: string;
   previewLimitSeconds: number;
@@ -225,7 +228,7 @@ export async function uploadCreatorMedia(
     headers: {
       Authorization: `Bearer ${idToken}`,
       'Content-Type': contentType,
-      'x-vyora-filename': safeHeaderName || 'vyora-media',
+      'x-deloken-filename': safeHeaderName || 'deloken-media',
     },
     body: file,
   });
@@ -242,18 +245,22 @@ export async function uploadCreatorMedia(
 
 export async function registerCreatorVideoMedia(input: {
   videoId: string;
-  provider: 'cloudflare_stream' | 'private_storage';
+  provider: 'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook';
   assetRef: string;
   mimeType?: string;
 }): Promise<void> {
   const currentUser = auth.currentUser;
   if (!currentUser) return;
   const headers = await getBearerHeaders();
-  await fetch('/api/creator/register-video-media', {
+  const res = await fetch('/api/creator/register-video-media', {
     method: 'POST',
     headers,
     body: JSON.stringify(input),
   });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || 'Failed to register creator media mapping.');
+  }
 }
 
 export async function authorizeVideoStream(

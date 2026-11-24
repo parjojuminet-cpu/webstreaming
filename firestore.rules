@@ -122,9 +122,17 @@ service cloud.firestore {
         && data.backdropUrl is string && data.backdropUrl.size() >= 1 && data.backdropUrl.size() <= 500
         && data.durationMinutes is int && data.durationMinutes >= 1 && data.durationMinutes <= 600
         && data.previewSeconds is int && data.previewSeconds == 300
-        && (data.priceUsd is float || data.priceUsd is int) && data.priceUsd >= 0.99 && data.priceUsd <= 500
-        && data.priceIdr is int && data.priceIdr >= 10000 && data.priceIdr <= 10000000
-        && data.creditCost is int && data.creditCost >= 1 && data.creditCost <= 500
+        && (
+          (
+            (data.priceUsd is float || data.priceUsd is int) && data.priceUsd == 0
+            && data.priceIdr is int && data.priceIdr == 0
+            && data.creditCost is int && data.creditCost == 0
+          ) || (
+            (data.priceUsd is float || data.priceUsd is int) && data.priceUsd >= 0.99 && data.priceUsd <= 500
+            && data.priceIdr is int && data.priceIdr >= 10000 && data.priceIdr <= 10000000
+            && data.creditCost is int && data.creditCost >= 1 && data.creditCost <= 500
+          )
+        )
         && data.releaseYear is int && data.releaseYear >= 1950 && data.releaseYear <= 2100
         && data.publishedAt is string && data.publishedAt.size() <= 40
         && data.resolution in ['4K HDR', '4K UHD', '1080p HD']

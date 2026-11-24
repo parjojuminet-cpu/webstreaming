@@ -212,13 +212,16 @@
           "type": "integer"
         },
         "priceUsd": {
-          "type": "number"
+          "type": "number",
+          "description": "0 for free releases, or paid release price in USD (0.99 to 500)."
         },
         "priceIdr": {
-          "type": "integer"
+          "type": "integer",
+          "description": "0 for free releases, or paid release price in IDR (10000 to 10000000)."
         },
         "creditCost": {
-          "type": "integer"
+          "type": "integer",
+          "description": "0 for free releases, or paid credit cost (1 to 500)."
         },
         "releaseYear": {
           "type": "integer"

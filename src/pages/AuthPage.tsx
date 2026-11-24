@@ -52,16 +52,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   if (firebaseUser) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-14">
-        <div className="max-w-md mx-auto bg-[#1B1C27] border border-white/10 rounded-2xl p-5 sm:p-8 space-y-6 text-center">
-          <div className="w-12 h-12 rounded-xl bg-[#7957ED]/20 border border-[#7957ED]/40 text-[#A78BFA] flex items-center justify-center mx-auto">
+        <div className="max-w-md mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-8 space-y-6 text-center shadow-xs">
+          <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 text-emerald-700 dark:text-emerald-400 flex items-center justify-center mx-auto">
             <CheckCircle2 className="w-6 h-6" aria-hidden="true" />
           </div>
 
           <div className="space-y-1.5">
-            <h1 className="font-display text-2xl font-bold text-[#F5F5F7]">
-              {locale === 'id' ? 'Anda Sudah Masuk' : 'Signed In to VYORA'}
+            <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
+              {locale === 'id' ? 'Anda Sudah Masuk' : 'Signed In to DELOKEN'}
             </h1>
-            <p className="text-sm text-[#A5A6B2]">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
               {userProfile?.displayName || firebaseUser.displayName} ·{' '}
               {firebaseUser.email}
             </p>
@@ -117,18 +117,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-14">
-      <div className="max-w-md mx-auto bg-[#1B1C27] border border-white/10 rounded-2xl p-5 sm:p-8 space-y-6">
+      <div className="max-w-md mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-8 space-y-6 shadow-xs">
         <div className="space-y-2 text-center">
-          <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#F5F5F7]">
+          <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
             {isSignup
               ? locale === 'id'
-                ? 'Buat Akun VYORA'
-                : 'Create Your VYORA Account'
+                ? 'Buat Akun DELOKEN'
+                : 'Create Your DELOKEN Account'
               : locale === 'id'
-              ? 'Masuk ke VYORA'
-              : 'Sign In to VYORA'}
+              ? 'Masuk ke DELOKEN'
+              : 'Sign In to DELOKEN'}
           </h1>
-          <p className="text-sm text-[#A5A6B2]">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
             {isSignup
               ? locale === 'id'
                 ? 'Masuk dengan Google untuk langsung membuat profil Penonton atau mengajukan Studio Kreator.'
@@ -142,7 +142,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
         {authError && (
           <div
             role="alert"
-            className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 leading-relaxed"
+            className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300 leading-relaxed"
           >
             {authError}
           </div>
@@ -150,17 +150,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
         {isSignup && (
           <div>
-            <label className="block text-xs font-medium text-[#A5A6B2] mb-2">
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">
               {locale === 'id' ? 'Tujuan Utama Anda' : 'Start With'}
             </label>
-            <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-[#11121A] border border-white/10">
+            <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setIntendedRole('viewer')}
                 className={`min-h-[44px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                   intendedRole === 'viewer'
-                    ? 'bg-[#7957ED] text-[#F5F5F7]'
-                    : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 {locale === 'id' ? 'Penonton' : 'Viewer'}
@@ -170,8 +170,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 onClick={() => setIntendedRole('creator')}
                 className={`min-h-[44px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                   intendedRole === 'creator'
-                    ? 'bg-[#7957ED] text-[#F5F5F7]'
-                    : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 {locale === 'id' ? 'Kreator' : 'Creator Studio'}
@@ -201,22 +201,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           </span>
         </Button>
 
-        <div className="pt-4 border-t border-white/8 text-center text-xs text-[#A5A6B2] space-y-2">
+        <div className="pt-4 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-600 dark:text-slate-300 space-y-2">
           <p>
             {isSignup
               ? locale === 'id'
                 ? 'Sudah punya akun?'
                 : 'Already have an account?'
               : locale === 'id'
-              ? 'Belum memiliki akun VYORA?'
-              : 'New to VYORA?'}{' '}
+              ? 'Belum memiliki akun DELOKEN?'
+              : 'New to DELOKEN?'}{' '}
             <button
               type="button"
               onClick={() => {
                 clearAuthError();
                 onSwitchMode(isSignup ? 'login' : 'signup');
               }}
-              className="text-[#A78BFA] hover:text-[#F5F5F7] font-semibold cursor-pointer"
+              className="text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 font-semibold cursor-pointer"
             >
               {isSignup
                 ? locale === 'id'
@@ -228,12 +228,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             </button>
           </p>
 
-          <p className="text-[11px] text-[#A5A6B2]/80">
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
             {locale === 'id' ? 'Dengan melanjutkan, Anda menyetujui ' : 'By continuing, you agree to '}
             <button
               type="button"
               onClick={() => onNavigate('terms')}
-              className="underline hover:text-[#F5F5F7] cursor-pointer"
+              className="underline hover:text-slate-900 dark:hover:text-white cursor-pointer"
             >
               {locale === 'id' ? 'Syarat & Ketentuan' : 'Terms'}
             </button>{' '}
@@ -241,7 +241,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <button
               type="button"
               onClick={() => onNavigate('privacy')}
-              className="underline hover:text-[#F5F5F7] cursor-pointer"
+              className="underline hover:text-slate-900 dark:hover:text-white cursor-pointer"
             >
               {locale === 'id' ? 'Privasi' : 'Privacy'}
             </button>

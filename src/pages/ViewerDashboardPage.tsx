@@ -195,10 +195,10 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
           title={locale === 'id' ? 'Masuk Diperlukan' : 'Sign In Required'}
           description={
             locale === 'id'
-              ? 'Masuk ke akun VYORA Anda untuk mengakses Perpustakaan, Dompet Kredit, dan Riwayat Pembelian.'
-              : 'Sign in to access your VYORA Library, Credit Wallet, Purchase History, and Profile Settings.'
+              ? 'Masuk ke akun DELOKEN Anda untuk mengakses Perpustakaan, Dompet Kredit, dan Riwayat Pembelian.'
+              : 'Sign in to access your DELOKEN Library, Credit Wallet, Purchase History, and Profile Settings.'
           }
-          actionLabel={locale === 'id' ? 'Masuk ke VYORA' : 'Sign In'}
+          actionLabel={locale === 'id' ? 'Masuk ke DELOKEN' : 'Sign In'}
           onAction={() => onNavigate('login')}
         />
       </div>
@@ -272,24 +272,24 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-white/8">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
-          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full overflow-hidden border border-white/15 bg-[#1B1C27] shrink-0">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 shrink-0">
             <MediaImage
               src={userProfile?.photoURL || firebaseUser.photoURL || ''}
               alt={userProfile?.displayName || 'User'}
-              fallbackTitle={userProfile?.displayName || 'VYORA'}
+              fallbackTitle={userProfile?.displayName || 'DELOKEN'}
               className="w-full h-full"
             />
           </div>
           <div className="min-w-0">
-            <p className="text-xs text-[#A78BFA] font-semibold">
+            <p className="text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
               {locale === 'id' ? 'Dasbor Penonton' : 'Viewer Workspace'}
             </p>
-            <h1 className="font-display text-xl sm:text-3xl font-bold text-[#F5F5F7] truncate">
-              {userProfile?.displayName || firebaseUser.displayName || 'VYORA Member'}
+            <h1 className="font-display text-xl sm:text-3xl font-bold text-slate-900 dark:text-white truncate">
+              {userProfile?.displayName || firebaseUser.displayName || 'DELOKEN Member'}
             </h1>
-            <p className="text-xs text-[#A5A6B2] truncate">{firebaseUser.email}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{firebaseUser.email}</p>
           </div>
         </div>
 
@@ -298,7 +298,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
             <Button
               variant="outline"
               size="sm"
-              className="col-span-2 sm:col-span-1 w-full sm:w-auto border-[#7957ED]/60 text-[#A78BFA]"
+              className="col-span-2 sm:col-span-1 w-full sm:w-auto border-emerald-600 dark:border-emerald-500 text-emerald-700 dark:text-emerald-400"
               leftIcon={<Shield className="w-4 h-4" />}
               onClick={() => onNavigate('admin-dashboard')}
             >
@@ -335,7 +335,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
       <div
         role="tablist"
         aria-label="Viewer dashboard sections"
-        className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 vyora-scroll"
+        className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 deloken-scroll"
       >
         {tabs.map((tab) => {
           const active = activeTab === tab.id;
@@ -348,8 +348,8 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
               onClick={() => setActiveTab(tab.id)}
               className={`min-h-[44px] sm:min-h-[40px] inline-flex items-center gap-2 px-4 py-2 rounded-xl sm:rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                 active
-                  ? 'bg-[#7957ED] text-[#F5F5F7]'
-                  : 'bg-[#1B1C27] text-[#A5A6B2] hover:text-[#F5F5F7] border border-white/8'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
               }`}
             >
               {tab.icon}
@@ -372,55 +372,55 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
       {activeTab === 'overview' && (
         <div className="space-y-6 sm:space-y-8">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5 space-y-1">
-              <p className="text-xs text-[#A5A6B2]">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-1 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Akses Aktif (30 Hari)' : 'Active 30-Day Access'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7]">
+              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                 {activeEntitlements.length}
               </p>
             </div>
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5 space-y-1">
-              <p className="text-xs text-[#A5A6B2]">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-1 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Saldo Dompet Kredit' : 'Credit Wallet Balance'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#A78BFA]">
+              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
                 {effectiveWallet?.balanceCredits ?? 0}
               </p>
             </div>
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5 space-y-1">
-              <p className="text-xs text-[#A5A6B2]">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-1 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Total Pembelian' : 'Total Purchases'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7]">
+              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                 {mergedPurchases.length}
               </p>
             </div>
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5 space-y-1">
-              <p className="text-xs text-[#A5A6B2]">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-1 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Peran Akun' : 'Account Role'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold capitalize text-[#F5F5F7]">
+              <p className="text-xl sm:text-2xl font-bold capitalize text-slate-900 dark:text-white">
                 {userProfile?.role ?? 'viewer'}
               </p>
             </div>
           </div>
 
-          <div className="bg-[#1B1C27] border border-white/8 rounded-2xl p-5 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-5 sm:gap-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-8 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-5 sm:gap-6">
             <div className="space-y-1.5 max-w-xl">
-              <h2 className="font-display text-lg font-bold text-[#F5F5F7]">
+              <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white">
                 {locale === 'id'
                   ? 'Pay-Per-View, QRIS & Dompet Kredit Aktif'
                   : 'Pay-Per-View, QRIS & Credit Wallet Ready'}
               </h2>
-              <p className="text-sm text-[#A5A6B2]">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
                 {locale === 'id'
                   ? 'Setiap judul menyediakan pratinjau HLS 5 menit dan dapat dibuka selama 30 hari menggunakan PayPal USD, QRIS Indonesia, atau Dompet Kredit.'
                   : 'Every release offers a 5-minute HLS preview and unlocks 30 days of streaming via PayPal USD, Indonesian QRIS, or Credit Wallet.'}
               </p>
             </div>
             <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2.5 shrink-0">
-              <Button variant="secondary" size="md" className="w-full sm:w-auto" onClick={() => onNavigate('pricing')}>
+              <Button variant="outline" size="md" className="w-full sm:w-auto" onClick={() => onNavigate('pricing')}>
                 {locale === 'id' ? 'Isi Ulang Kredit' : 'Top Up Credits'}
               </Button>
               <Button variant="primary" size="md" className="w-full sm:w-auto" onClick={() => onNavigate('explore')}>
@@ -434,7 +434,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
       {/* MY LIBRARY */}
       {activeTab === 'library' && (
         <section className="space-y-4">
-          <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+          <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Perpustakaan Akses 30 Hari' : 'My 30-Day Streaming Library'}
           </h2>
           {loadingServerData && mergedEntitlements.length === 0 ? (
@@ -467,7 +467,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                   descriptionId: '',
                   category: 'Creator Exclusives',
                   creatorId: 'creator-1',
-                  creatorName: 'VYORA Creator',
+                  creatorName: 'DELOKEN Creator',
                   durationMinutes: 6,
                   previewSeconds: 300,
                   releaseYear: 2026,
@@ -484,19 +484,19 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                   publishedAt: ent.createdAt || new Date().toISOString(),
                   status: 'published',
                   credits: {
-                    director: 'VYORA Studio',
-                    cinematography: 'VYORA Studio',
-                    sound: 'VYORA Audio',
+                    director: 'DELOKEN Studio',
+                    cinematography: 'DELOKEN Studio',
+                    sound: 'DELOKEN Audio',
                   },
                 };
 
                 return (
                   <article
                     key={ent.id}
-                    className="bg-[#1B1C27] border border-white/8 rounded-xl overflow-hidden p-4 flex flex-col justify-between gap-3"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden p-4 flex flex-col justify-between gap-3 shadow-xs"
                   >
                     <div className="space-y-3">
-                      <div className="aspect-video rounded-lg overflow-hidden bg-[#11121A]">
+                      <div className="aspect-video rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800">
                         <MediaImage
                           src={ent.thumbnailUrl || playableItem.thumbnailUrl}
                           alt={ent.videoTitle}
@@ -505,10 +505,10 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                         />
                       </div>
                       <div>
-                        <h3 className="text-base font-semibold text-[#F5F5F7] line-clamp-1">
+                        <h3 className="text-base font-semibold text-slate-900 dark:text-white line-clamp-1">
                           {ent.videoTitle}
                         </h3>
-                        <p className="text-xs text-[#A78BFA] mt-1 font-mono tabular-nums">
+                        <p className="text-xs text-emerald-700 dark:text-emerald-400 font-semibold mt-1 font-mono tabular-nums">
                           {ent.status === 'active'
                             ? locale === 'id'
                               ? `Aktif · Tersisa ${ent.remainingDays} hari`
@@ -521,7 +521,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                             ? 'Kedaluwarsa'
                             : 'Expired'}
                         </p>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-[#A5A6B2] mt-1 font-mono tabular-nums">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono tabular-nums">
                           <span>
                             {locale === 'id' ? 'Berakhir' : 'Expires'}{' '}
                             {formatLocalizedDate(ent.expiresAt, locale)}
@@ -562,18 +562,18 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
       {/* CREDIT WALLET */}
       {activeTab === 'wallet' && (
         <section className="space-y-6">
-          <div className="bg-[#1B1C27] border border-white/10 rounded-2xl p-5 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-5 sm:gap-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-8 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-5 sm:gap-6">
             <div>
-              <p className="text-xs text-[#A5A6B2] mb-1">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
                 {locale === 'id' ? 'Saldo Kredit Tersedia' : 'Available Credit Balance'}
               </p>
-              <p className="text-3xl sm:text-4xl font-bold font-mono tabular-nums text-[#F5F5F7]">
+              <p className="text-3xl sm:text-4xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                 {effectiveWallet?.balanceCredits ?? 0}{' '}
-                <span className="text-base font-normal text-[#A78BFA]">
+                <span className="text-base font-normal text-emerald-700 dark:text-emerald-400">
                   {locale === 'id' ? 'Kredit' : 'Credits'}
                 </span>
               </p>
-              <p className="text-xs text-[#A5A6B2] mt-2 font-mono tabular-nums">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 font-mono tabular-nums">
                 {locale === 'id' ? 'Total digunakan: ' : 'Lifetime spent: '}
                 {effectiveWallet?.totalSpentCredits ?? 0}
               </p>
@@ -585,7 +585,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
           </div>
 
           <div className="space-y-3">
-            <h3 className="font-display text-lg font-bold text-[#F5F5F7]">
+            <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white">
               {locale === 'id' ? 'Riwayat Transaksi Kredit' : 'Wallet Ledger'}
             </h3>
             {loadingServerData && mergedTransactions.length === 0 ? (
@@ -604,18 +604,18 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                 icon={<Wallet className="w-6 h-6" />}
               />
             ) : (
-              <div className="bg-[#1B1C27] border border-white/8 rounded-xl divide-y divide-white/8">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-200 dark:divide-slate-800 shadow-xs">
                 {mergedTransactions.map((tx) => (
                   <div key={tx.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-[#F5F5F7] break-words">{tx.description}</p>
-                      <p className="text-xs text-[#A5A6B2] capitalize font-mono mt-0.5">
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100 break-words">{tx.description}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 capitalize font-mono mt-0.5">
                         {tx.type} · {formatLocalizedDate(tx.createdAt, locale)}
                       </p>
                     </div>
                     <span
                       className={`text-sm font-mono tabular-nums font-semibold shrink-0 ${
-                        tx.creditsDelta >= 0 ? 'text-[#A78BFA]' : 'text-[#F5F5F7]'
+                        tx.creditsDelta >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-900 dark:text-slate-100'
                       }`}
                     >
                       {tx.creditsDelta > 0 ? `+${tx.creditsDelta}` : tx.creditsDelta} Credits
@@ -631,7 +631,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
       {/* PURCHASE HISTORY */}
       {activeTab === 'purchases' && (
         <section className="space-y-4">
-          <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+          <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Riwayat Pembelian' : 'Purchase History'}
           </h2>
           {loadingServerData && mergedPurchases.length === 0 ? (
@@ -650,17 +650,17 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
               icon={<History className="w-6 h-6" />}
             />
           ) : (
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl divide-y divide-white/8">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-200 dark:divide-slate-800 shadow-xs">
               {mergedPurchases.map((p) => (
                 <div key={p.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[#F5F5F7] break-words">{p.videoTitle}</p>
-                    <p className="text-xs text-[#A5A6B2] font-mono mt-0.5">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white break-words">{p.videoTitle}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">
                       {p.method.toUpperCase()} · {p.status.toUpperCase()} ·{' '}
                       {formatLocalizedDate(p.createdAt, locale)}
                     </p>
                   </div>
-                  <span className="text-sm font-mono tabular-nums font-semibold text-[#F5F5F7] shrink-0">
+                  <span className="text-sm font-mono tabular-nums font-semibold text-slate-900 dark:text-white shrink-0">
                     {p.currency === 'CREDITS'
                       ? `${p.amount} Credits`
                       : formatPrice(p.amount, p.amount, p.currency)}
@@ -674,12 +674,12 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
 
       {/* PROFILE & SETTINGS */}
       {activeTab === 'profile' && (
-        <section className="max-w-xl bg-[#1B1C27] border border-white/10 rounded-2xl p-6 sm:p-8 space-y-6">
+        <section className="max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs">
           <div>
-            <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+            <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
               {locale === 'id' ? 'Profil & Pengaturan' : 'Profile & Settings'}
             </h2>
-            <p className="text-xs text-[#A5A6B2] mt-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               {locale === 'id'
                 ? 'Perubahan disimpan langsung ke profil Firestore Anda.'
                 : 'Updates save directly to your Firestore profile.'}
@@ -689,7 +689,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
           {profileError && (
             <div
               role="alert"
-              className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300"
+              className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300"
             >
               {profileError}
             </div>
@@ -698,9 +698,9 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
           {profileFeedback && (
             <div
               role="status"
-              className="p-3.5 rounded-xl bg-[#7957ED]/15 border border-[#7957ED]/40 text-xs text-[#F5F5F7] flex items-center gap-2"
+              className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2"
             >
-              <CheckCircle2 className="w-4 h-4 text-[#A78BFA] shrink-0" />
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>{profileFeedback}</span>
             </div>
           )}
@@ -709,7 +709,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
             <div>
               <label
                 htmlFor="viewer-display-name"
-                className="block text-xs font-medium text-[#A5A6B2] mb-1.5"
+                className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5"
               >
                 {locale === 'id' ? 'Nama Tampilan' : 'Display Name'}
               </label>
@@ -719,7 +719,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                 maxLength={80}
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
 
@@ -727,7 +727,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
               <div>
                 <label
                   htmlFor="viewer-locale"
-                  className="block text-xs font-medium text-[#A5A6B2] mb-1.5"
+                  className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5"
                 >
                   {locale === 'id' ? 'Bahasa Default' : 'Preferred Language'}
                 </label>
@@ -735,7 +735,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                   id="viewer-locale"
                   value={prefLocale}
                   onChange={(e) => setPrefLocale(e.target.value as LocaleCode)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600"
                 >
                   <option value="en">English</option>
                   <option value="id">Bahasa Indonesia</option>
@@ -745,7 +745,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
               <div>
                 <label
                   htmlFor="viewer-currency"
-                  className="block text-xs font-medium text-[#A5A6B2] mb-1.5"
+                  className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5"
                 >
                   {locale === 'id' ? 'Mata Uang Default' : 'Preferred Currency'}
                 </label>
@@ -753,7 +753,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                   id="viewer-currency"
                   value={prefCurrency}
                   onChange={(e) => setPrefCurrency(e.target.value as CurrencyCode)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600"
                 >
                   <option value="USD">USD ($)</option>
                   <option value="IDR">IDR (Rp)</option>

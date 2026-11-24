@@ -29,7 +29,12 @@ import {
   fetchAdminFinanceOverview,
   syncAdminPlatformSettings,
 } from '../services/paymentService';
-import { formatLocalizedDate, formatPrice } from '../i18n/translations';
+import {
+  formatLocalizedDate,
+  formatPrice,
+  formatReleasePrice,
+  isFreeContent,
+} from '../i18n/translations';
 import type {
   AdminFinanceOverview,
   ContentItem,
@@ -141,7 +146,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <EmptyState
           title="Admin Sign In Required"
-          description="Sign in with an authorized administrator account to access the VYORA Admin Console."
+          description="Sign in with an authorized administrator account to access the DELOKEN Admin Console."
           actionLabel="Go to Login"
           onAction={() => onNavigate('login')}
         />
@@ -232,13 +237,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-white/8">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-slate-200 dark:border-slate-800">
         <div className="space-y-1">
-          <div className="inline-flex items-center gap-2 text-xs font-semibold text-[#A78BFA]">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
             <Shield className="w-4 h-4" aria-hidden="true" />
-            <span>VYORA Admin Console</span>
+            <span>DELOKEN Admin Console</span>
           </div>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#F5F5F7]">
+          <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Manajemen & Moderasi Platform' : 'Platform Operations & Moderation'}
           </h1>
         </div>
@@ -248,7 +253,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       <div
         role="tablist"
         aria-label="Admin dashboard sections"
-        className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 vyora-scroll"
+        className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 deloken-scroll"
       >
         {[
           { id: 'overview' as AdminTab, label: locale === 'id' ? 'Ringkasan' : 'Overview', icon: <Shield className="w-4 h-4" /> },
@@ -268,8 +273,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             onClick={() => setActiveTab(tab.id)}
             className={`min-h-[44px] sm:min-h-[40px] inline-flex items-center gap-2 px-4 py-2 rounded-xl sm:rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
               activeTab === tab.id
-                ? 'bg-[#7957ED] text-[#F5F5F7]'
-                : 'bg-[#1B1C27] text-[#A5A6B2] hover:text-[#F5F5F7] border border-white/8'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
             }`}
           >
             {tab.icon}
@@ -282,33 +287,33 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       {activeTab === 'overview' && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5">
-              <p className="text-xs text-[#A5A6B2]">Total Users</p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Total Users</p>
+              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {users.length}
               </p>
             </div>
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5">
-              <p className="text-xs text-[#A5A6B2]">Creators</p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Creators</p>
+              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {creators.length}
               </p>
             </div>
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5">
-              <p className="text-xs text-[#A5A6B2]">Pending Moderation</p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#A78BFA] mt-1">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Pending Moderation</p>
+              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1">
                 {pendingVideos.length}
               </p>
             </div>
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5">
-              <p className="text-xs text-[#A5A6B2]">Active Entitlements</p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Active Entitlements</p>
+              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {financeOverview?.activeEntitlementsCount ?? 0}
               </p>
             </div>
-            <div className="col-span-2 lg:col-span-1 bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5">
-              <p className="text-xs text-[#A5A6B2]">Platform Commission</p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <div className="col-span-2 lg:col-span-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Platform Commission</p>
+              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {financeOverview?.commissionPercent ??
                   settings?.commissionPercent ??
                   commissionPercent}
@@ -318,27 +323,27 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-5">
-              <p className="text-xs text-[#A5A6B2]">Gross USD Volume</p>
-              <p className="text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Gross USD Volume</p>
+              <p className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {formatPrice(financeOverview?.totalGrossUsd ?? 0, 0, 'USD')}
               </p>
-              <p className="text-xs font-mono text-[#A78BFA] mt-1">
+              <p className="text-xs font-mono text-emerald-700 dark:text-emerald-400 mt-1">
                 Platform fee: {formatPrice(financeOverview?.platformCommissionUsd ?? 0, 0, 'USD')}
               </p>
             </div>
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-5">
-              <p className="text-xs text-[#A5A6B2]">Gross IDR Volume</p>
-              <p className="text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Gross IDR Volume</p>
+              <p className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {formatPrice(0, financeOverview?.totalGrossIdr ?? 0, 'IDR')}
               </p>
-              <p className="text-xs font-mono text-[#A78BFA] mt-1">
+              <p className="text-xs font-mono text-emerald-700 dark:text-emerald-400 mt-1">
                 Platform fee: {formatPrice(0, financeOverview?.platformCommissionIdr ?? 0, 'IDR')}
               </p>
             </div>
-            <div className="bg-[#1B1C27] border border-white/8 rounded-xl p-5">
-              <p className="text-xs text-[#A5A6B2]">Open Reports & Pending Payouts</p>
-              <p className="text-2xl font-bold font-mono tabular-nums text-[#F5F5F7] mt-1">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Open Reports & Pending Payouts</p>
+              <p className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {openReports.length} / {pendingPayouts.length}
               </p>
             </div>
@@ -373,11 +378,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               {financeOverview.payments.map((pay) => (
                 <article
                   key={pay.id}
-                  className="bg-[#1B1C27] border border-white/8 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
                 >
                   <div className="space-y-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-[#A5A6B2] font-mono">
-                      <span className="text-[#A78BFA] font-semibold uppercase">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
+                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold uppercase">
                         {pay.method} · {pay.status}
                       </span>
                       <span aria-hidden="true">·</span>
@@ -385,16 +390,16 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                       <span aria-hidden="true">·</span>
                       <span>{formatLocalizedDate(pay.createdAt, locale)}</span>
                     </div>
-                    <h3 className="text-base font-semibold text-[#F5F5F7] break-words">
+                    <h3 className="text-base font-semibold text-slate-900 dark:text-white break-words">
                       {pay.targetTitle}
                     </h3>
-                    <p className="text-xs text-[#A5A6B2] font-mono break-all">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono break-all">
                       User: {pay.userEmail || pay.userId} · Ref: {pay.id}
                     </p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3 shrink-0">
-                    <span className="text-sm font-bold font-mono tabular-nums text-[#F5F5F7]">
+                    <span className="text-sm font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                       {pay.currency === 'CREDITS'
                         ? `${pay.amount} Credits`
                         : formatPrice(pay.amount, pay.amount, pay.currency)}
@@ -406,7 +411,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                           <Button
                             variant="primary"
                             size="sm"
-                            className="bg-rose-600 hover:bg-rose-500 text-white"
+                            className="bg-rose-600 hover:bg-rose-700 text-white"
                             isLoading={processingActionId === pay.id}
                             onClick={() => void handleIssueRefund(pay.id)}
                           >
@@ -442,7 +447,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       {activeTab === 'payouts' && (
         <section className="space-y-4">
           {financeError && (
-            <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
+            <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300">
               {financeError}
             </div>
           )}
@@ -457,20 +462,20 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               {financeOverview.payouts.map((po) => (
                 <article
                   key={po.id}
-                  className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5 space-y-3"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-3 shadow-xs"
                 >
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4">
                     <div className="space-y-1 min-w-0">
-                      <p className="text-xs font-mono text-[#A78BFA] font-semibold uppercase">
+                      <p className="text-xs font-mono text-emerald-700 dark:text-emerald-400 font-semibold uppercase">
                         {po.status} · {po.method}
                       </p>
-                      <h3 className="text-base font-semibold text-[#F5F5F7] break-words">
+                      <h3 className="text-base font-semibold text-slate-900 dark:text-white break-words">
                         {po.creatorName} —{' '}
                         {po.currency === 'USD'
                           ? formatPrice(po.amountUsd, 0, 'USD')
                           : formatPrice(0, po.amountIdr, 'IDR')}
                       </h3>
-                      <p className="text-xs text-[#A5A6B2] font-mono break-all">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 font-mono break-all">
                         Destination: {po.destination} · Requested{' '}
                         {formatLocalizedDate(po.createdAt, locale)}
                       </p>
@@ -480,7 +485,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                       <div className="flex flex-wrap items-center gap-2 shrink-0 w-full md:w-auto">
                         {po.status === 'requested' && (
                           <Button
-                            variant="secondary"
+                            variant="outline"
                             size="sm"
                             className="flex-1 sm:flex-none"
                             isLoading={processingActionId === po.id}
@@ -518,7 +523,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                       setPayoutNotes((prev) => ({ ...prev, [po.id]: e.target.value }))
                     }
                     placeholder="Optional payout transfer reference or admin note..."
-                    className="w-full min-h-[42px] sm:min-h-[38px] px-3.5 py-2 rounded-lg bg-[#11121A] border border-white/10 text-xs text-[#F5F5F7]"
+                    className="w-full min-h-[42px] sm:min-h-[38px] px-3.5 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                   />
                 </article>
               ))}
@@ -539,23 +544,33 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             videos.map((vid) => (
               <article
                 key={vid.id}
-                className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5 space-y-3.5 sm:space-y-4"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-3.5 sm:space-y-4 shadow-xs"
               >
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4">
                   <div className="space-y-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-[#A5A6B2]">
-                      <span className="text-[#A78BFA] font-semibold uppercase">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold uppercase">
                         {vid.status.replace('_', ' ')}
                       </span>
                       <span aria-hidden="true">·</span>
                       <span>{vid.category}</span>
                       <span aria-hidden="true">·</span>
                       <span>By {vid.creatorName}</span>
+                      <span aria-hidden="true">·</span>
+                      <span
+                        className={`font-mono tabular-nums ${
+                          isFreeContent(vid)
+                            ? 'text-emerald-700 dark:text-emerald-400 font-semibold'
+                            : ''
+                        }`}
+                      >
+                        {formatReleasePrice(vid, locale, locale === 'id' ? 'IDR' : 'USD')}
+                      </span>
                     </div>
-                    <h3 className="text-base sm:text-lg font-semibold text-[#F5F5F7] break-words">
+                    <h3 className="text-base sm:text-lg font-semibold text-slate-900 dark:text-white break-words">
                       {vid.title}
                     </h3>
-                    <p className="text-xs text-[#A5A6B2] line-clamp-2">{vid.subtitle}</p>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2">{vid.subtitle}</p>
                   </div>
 
                   <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full md:w-auto shrink-0">
@@ -649,7 +664,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                       ? 'Catatan moderasi opsional untuk kreator...'
                       : 'Optional moderation note for the creator...'
                   }
-                  className="w-full min-h-[42px] sm:min-h-[40px] px-3.5 py-2 rounded-lg bg-[#11121A] border border-white/10 text-xs text-[#F5F5F7]"
+                  className="w-full min-h-[42px] sm:min-h-[40px] px-3.5 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                 />
               </article>
             ))
@@ -669,14 +684,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             creators.map((c) => (
               <div
                 key={c.id}
-                className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4"
               >
                 <div className="min-w-0">
-                  <h3 className="text-base font-semibold text-[#F5F5F7] break-words">
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-white break-words">
                     {c.name}{' '}
-                    <span className="text-xs font-mono text-[#A5A6B2]">{c.handle}</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{c.handle}</span>
                   </h3>
-                  <p className="text-xs text-[#A5A6B2] mt-0.5">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     {c.role} · {c.location} · Status: {c.status ?? 'pending'} ·{' '}
                     {c.verified ? 'Verified' : 'Unverified'}
                   </p>
@@ -705,9 +720,9 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
       {/* USER MANAGEMENT */}
       {activeTab === 'users' && (
-        <section className="bg-[#1B1C27] border border-white/8 rounded-xl overflow-hidden divide-y divide-white/8">
+        <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-200 dark:divide-slate-800 shadow-xs">
           {users.length === 0 ? (
-            <div className="p-8 text-center text-sm text-[#A5A6B2]">No users loaded yet.</div>
+            <div className="p-8 text-center text-sm text-slate-500 dark:text-slate-400">No users loaded yet.</div>
           ) : (
             users.map((u) => (
               <div
@@ -715,8 +730,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-[#F5F5F7] truncate">{u.displayName}</p>
-                  <p className="text-xs text-[#A5A6B2] break-all">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{u.displayName}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 break-all">
                     {u.email} · {u.preferredLocale.toUpperCase()} / {u.preferredCurrency}
                   </p>
                 </div>
@@ -726,7 +741,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                   onChange={(e) =>
                     void adminUpdateUserRole(u.uid, e.target.value as UserRole)
                   }
-                  className="w-full sm:w-auto min-h-[44px] sm:min-h-[40px] px-3 py-2 rounded-xl sm:rounded-lg bg-[#11121A] border border-white/12 text-xs font-semibold text-[#F5F5F7]"
+                  className="w-full sm:w-auto min-h-[44px] sm:min-h-[40px] px-3 py-2 rounded-xl sm:rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-slate-100"
                 >
                   <option value="viewer">Viewer</option>
                   <option value="creator">Creator</option>
@@ -750,14 +765,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             reports.map((r) => (
               <div
                 key={r.id}
-                className="bg-[#1B1C27] border border-white/8 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4"
               >
                 <div className="min-w-0">
-                  <p className="text-xs text-[#A78BFA] font-semibold uppercase">
+                  <p className="text-xs text-emerald-700 dark:text-emerald-400 font-semibold uppercase">
                     {r.targetType} · {r.status}
                   </p>
-                  <p className="text-sm font-medium text-[#F5F5F7] mt-1 break-words">{r.reason}</p>
-                  <p className="text-xs text-[#A5A6B2] font-mono mt-0.5 break-all">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white mt-1 break-words">{r.reason}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5 break-all">
                     Target ID: {r.targetId}
                   </p>
                 </div>
@@ -787,30 +802,30 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
       {/* PLATFORM SETTINGS */}
       {activeTab === 'settings' && (
-        <section className="max-w-xl bg-[#1B1C27] border border-white/10 rounded-2xl p-6 sm:p-8 space-y-5">
-          <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+        <section className="max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5 shadow-xs">
+          <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
             Platform Economics & Streaming Rules
           </h2>
 
           {settingsError && (
             <div
               role="alert"
-              className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300"
+              className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300"
             >
               {settingsError}
             </div>
           )}
 
           {settingsSaved && (
-            <div className="p-3.5 rounded-xl bg-[#7957ED]/15 border border-[#7957ED]/40 text-xs text-[#F5F5F7] flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-[#A78BFA] shrink-0" />
-              <span>Platform settings saved to Firestore.</span>
+            <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>Platform settings saved to Firestore & Cloud SQL.</span>
             </div>
           )}
 
           <form onSubmit={handleSaveSettings} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                 Platform Commission (%)
               </label>
               <input
@@ -819,13 +834,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 max={50}
                 value={commissionPercent}
                 onChange={(e) => setCommissionPercent(Number(e.target.value))}
-                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm font-mono tabular-nums text-[#F5F5F7]"
+                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm font-mono tabular-nums text-slate-900 dark:text-slate-100"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   Minimum Price (USD)
                 </label>
                 <input
@@ -834,11 +849,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                   min={0.99}
                   value={minPriceUsd}
                   onChange={(e) => setMinPriceUsd(Number(e.target.value))}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm font-mono tabular-nums text-[#F5F5F7]"
+                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm font-mono tabular-nums text-slate-900 dark:text-slate-100"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#A5A6B2] mb-1.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                   Minimum Price (IDR)
                 </label>
                 <input
@@ -847,12 +862,12 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                   min={10000}
                   value={minPriceIdr}
                   onChange={(e) => setMinPriceIdr(Number(e.target.value))}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm font-mono tabular-nums text-[#F5F5F7]"
+                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm font-mono tabular-nums text-slate-900 dark:text-slate-100"
                 />
               </div>
             </div>
 
-            <p className="text-xs text-[#A5A6B2] font-mono">
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
               Fixed invariants: Free Preview = 300s (5 min) · Entitlement Window = 30 days
             </p>
 

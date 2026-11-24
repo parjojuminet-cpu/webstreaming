@@ -42,16 +42,16 @@ export class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#11121A] text-[#F5F5F7] flex items-center justify-center p-6">
-          <div className="max-w-lg w-full bg-[#1B1C27] border border-rose-500/30 rounded-2xl p-8 space-y-5 text-center">
-            <div className="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto">
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex items-center justify-center p-6">
+          <div className="max-w-lg w-full bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800/70 rounded-2xl p-8 space-y-5 text-center shadow-sm">
+            <div className="w-12 h-12 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto">
               <AlertTriangle className="w-6 h-6" aria-hidden="true" />
             </div>
             <div className="space-y-2">
-              <h1 className="font-display text-xl font-bold text-[#F5F5F7]">
+              <h1 className="font-display text-xl font-bold text-slate-900 dark:text-white">
                 Something went wrong
               </h1>
-              <p className="text-sm text-[#A5A6B2] break-words leading-relaxed">
+              <p className="text-sm text-slate-600 dark:text-slate-300 break-words leading-relaxed">
                 {this.state.message}
               </p>
             </div>
@@ -64,7 +64,7 @@ export class ErrorBoundary extends React.Component<
                 window.location.reload();
               }}
             >
-              Reload VYORA
+              Reload DELOKEN
             </Button>
           </div>
         </div>

@@ -13,13 +13,13 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
-    'bg-[#7957ED] hover:bg-[#6743DF] text-[#F5F5F7] shadow-sm shadow-[#7957ED]/20 border border-transparent',
+    'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/15 border border-transparent',
   secondary:
-    'bg-[#1B1C27] hover:bg-[#242636] text-[#F5F5F7] border border-white/10',
+    'bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white border border-transparent',
   outline:
-    'bg-transparent hover:bg-white/5 text-[#F5F5F7] border border-white/15 hover:border-[#A78BFA]/50',
+    'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 hover:border-emerald-600 dark:hover:border-emerald-500',
   ghost:
-    'bg-transparent hover:bg-white/5 text-[#A5A6B2] hover:text-[#F5F5F7] border border-transparent',
+    'bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-transparent',
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
@@ -44,7 +44,7 @@ export const Button: React.FC<ButtonProps> = ({
     <button
       type={type}
       disabled={disabled || isLoading}
-      className={`inline-flex items-center justify-center rounded-xl sm:rounded-lg whitespace-nowrap shrink-0 active:scale-[0.98] transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A78BFA] focus-visible:ring-offset-2 focus-visible:ring-offset-[#11121A] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
+      className={`inline-flex items-center justify-center rounded-xl sm:rounded-lg whitespace-nowrap shrink-0 active:scale-[0.98] transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:focus-visible:ring-offset-slate-950 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
       {...props}
     >
       {isLoading ? (

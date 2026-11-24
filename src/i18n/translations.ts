@@ -101,10 +101,12 @@ export interface Dictionary {
   };
   cards: {
     watchPreview: string;
+    watchFree: string;
     viewDetails: string;
     exploreCreator: string;
     titles: string;
     access30Days: string;
+    freeAccess: string;
     freePreview: string;
   };
   footer: {
@@ -122,7 +124,7 @@ export interface Dictionary {
 
 export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
   en: {
-    tagline: 'Watch More. Experience More.',
+    tagline: 'Learn Practical Skills. Stream Curated Documentaries.',
     nav: {
       home: 'Home',
       explore: 'Explore',
@@ -139,41 +141,43 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
       previewNote: '5-minute free preview · 30-day access upon unlock',
     },
     sections: {
-      galleryHeading: 'Movie & Streaming Gallery',
-      gallerySubtitle: 'Select any film, documentary, or masterclass to watch a 5-minute free preview immediately.',
+      galleryHeading: 'Curated Learning, DIY & Documentary Catalog',
+      gallerySubtitle: 'Select any documentary, practical workshop, or independent release to stream a 5-minute free preview immediately.',
       allCategories: 'All',
       trendingNow: 'Trending Now',
       trendingSubtitle: 'Most watched Pay-Per-View releases across Indonesia and international audiences.',
       exploreCategories: 'Explore Categories',
-      categoriesSubtitle: 'Curated films, masterclasses, live performances, and independent creator originals.',
+      categoriesSubtitle: 'Curated films, masterclasses, documentaries, live performances, and creator originals.',
       featuredCreators: 'Featured Creators',
-      creatorsSubtitle: 'Independent filmmakers, educators, and visual storytellers publishing directly on VYORA.',
+      creatorsSubtitle: 'Independent filmmakers, craft educators, and visual storytellers publishing directly on DELOKEN.',
       recentlyAdded: 'Recently Added',
       recentlySubtitle: 'Newly approved premieres ready for instant five-minute preview.',
-      howItWorks: 'How VYORA Works',
+      howItWorks: 'How DELOKEN Works',
       howItWorksSubtitle: 'Transparent Pay-Per-View streaming with zero recurring subscription lock-in.',
       viewAll: 'View All',
     },
     howSteps: {
       step1Title: '01. Watch Five Minutes Free',
-      step1Desc: 'Start any film, documentary, or masterclass immediately. Experience the first five minutes in full resolution before deciding.',
-      step2Title: '02. Unlock Premium Content',
-      step2Desc: 'Pay per title via PayPal, Indonesian QRIS, or your VYORA Credit Wallet with instant server-verified entitlement.',
+      step1Desc: 'Start any documentary, workshop, or film immediately. Experience the first five minutes in full resolution before deciding.',
+      step2Title: '02. Unlock Premium Access',
+      step2Desc: 'Pay per title via PayPal, Indonesian QRIS, or your DELOKEN Credit Wallet with instant server-verified entitlement.',
       step3Title: '03. Enjoy 30 Days of Access',
       step3Desc: 'Stream seamlessly across desktop, tablet, and mobile for 30 full days from purchase, resuming right where you paused.',
     },
     cta: {
-      heading: 'Become a VYORA Creator',
-      body: 'Publish exclusive cinema, educational masterclasses, or live event captures directly to global and Indonesian viewers with transparent Pay-Per-View earnings.',
+      heading: 'Become a DELOKEN Creator',
+      body: 'Publish practical workshops, craft documentaries, or independent cinema directly to Indonesian and global viewers with transparent Pay-Per-View revenue.',
       primaryBtn: 'Start Publishing Content',
       secondaryBtn: 'Read Creator Guidelines',
     },
     cards: {
       watchPreview: 'Watch Preview',
+      watchFree: 'Watch Free',
       viewDetails: 'Details',
       exploreCreator: 'Explore Creator',
       titles: 'titles',
       access30Days: '30-day access',
+      freeAccess: 'Free full access',
       freePreview: '5m free preview',
     },
     footer: {
@@ -185,11 +189,11 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
       social: 'Social Media',
       language: 'Language',
       currency: 'Currency',
-      rights: 'VYORA International Streaming. All rights reserved.',
+      rights: 'DELOKEN Hybrid Learning & Documentary Platform. All rights reserved.',
     },
   },
   id: {
-    tagline: 'Tonton Lebih Banyak. Rasakan Lebih Dalam.',
+    tagline: 'Belajar Keterampilan Praktis. Tonton Dokumenter Terkurasi.',
     nav: {
       home: 'Beranda',
       explore: 'Jelajah',
@@ -206,41 +210,43 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
       previewNote: 'Pratinjau gratis 5 menit · Akses penuh 30 hari setelah dibuka',
     },
     sections: {
-      galleryHeading: 'Galeri Movie & Tayangan',
-      gallerySubtitle: 'Pilih film, dokumenter, atau kelas master — langsung tonton pratinjau gratis 5 menit dari galeri.',
+      galleryHeading: 'Katalog Edukasi, DIY & Dokumenter',
+      gallerySubtitle: 'Pilih film dokumenter, kelas keterampilan praktis, atau karya independen untuk langsung menonton pratinjau gratis 5 menit.',
       allCategories: 'Semua',
       trendingNow: 'Sedang Tren',
       trendingSubtitle: 'Rilisan Pay-Per-View paling banyak ditonton di Indonesia dan mancanegara.',
       exploreCategories: 'Jelajahi Kategori',
-      categoriesSubtitle: 'Kurasi film, kelas master, konser langsung, dan karya eksklusif kreator independen.',
+      categoriesSubtitle: 'Kurasi film, kelas praktik, dokumenter, konser langsung, dan karya eksklusif kreator independen.',
       featuredCreators: 'Kreator Pilihan',
-      creatorsSubtitle: 'Pembuat film, pengajar, dan pencerita visual independen yang merilis karya langsung di VYORA.',
+      creatorsSubtitle: 'Pembuat film, pengajar praktis, dan dokumenter independen yang merilis karya langsung di DELOKEN.',
       recentlyAdded: 'Baru Ditambahkan',
-      recentlySubtitle: 'Tayangan perdana terbaru yang siap ditonton pratinjau gratis lima menit.',
-      howItWorks: 'Cara Kerja VYORA',
+      recentlySubtitle: 'Tayangan terbaru yang siap ditonton pratinjau gratis lima menit.',
+      howItWorks: 'Cara Kerja DELOKEN',
       howItWorksSubtitle: 'Streaming Pay-Per-View transparan tanpa kewajiban langganan bulanan.',
       viewAll: 'Lihat Semua',
     },
     howSteps: {
       step1Title: '01. Tonton Lima Menit Gratis',
-      step1Desc: 'Mulai tonton film, dokumenter, atau kelas master apa pun seketika. Nikmati lima menit pertama sebelum memutuskan membeli.',
-      step2Title: '02. Buka Konten Premium',
-      step2Desc: 'Bayar per judul melalui QRIS Indonesia, PayPal internasional, atau Dompet Kredit VYORA dengan verifikasi instan.',
+      step1Desc: 'Mulai tonton dokumenter, kelas praktik, atau film apa pun seketika. Evaluasi lima menit pertama sebelum memutuskan membeli.',
+      step2Title: '02. Buka Akses Premium',
+      step2Desc: 'Bayar per judul melalui QRIS Indonesia, PayPal internasional, atau Dompet Kredit DELOKEN dengan verifikasi server instan.',
       step3Title: '03. Nikmati Akses 30 Hari',
       step3Desc: 'Streaming lancar di desktop, tablet, dan ponsel selama 30 hari penuh, melanjutkan tepat dari posisi terakhir.',
     },
     cta: {
-      heading: 'Jadilah Kreator VYORA',
-      body: 'Publikasikan film eksklusif, kelas edukasi, atau rekaman acara langsung ke penonton Indonesia dan global dengan skema bagi hasil yang transparan.',
+      heading: 'Jadilah Kreator DELOKEN',
+      body: 'Publikasikan kelas praktik, dokumenter kerajinan, atau film independen langsung ke penonton Indonesia dan global dengan bagi hasil transparan.',
       primaryBtn: 'Mulai Publikasi Konten',
       secondaryBtn: 'Baca Panduan Kreator',
     },
     cards: {
       watchPreview: 'Pratinjau',
+      watchFree: 'Tonton Gratis',
       viewDetails: 'Detail',
       exploreCreator: 'Jelajahi Kreator',
       titles: 'karya',
       access30Days: 'akses 30 hari',
+      freeAccess: 'akses penuh gratis',
       freePreview: 'pratinjau 5 menit',
     },
     footer: {
@@ -252,10 +258,18 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
       social: 'Media Sosial',
       language: 'Bahasa',
       currency: 'Mata Uang',
-      rights: 'VYORA International Streaming. Hak cipta dilindungi.',
+      rights: 'DELOKEN Hybrid Learning & Documentary Platform. Hak cipta dilindungi.',
     },
   },
 };
+
+export function isFreeContent(item: {
+  priceUsd: number;
+  priceIdr: number;
+  creditCost: number;
+}): boolean {
+  return item.priceUsd === 0 && item.priceIdr === 0 && item.creditCost === 0;
+}
 
 export function formatPrice(priceUsd: number, priceIdr: number, currency: CurrencyCode): string {
   if (currency === 'IDR') {
@@ -270,6 +284,17 @@ export function formatPrice(priceUsd: number, priceIdr: number, currency: Curren
     currency: 'USD',
     minimumFractionDigits: 2,
   }).format(priceUsd);
+}
+
+export function formatReleasePrice(
+  item: { priceUsd: number; priceIdr: number; creditCost: number },
+  locale: LocaleCode,
+  currency: CurrencyCode
+): string {
+  if (isFreeContent(item)) {
+    return locale === 'id' ? 'Gratis' : 'Free';
+  }
+  return formatPrice(item.priceUsd, item.priceIdr, currency);
 }
 
 export function formatDuration(minutes: number, locale: LocaleCode): string {

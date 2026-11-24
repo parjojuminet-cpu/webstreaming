@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --color-deloken-bg: #F8FAFC;
@@ -25,10 +26,21 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  html.dark {
+    background-color: #020617;
+    color: #F1F5F9;
+    color-scheme: dark;
+  }
+
   body {
     background-color: #F8FAFC;
     color: #0F172A;
     overflow-x: clip;
+  }
+
+  html.dark body {
+    background-color: #020617;
+    color: #F1F5F9;
   }
 
   h1, h2, h3, h4, .font-display {
@@ -56,3 +68,22 @@
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+.deloken-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #CBD5E1 transparent;
+}
+.dark .deloken-scroll {
+  scrollbar-color: #334155 transparent;
+}
+.deloken-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.deloken-scroll::-webkit-scrollbar-thumb {
+  background-color: #CBD5E1;
+  border-radius: 9999px;
+}
+.dark .deloken-scroll::-webkit-scrollbar-thumb {
+  background-color: #334155;
+}
+

@@ -52,7 +52,7 @@ function sanitizeSlug(raw: string): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 90);
-  return cleaned.length >= 2 ? cleaned : `vyora-${Date.now()}`;
+  return cleaned.length >= 2 ? cleaned : `deloken-${Date.now()}`;
 }
 
 function clampString(val: string, maxLen: number): string {
@@ -80,10 +80,10 @@ export async function ensureUserProfile(
 
   if (!existingSnap.exists()) {
     const safeName = clampString(
-      firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'VYORA Member',
+      firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'DELOKEN Member',
       80
     );
-    const displayName = safeName.length >= 2 ? safeName : 'VYORA User';
+    const displayName = safeName.length >= 2 ? safeName : 'DELOKEN User';
     const email = clampString(firebaseUser.email || '', 160);
     const photoURL = clampString(firebaseUser.photoURL || '', 500);
     const role: UserRole = isBootstrapAdmin ? 'admin' : 'viewer';
@@ -213,10 +213,7 @@ export async function upsertCreatorProfile(
         handle: normalizedHandle.length >= 2 ? normalizedHandle : `@creator_${uid.slice(0, 6)}`,
         role: clampString(input.role, 80),
         location: clampString(input.location, 80),
-        avatarUrl: clampString(
-          input.avatarUrl || '/src/assets/images/creator_portrait_dimas_1794930901730.jpg',
-          500
-        ),
+        avatarUrl: clampString(input.avatarUrl || '', 500),
         bio: clampString(input.bio, 600),
         bioId: clampString(input.bioId || input.bio, 600),
         specialty: input.specialty,
@@ -233,10 +230,7 @@ export async function upsertCreatorProfile(
         handle: normalizedHandle.length >= 2 ? normalizedHandle : `@creator_${uid.slice(0, 6)}`,
         role: clampString(input.role, 80),
         location: clampString(input.location, 80),
-        avatarUrl: clampString(
-          input.avatarUrl || '/src/assets/images/creator_portrait_dimas_1794930901730.jpg',
-          500
-        ),
+        avatarUrl: clampString(input.avatarUrl || '', 500),
         bio: clampString(input.bio, 600),
         bioId: clampString(input.bioId || input.bio, 600),
         specialty: input.specialty,
@@ -279,9 +273,9 @@ export function subscribePublishedVideos(
           ...(data as unknown as ContentItem),
           id: d.id,
           credits: (data.credits as ContentItem['credits']) || {
-            director: String(data.creatorName || 'VYORA Creator'),
-            cinematography: String(data.creatorName || 'VYORA Studio'),
-            sound: 'VYORA Mastering',
+            director: String(data.creatorName || 'DELOKEN Creator'),
+            cinematography: String(data.creatorName || 'DELOKEN Studio'),
+            sound: 'DELOKEN Mastering',
           },
         };
       });
@@ -308,7 +302,7 @@ export function subscribeCreatorVideos(
           credits: (data.credits as ContentItem['credits']) || {
             director: String(data.creatorName || ''),
             cinematography: String(data.creatorName || ''),
-            sound: 'VYORA Studio',
+            sound: 'DELOKEN Studio',
           },
         };
       });
@@ -326,6 +320,7 @@ export interface CreateVideoInput {
   category: ContentCategory;
   thumbnailUrl: string;
   durationMinutes: number;
+  isFree?: boolean;
   priceUsd: number;
   priceIdr: number;
   creditCost: number;
@@ -333,7 +328,7 @@ export interface CreateVideoInput {
   resolution: '4K HDR' | '4K UHD' | '1080p HD';
   audioFormat: string;
   languages: string[];
-  assetProvider: 'cloudflare_stream' | 'private_storage';
+  assetProvider: 'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook';
   assetRef: string;
   initialStatus: 'draft' | 'pending_review';
 }
@@ -352,13 +347,24 @@ export async function createCreatorVideo(
   const safeDuration = Number.isFinite(input.durationMinutes)
     ? Math.max(1, Math.min(600, Math.round(input.durationMinutes)))
     : 60;
-  const safePriceUsd = Number.isFinite(input.priceUsd)
+  const isFreeRelease =
+    input.isFree === true ||
+    (Number(input.priceUsd) === 0 &&
+      Number(input.priceIdr) === 0 &&
+      Number(input.creditCost) === 0);
+  const safePriceUsd = isFreeRelease
+    ? 0
+    : Number.isFinite(input.priceUsd)
     ? Math.max(0.99, Math.min(500, Number(Number(input.priceUsd).toFixed(2))))
     : 4.99;
-  const safePriceIdr = Number.isFinite(input.priceIdr)
+  const safePriceIdr = isFreeRelease
+    ? 0
+    : Number.isFinite(input.priceIdr)
     ? Math.max(10000, Math.min(10000000, Math.round(input.priceIdr)))
     : 75000;
-  const safeCreditCost = Number.isFinite(input.creditCost)
+  const safeCreditCost = isFreeRelease
+    ? 0
+    : Number.isFinite(input.creditCost)
     ? Math.max(1, Math.min(500, Math.round(input.creditCost)))
     : 5;
   const safeReleaseYear = Number.isFinite(input.releaseYear)
@@ -374,7 +380,7 @@ export async function createCreatorVideo(
     descriptionId: clampString(input.descriptionId || input.description, 2000),
     category: input.category,
     creatorId,
-    creatorName: safeCreatorName.length >= 2 ? safeCreatorName : 'VYORA Creator',
+    creatorName: safeCreatorName.length >= 2 ? safeCreatorName : 'DELOKEN Creator',
     thumbnailUrl: clampString(
       input.thumbnailUrl || '/src/assets/images/hero_featured_film_1794930897673.jpg',
       500
@@ -409,11 +415,26 @@ export async function createCreatorVideo(
   }
 
   try {
+    const firestoreAssetProvider =
+      input.assetProvider === 'youtube' || input.assetProvider === 'facebook'
+        ? 'private_storage'
+        : input.assetProvider;
+    const firestoreAssetRef =
+      input.assetProvider === 'youtube'
+        ? input.assetRef.startsWith('youtube:')
+          ? input.assetRef
+          : `youtube:${input.assetRef}`
+        : input.assetProvider === 'facebook'
+        ? input.assetRef.startsWith('facebook:')
+          ? input.assetRef
+          : `facebook:${input.assetRef}`
+        : input.assetRef;
+
     await setDoc(doc(db, 'video_assets', videoId), {
       videoId,
       creatorId,
-      provider: input.assetProvider,
-      assetRef: clampString(input.assetRef, 300),
+      provider: firestoreAssetProvider,
+      assetRef: clampString(firestoreAssetRef, 300),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -454,6 +475,26 @@ export async function creatorArchiveVideo(videoId: string): Promise<void> {
   try {
     await updateDoc(doc(db, 'videos', videoId), {
       status: 'archived',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateVideoCover(
+  videoId: string,
+  coverUrl: string
+): Promise<void> {
+  const path = `videos/${videoId}`;
+  const safeCover = clampString(coverUrl, 500);
+  if (!safeCover) {
+    throw new Error('Cover URL cannot be empty.');
+  }
+  try {
+    await updateDoc(doc(db, 'videos', videoId), {
+      thumbnailUrl: safeCover,
+      backdropUrl: safeCover,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
@@ -554,7 +595,7 @@ export function subscribeContentReviews(
         return {
           id: d.id,
           contentId: String(data.contentId || contentId),
-          authorName: String(data.authorName || 'VYORA Viewer'),
+          authorName: String(data.authorName || 'DELOKEN Viewer'),
           authorLocation: 'Verified Viewer',
           rating: Number(data.rating || 5),
           comment: String(data.comment || ''),
@@ -585,7 +626,7 @@ export async function submitContentReview(input: {
     await setDoc(doc(db, 'reviews', reviewId), {
       userId: input.userId,
       contentId: safeContentId,
-      authorName: safeName.length >= 2 ? safeName : 'VYORA Viewer',
+      authorName: safeName.length >= 2 ? safeName : 'DELOKEN Viewer',
       rating: safeRating,
       comment: safeComment,
       createdAt: serverTimestamp(),
@@ -648,7 +689,7 @@ export function subscribeAdminVideos(
             credits: (data.credits as ContentItem['credits']) || {
               director: String(data.creatorName || ''),
               cinematography: String(data.creatorName || ''),
-              sound: 'VYORA Studio',
+              sound: 'DELOKEN Studio',
             },
           };
         })

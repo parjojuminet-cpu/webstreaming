@@ -32,6 +32,7 @@ import {
   getPaymentByIdSql,
   getPaymentStatusSnapshotSql,
   getStreamAuthContextSql,
+  getThumbnailAssetSql,
   getUserEntitlementsSql,
   getWalletSnapshotSql,
   isWebhookProcessedSql,
@@ -40,6 +41,7 @@ import {
   refundPaymentAtomicSql,
   requestCreatorPayoutAtomicSql,
   savePendingPaymentOrderSql,
+  saveThumbnailAssetSql,
   spendCreditsAtomicSql,
   updatePayoutStatusSql,
   updatePlatformSettingsSql,
@@ -57,6 +59,11 @@ import {
   signCloudflareStreamToken,
 } from './server/cloudflareStream.ts';
 import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
+import { extractYouTubeVideoId } from './src/utils/youtube.ts';
+import {
+  extractFacebookVideoUrl,
+  getFacebookEmbedUrl,
+} from './src/utils/facebook.ts';
 import type { PaymentOrderRecord, PaymentPurpose } from './src/types/vyora';
 
 dotenv.config();
@@ -364,7 +371,7 @@ async function startServer(): Promise<void> {
       ],
       limit: '100mb',
     }),
-    (req: AuthedRequest, res) => {
+    async (req: AuthedRequest, res) => {
       const uid = req.user!.uid;
       if (!isValidSafeId(uid)) {
         res.status(400).json({ error: 'Invalid user identifier.' });
@@ -399,12 +406,14 @@ async function startServer(): Promise<void> {
         return;
       }
 
-      const rawOriginal = String(req.headers['x-vyora-filename'] || 'media')
+      const rawOriginal = String(
+        req.headers['x-deloken-filename'] || req.headers['x-vyora-filename'] || 'media'
+      )
         .replace(/[^a-zA-Z0-9_-]/g, '-')
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 48);
-      const baseSlug = rawOriginal.length >= 2 ? rawOriginal.toLowerCase() : 'vyora-media';
+      const baseSlug = rawOriginal.length >= 2 ? rawOriginal.toLowerCase() : 'deloken-media';
       const uniqueName = `${baseSlug}-${Date.now().toString(36)}-${crypto
         .randomBytes(3)
         .toString('hex')}${videoExt || imageExt}`;
@@ -434,6 +443,15 @@ async function startServer(): Promise<void> {
       }
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, bodyBuffer);
+
+      await saveThumbnailAssetSql({
+        key: `thumb:${uid}:${uniqueName}`,
+        creatorId: uid,
+        mimeType: contentType,
+        base64Data: bodyBuffer.toString('base64'),
+        updatedAtIso: new Date().toISOString(),
+      });
+
       res.json({
         kind: 'thumbnail',
         thumbnailUrl: `/api/media/thumb/${encodeURIComponent(uid)}/${encodeURIComponent(
@@ -445,23 +463,45 @@ async function startServer(): Promise<void> {
     }
   );
 
-  app.get('/api/media/thumb/:uid/:fileName', (req, res) => {
+  app.get('/api/media/thumb/:uid/:fileName', async (req, res) => {
     const { uid, fileName } = req.params;
     const target = safeResolveUploadedAsset(THUMBNAILS_DIR, uid, fileName);
-    if (!target || !fs.existsSync(target)) {
+    if (!target) {
+      res.status(400).json({ error: 'Invalid thumbnail path.' });
+      return;
+    }
+
+    if (fs.existsSync(target)) {
+      const ext = path.extname(fileName).toLowerCase();
+      const mime =
+        ext === '.png'
+          ? 'image/png'
+          : ext === '.webp'
+          ? 'image/webp'
+          : 'image/jpeg';
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      fs.createReadStream(target).pipe(res);
+      return;
+    }
+
+    const sqlThumb = await getThumbnailAssetSql(`thumb:${uid}:${fileName}`);
+    if (!sqlThumb) {
       res.status(404).json({ error: 'Thumbnail not found.' });
       return;
     }
-    const ext = path.extname(fileName).toLowerCase();
-    const mime =
-      ext === '.png'
-        ? 'image/png'
-        : ext === '.webp'
-        ? 'image/webp'
-        : 'image/jpeg';
-    res.setHeader('Content-Type', mime);
+
+    const buf = Buffer.from(sqlThumb.base64Data, 'base64');
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, buf);
+    } catch {
+      // Non-fatal if disk cache write fails
+    }
+
+    res.setHeader('Content-Type', sqlThumb.mimeType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    fs.createReadStream(target).pipe(res);
+    res.send(buf);
   });
 
   app.use(express.json({ limit: '128kb' }));
@@ -587,7 +627,10 @@ async function startServer(): Promise<void> {
 
       if (
         !isValidSafeId(videoId) ||
-        (provider !== 'cloudflare_stream' && provider !== 'private_storage') ||
+        (provider !== 'cloudflare_stream' &&
+          provider !== 'private_storage' &&
+          provider !== 'youtube' &&
+          provider !== 'facebook') ||
         typeof assetRef !== 'string' ||
         assetRef.trim().length < 3 ||
         assetRef.trim().length > 300
@@ -596,8 +639,28 @@ async function startServer(): Promise<void> {
         return;
       }
 
-      const trimmedRef = assetRef.trim();
-      if (trimmedRef.startsWith('private/uploads/')) {
+      let trimmedRef = assetRef.trim();
+      if (provider === 'youtube') {
+        const ytId = extractYouTubeVideoId(trimmedRef);
+        if (!ytId) {
+          res.status(400).json({
+            error:
+              'Invalid YouTube link or Video ID. Use a standard youtube.com/watch?v=... or youtu.be/... link.',
+          });
+          return;
+        }
+        trimmedRef = ytId;
+      } else if (provider === 'facebook') {
+        const fbUrl = extractFacebookVideoUrl(trimmedRef);
+        if (!fbUrl) {
+          res.status(400).json({
+            error:
+              'Invalid Facebook video link. Use a public facebook.com/.../videos/..., facebook.com/watch?v=..., facebook.com/reel/..., or fb.watch/... URL.',
+          });
+          return;
+        }
+        trimmedRef = fbUrl;
+      } else if (trimmedRef.startsWith('private/uploads/')) {
         const expectedPrefix = `private/uploads/${uid}/`;
         if (!trimmedRef.startsWith(expectedPrefix)) {
           res.status(403).json({ error: 'You may only bind media uploaded by your account.' });
@@ -640,10 +703,19 @@ async function startServer(): Promise<void> {
 
     let record: ServerEntitlement | null = null;
     let mediaBinding = null;
+    let resolvedVideo = null;
     try {
-      const ctx = await getStreamAuthContextSql(req.user?.uid, videoId);
+      const [ctx, videoMeta] = await Promise.all([
+        getStreamAuthContextSql(req.user?.uid, videoId),
+        resolveServerVideoEntry(
+          videoId,
+          firebaseConfig.projectId,
+          firebaseConfig.firestoreDatabaseId
+        ),
+      ]);
       record = ctx.entitlement;
       mediaBinding = ctx.mediaBinding;
+      resolvedVideo = videoMeta;
     } catch (err) {
       res.status(500).json({
         error: err instanceof Error ? err.message : 'Failed to authorize stream.',
@@ -651,15 +723,39 @@ async function startServer(): Promise<void> {
       return;
     }
 
+    const isFreeRelease = Boolean(
+      resolvedVideo &&
+        resolvedVideo.priceUsd === 0 &&
+        resolvedVideo.priceIdr === 0 &&
+        resolvedVideo.creditCost === 0
+    );
+    const hasPaidEntitlement = Boolean(
+      record && record.status !== 'revoked' && now < record.expiresAtMs
+    );
     const isCreatorPreview = Boolean(
       req.user?.uid && mediaBinding && mediaBinding.creatorId === req.user.uid
     );
-    const isActive = Boolean(
-      (record && record.status !== 'revoked' && now < record.expiresAtMs) ||
-        isCreatorPreview
-    );
+    const isActive = Boolean(hasPaidEntitlement || isCreatorPreview || isFreeRelease);
     const mode: 'preview' | 'full' = isActive ? 'full' : 'preview';
     const maxSeg = isActive ? FULL_MAX_SEGMENT_INDEX : PREVIEW_MAX_SEGMENT_INDEX;
+
+    const entitlementPayload =
+      hasPaidEntitlement && record
+        ? {
+            status: 'active' as const,
+            expiresAt: new Date(record.expiresAtMs).toISOString(),
+            remainingDays: Math.max(
+              1,
+              Math.ceil((record.expiresAtMs - now) / (24 * 60 * 60 * 1000))
+            ),
+          }
+        : isCreatorPreview
+        ? {
+            status: 'active' as const,
+            expiresAt: new Date(now + ACCESS_WINDOW_MS).toISOString(),
+            remainingDays: 30,
+          }
+        : null;
 
     // Check if this video has an uploaded MP4/WebM master file on disk
     if (
@@ -684,28 +780,15 @@ async function startServer(): Promise<void> {
             fileRef: `${ownerUid}/${fileName}`,
             mimeType: mediaBinding.mimeType || 'video/mp4',
           });
-          const remainingDays =
-            isActive && record
-              ? Math.max(1, Math.ceil((record.expiresAtMs - now) / (24 * 60 * 60 * 1000)))
-              : isCreatorPreview
-              ? 30
-              : 0;
           res.json({
             mode,
+            isFree: isFreeRelease,
             streamType: 'file',
             videoId,
             previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
-            resumeSeconds: isActive && record ? record.resumeSeconds : 0,
+            resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
             manifestUrl: `/api/stream/file?token=${encodeURIComponent(token)}`,
-            entitlement: isActive
-              ? {
-                  status: 'active',
-                  expiresAt: record
-                    ? new Date(record.expiresAtMs).toISOString()
-                    : new Date(now + ACCESS_WINDOW_MS).toISOString(),
-                  remainingDays,
-                }
-              : null,
+            entitlement: entitlementPayload,
             serverTimeIso: new Date(now).toISOString(),
           });
           return;
@@ -725,34 +808,78 @@ async function startServer(): Promise<void> {
       const ttlSeconds = isActive ? 3600 : 420;
       const signedToken = signCloudflareStreamToken(cfUid, { ttlSeconds });
       const manifestUrl = buildCloudflareHlsUrl(signedToken || cfUid);
-      const remainingDays =
-        isActive && record
-          ? Math.max(1, Math.ceil((record.expiresAtMs - now) / (24 * 60 * 60 * 1000)))
-          : isCreatorPreview
-          ? 30
-          : 0;
 
       res.json({
         mode,
+        isFree: isFreeRelease,
         streamType: 'hls',
         provider: 'cloudflare_stream',
         signedHls: Boolean(signedToken),
         videoId,
         previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
-        resumeSeconds: isActive && record ? record.resumeSeconds : 0,
+        resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
         manifestUrl,
-        entitlement: isActive
-          ? {
-              status: 'active',
-              expiresAt: record
-                ? new Date(record.expiresAtMs).toISOString()
-                : new Date(now + ACCESS_WINDOW_MS).toISOString(),
-              remainingDays,
-            }
-          : null,
+        entitlement: entitlementPayload,
         serverTimeIso: new Date(now).toISOString(),
       });
       return;
+    }
+
+    // Check if this video is bound to YouTube (Unlisted / Public Embed via IFrame API)
+    if (
+      mediaBinding &&
+      (mediaBinding.provider === 'youtube' ||
+        (mediaBinding.provider === 'private_storage' &&
+          mediaBinding.assetRef.startsWith('youtube:')))
+    ) {
+      const ytId = extractYouTubeVideoId(mediaBinding.assetRef);
+      if (ytId) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'youtube',
+          provider: 'youtube',
+          youtubeVideoId: ytId,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: `https://www.youtube-nocookie.com/embed/${ytId}`,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    // Check if this video is bound to Facebook (Public Embedded Video Plugin)
+    if (
+      mediaBinding &&
+      (mediaBinding.provider === 'facebook' ||
+        (mediaBinding.provider === 'private_storage' &&
+          mediaBinding.assetRef.startsWith('facebook:')))
+    ) {
+      const fbUrl = extractFacebookVideoUrl(mediaBinding.assetRef);
+      if (fbUrl) {
+        const resumeAt = hasPaidEntitlement && record ? record.resumeSeconds : 0;
+
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'facebook',
+          provider: 'facebook',
+          facebookVideoUrl: fbUrl,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: resumeAt,
+          manifestUrl: getFacebookEmbedUrl(fbUrl, {
+            autoplay: true,
+            startSeconds: resumeAt,
+          }),
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
     }
 
     const mappedPreset =
@@ -776,30 +903,15 @@ async function startServer(): Promise<void> {
       jti: crypto.randomUUID(),
     });
 
-    const remainingDays =
-      isActive && record
-        ? Math.max(1, Math.ceil((record.expiresAtMs - now) / (24 * 60 * 60 * 1000)))
-        : isCreatorPreview
-        ? 30
-        : 0;
-
     res.json({
       mode,
+      isFree: isFreeRelease,
       streamType: 'hls',
       videoId,
       previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
-      resumeSeconds: isActive && record ? record.resumeSeconds : 0,
+      resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
       manifestUrl: `/api/stream/master.m3u8?token=${encodeURIComponent(token)}`,
-      entitlement:
-        isActive
-          ? {
-              status: 'active',
-              expiresAt: record
-                ? new Date(record.expiresAtMs).toISOString()
-                : new Date(now + ACCESS_WINDOW_MS).toISOString(),
-              remainingDays,
-            }
-          : null,
+      entitlement: entitlementPayload,
       serverTimeIso: new Date(now).toISOString(),
     });
   });
@@ -1163,6 +1275,14 @@ async function startServer(): Promise<void> {
       res.status(404).json({ error: 'Published video release not found.' });
       return;
     }
+    if (
+      resolvedVideo.priceUsd === 0 &&
+      resolvedVideo.priceIdr === 0 &&
+      resolvedVideo.creditCost === 0
+    ) {
+      res.status(400).json({ error: 'Free release does not require credits.' });
+      return;
+    }
 
     try {
       const paymentId = `pay_cr_${crypto.randomUUID().slice(0, 12)}`;
@@ -1229,6 +1349,10 @@ async function startServer(): Promise<void> {
       );
       if (!vid) {
         res.status(404).json({ error: 'Published release not found.' });
+        return;
+      }
+      if (vid.priceUsd === 0 && vid.priceIdr === 0 && vid.creditCost === 0) {
+        res.status(400).json({ error: 'Free release does not require payment.' });
         return;
       }
       amountUsd = vid.priceUsd;
@@ -1487,6 +1611,10 @@ async function startServer(): Promise<void> {
       );
       if (!vid) {
         res.status(404).json({ error: 'Published release not found.' });
+        return;
+      }
+      if (vid.priceUsd === 0 && vid.priceIdr === 0 && vid.creditCost === 0) {
+        res.status(400).json({ error: 'Free release does not require payment.' });
         return;
       }
       amountIdr = vid.priceIdr;

@@ -378,6 +378,61 @@ export async function upsertCreatorMediaSql(binding: CreatorMediaBinding): Promi
   }
 }
 
+export async function saveThumbnailAssetSql(input: {
+  key: string;
+  creatorId: string;
+  mimeType: string;
+  base64Data: string;
+  updatedAtIso: string;
+}): Promise<void> {
+  try {
+    await ensureLegacyLedgerMigrated();
+    await db
+      .insert(creatorMedia)
+      .values({
+        videoId: input.key,
+        creatorId: input.creatorId,
+        provider: 'thumbnail',
+        assetRef: input.base64Data,
+        mimeType: input.mimeType,
+        updatedAtIso: input.updatedAtIso,
+      })
+      .onConflictDoUpdate({
+        target: creatorMedia.videoId,
+        set: {
+          creatorId: input.creatorId,
+          provider: 'thumbnail',
+          assetRef: input.base64Data,
+          mimeType: input.mimeType,
+          updatedAtIso: input.updatedAtIso,
+        },
+      });
+  } catch (error) {
+    console.error('saveThumbnailAssetSql failed:', error);
+  }
+}
+
+export async function getThumbnailAssetSql(
+  key: string
+): Promise<{ mimeType: string; base64Data: string } | null> {
+  try {
+    await ensureLegacyLedgerMigrated();
+    const rows = await db
+      .select()
+      .from(creatorMedia)
+      .where(and(eq(creatorMedia.videoId, key), eq(creatorMedia.provider, 'thumbnail')));
+    const row = rows[0];
+    if (!row || !row.assetRef) return null;
+    return {
+      mimeType: row.mimeType || 'image/jpeg',
+      base64Data: row.assetRef,
+    };
+  } catch (error) {
+    console.error('getThumbnailAssetSql failed:', error);
+    return null;
+  }
+}
+
 export async function getStreamAuthContextSql(
   uid: string | undefined,
   videoId: string
@@ -404,7 +459,11 @@ export async function getStreamAuthContextSql(
         ? {
             videoId: m.videoId,
             creatorId: m.creatorId,
-            provider: m.provider as 'cloudflare_stream' | 'private_storage',
+            provider: m.provider as
+              | 'cloudflare_stream'
+              | 'private_storage'
+              | 'youtube'
+              | 'facebook',
             assetRef: m.assetRef,
             mimeType: m.mimeType ?? undefined,
             updatedAtIso: m.updatedAtIso,

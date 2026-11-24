@@ -24,9 +24,9 @@ const SUGGESTED_QUERIES = [
   '4K HDR',
   'Documentary',
   'Indonesia',
-  'Berlin',
-  'Architecture',
-  'Kenji Takahashi',
+  'Workshop',
+  'Education',
+  'DELOKEN',
 ];
 
 export const SearchPage: React.FC<SearchPageProps> = ({
@@ -71,10 +71,10 @@ export const SearchPage: React.FC<SearchPageProps> = ({
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8 sm:space-y-10">
       <div className="max-w-3xl space-y-4 sm:space-y-5">
         <div className="space-y-2">
-          <h1 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-[#F5F5F7]">
-            {locale === 'id' ? 'Cari di VYORA' : 'Search VYORA'}
+          <h1 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-white">
+            {locale === 'id' ? 'Cari di DELOKEN' : 'Search DELOKEN'}
           </h1>
-          <p className="text-sm sm:text-base text-[#A5A6B2]">
+          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400">
             {locale === 'id'
               ? 'Cari berdasarkan judul, sutradara, kategori, lokasi, atau format audio.'
               : 'Search across films, documentaries, masterclasses, live events, and verified creators.'}
@@ -84,7 +84,7 @@ export const SearchPage: React.FC<SearchPageProps> = ({
         {/* Search Input */}
         <div className="relative">
           <Search
-            className="w-5 h-5 text-[#A5A6B2] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"
+            className="w-5 h-5 text-slate-400 dark:text-slate-500 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"
             aria-hidden="true"
           />
           <input
@@ -96,15 +96,15 @@ export const SearchPage: React.FC<SearchPageProps> = ({
                 ? 'Ketik judul film, dokumenter, atau nama kreator...'
                 : 'Search titles, creators, categories, or themes...'
             }
-            aria-label="Search VYORA catalog"
-            className="w-full min-h-[50px] pl-12 pr-12 py-3 rounded-xl bg-[#1B1C27] border border-white/12 text-base text-[#F5F5F7] placeholder:text-[#A5A6B2]/70 focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+            aria-label="Search DELOKEN catalog"
+            className="w-full min-h-[50px] pl-12 pr-12 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-600 shadow-xs"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery('')}
               aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-[#A5A6B2] hover:text-[#F5F5F7] cursor-pointer"
+              className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -113,7 +113,7 @@ export const SearchPage: React.FC<SearchPageProps> = ({
 
         {/* Quick Search Suggestions */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-[#A5A6B2] mr-1">
+          <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">
             {locale === 'id' ? 'Populer:' : 'Suggested:'}
           </span>
           {SUGGESTED_QUERIES.map((term) => (
@@ -121,7 +121,7 @@ export const SearchPage: React.FC<SearchPageProps> = ({
               key={term}
               type="button"
               onClick={() => setQuery(term)}
-              className="min-h-[40px] px-3.5 py-2 rounded-xl sm:rounded-lg bg-[#1B1C27] hover:bg-[#242636] border border-white/10 text-xs font-medium text-[#A5A6B2] hover:text-[#F5F5F7] transition-colors cursor-pointer active:scale-[0.98]"
+              className="min-h-[40px] px-3.5 py-2 rounded-xl sm:rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer active:scale-[0.98]"
             >
               {term}
             </button>
@@ -132,7 +132,7 @@ export const SearchPage: React.FC<SearchPageProps> = ({
       {/* Matching Creators */}
       {matchingCreators.length > 0 && (
         <section className="space-y-4">
-          <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+          <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Kreator Terkait' : 'Matching Creators'}
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -151,7 +151,7 @@ export const SearchPage: React.FC<SearchPageProps> = ({
       {/* Matching Content */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+          <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
             {trimmed
               ? locale === 'id'
                 ? `Hasil Pencarian (${matchingContent.length})`

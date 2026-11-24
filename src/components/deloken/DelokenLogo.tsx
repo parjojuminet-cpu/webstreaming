@@ -18,7 +18,7 @@ export const DelokenLogo: React.FC<DelokenLogoProps> = ({
         viewBox="0 0 32 32"
         fill="none"
         aria-hidden="true"
-        className="shrink-0"
+        className="shrink-0 rounded-lg dark:ring-1 dark:ring-slate-700"
       >
         <rect width="32" height="32" rx="8" fill="#0F172A" />
         <path
@@ -29,7 +29,7 @@ export const DelokenLogo: React.FC<DelokenLogoProps> = ({
         <path d="M13.5 12.6L19.2 16L13.5 19.4V12.6Z" fill="#10B981" />
       </svg>
       {showWordmark && (
-        <span className="font-display text-lg font-bold tracking-tight text-slate-900">
+        <span className="font-display text-lg font-bold tracking-tight text-slate-900 dark:text-white">
           DELOKEN
         </span>
       )}

@@ -1,16 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Clapperboard, Globe, LogOut, Menu, Search, Shield, User, X } from 'lucide-react';
+import { ChevronDown, Clapperboard, Globe, LogOut, Menu, Moon, Search, Shield, Sun, User, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import type { CurrencyCode, LocaleCode, ViewRoute } from '../../types/vyora';
 import { TRANSLATIONS } from '../../i18n/translations';
+import { DelokenLogo } from '../deloken/DelokenLogo';
 import { Button } from '../ui/Button';
 
 interface NavbarProps {
   activeRoute: ViewRoute;
   locale: LocaleCode;
   currency: CurrencyCode;
+  theme: 'light' | 'dark';
   onChangeLocale: (locale: LocaleCode) => void;
   onChangeCurrency: (currency: CurrencyCode) => void;
+  onToggleTheme: () => void;
   onNavigate: (route: ViewRoute) => void;
 }
 
@@ -18,8 +21,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeRoute,
   locale,
   currency,
+  theme,
   onChangeLocale,
   onChangeCurrency,
+  onToggleTheme,
   onNavigate,
 }) => {
   const { firebaseUser, userProfile, isAdmin, signOutUser } = useAuth();
@@ -67,33 +72,26 @@ export const Navbar: React.FC<NavbarProps> = ({
     setAccountMenuOpen(false);
   };
 
+  const themeToggleLabel =
+    theme === 'dark'
+      ? locale === 'id'
+        ? 'Aktifkan Mode Terang'
+        : 'Switch to Light Mode'
+      : locale === 'id'
+      ? 'Aktifkan Mode Gelap'
+      : 'Switch to Dark Mode';
+
   return (
-    <header className="sticky top-0 z-40 h-14 md:h-16 bg-[#11121A]/90 backdrop-blur-md border-b border-white/8">
+    <header className="sticky top-0 z-40 h-14 md:h-16 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors">
       <div className="max-w-7xl mx-auto h-full px-3.5 sm:px-6 lg:px-8 flex items-center justify-between gap-2 md:gap-4 lg:gap-8">
-        {/* Zone 1: Brand Mark & Wordmark */}
+        {/* Zone 1: DELOKEN Brand Mark & Wordmark */}
         <button
           type="button"
           onClick={() => handleNav('home')}
-          className="inline-flex items-center gap-2 text-[#F5F5F7] hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A78BFA] rounded-md px-1 py-1 min-h-[44px] md:min-h-0"
-          aria-label="VYORA Home"
+          className="inline-flex items-center hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 rounded-md px-1 py-1 min-h-[44px] md:min-h-0"
+          aria-label="DELOKEN Home"
         >
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
-            className="shrink-0"
-          >
-            <rect width="24" height="24" rx="6" fill="#7957ED" />
-            <path
-              d="M6.5 7.25L12 17.25L17.5 7.25H14.6L12 12.25L9.4 7.25H6.5Z"
-              fill="#F5F5F7"
-            />
-          </svg>
-          <span className="font-display text-lg font-bold tracking-tight text-[#F5F5F7]">
-            VYORA
-          </span>
+          <DelokenLogo size="sm" />
         </button>
 
         {/* Zone 2: Primary Navigation Links (Desktop) */}
@@ -109,10 +107,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 type="button"
                 onClick={() => handleNav(item.route)}
                 aria-current={isActive ? 'page' : undefined}
-                className={`relative py-2 text-sm font-medium whitespace-nowrap shrink-0 transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A78BFA] rounded-sm ${
+                className={`relative py-2 text-sm font-medium whitespace-nowrap shrink-0 transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 rounded-sm ${
                   isActive
-                    ? 'text-[#F5F5F7]'
-                    : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
+                    ? 'text-slate-900 dark:text-white font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <span className="inline-flex items-center gap-1.5">
@@ -123,7 +121,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
                 {isActive && (
                   <span
-                    className="absolute inset-x-0 -bottom-[1px] h-[2px] bg-[#7957ED] rounded-full"
+                    className="absolute inset-x-0 -bottom-[1px] h-[2px] bg-emerald-600 dark:bg-emerald-500 rounded-full"
                     aria-hidden="true"
                   />
                 )}
@@ -132,16 +130,32 @@ export const Navbar: React.FC<NavbarProps> = ({
           })}
         </nav>
 
-        {/* Zone 3: Top Language Switcher + Auth / Workspace Menu */}
+        {/* Zone 3: Theme Toggle + Language Switcher + Auth / Workspace Menu */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-          {/* Top Language Switcher (Always visible on mobile & desktop) */}
+          {/* Theme Toggle */}
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            aria-label={themeToggleLabel}
+            aria-pressed={theme === 'dark'}
+            title={themeToggleLabel}
+            className="inline-flex items-center justify-center w-9 h-9 md:w-9 md:h-9 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-amber-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+          >
+            {theme === 'dark' ? (
+              <Sun className="w-4 h-4" aria-hidden="true" />
+            ) : (
+              <Moon className="w-4 h-4 text-slate-700" aria-hidden="true" />
+            )}
+          </button>
+
+          {/* Language Switcher */}
           <div
-            className="inline-flex items-center p-0.5 rounded-lg bg-[#1B1C27] border border-white/10 shrink-0"
+            className="inline-flex items-center p-0.5 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shrink-0"
             role="group"
             aria-label={dict.footer.language}
           >
             <Globe
-              className="hidden sm:block w-3.5 h-3.5 text-[#A78BFA] ml-2 mr-1 shrink-0"
+              className="hidden sm:block w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 ml-2 mr-1 shrink-0"
               aria-hidden="true"
             />
             <button
@@ -151,8 +165,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               aria-label="Bahasa Indonesia"
               className={`min-h-[36px] md:min-h-[32px] px-2 sm:px-2.5 rounded-md text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 locale === 'id'
-                  ? 'bg-[#7957ED] text-[#F5F5F7]'
-                  : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               ID
@@ -164,8 +178,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               aria-label="English"
               className={`min-h-[36px] md:min-h-[32px] px-2 sm:px-2.5 rounded-md text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 locale === 'en'
-                  ? 'bg-[#7957ED] text-[#F5F5F7]'
-                  : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               EN
@@ -177,10 +191,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => handleNav('login')}
-                className={`min-h-[40px] px-3 py-2 text-sm font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A78BFA] ${
+                className={`min-h-[40px] px-3 py-2 text-sm font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${
                   activeRoute === 'login'
-                    ? 'text-[#F5F5F7]'
-                    : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
+                    ? 'text-slate-900 dark:text-white font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 {dict.nav.login}
@@ -200,23 +214,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => setAccountMenuOpen((prev) => !prev)}
                 aria-expanded={accountMenuOpen}
                 aria-haspopup="menu"
-                className="min-h-[40px] inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#1B1C27] hover:bg-[#242636] border border-white/10 text-xs font-semibold text-[#F5F5F7] whitespace-nowrap shrink-0 cursor-pointer"
+                className="min-h-[40px] inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <User className="w-3.5 h-3.5 text-[#A78BFA]" aria-hidden="true" />
+                <User className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
                 <span className="max-w-[130px] truncate">
                   {userProfile?.displayName || firebaseUser.displayName || 'Account'}
                 </span>
-                <ChevronDown className="w-3.5 h-3.5 text-[#A5A6B2]" aria-hidden="true" />
+                <ChevronDown className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" aria-hidden="true" />
               </button>
 
               {accountMenuOpen && (
-                <div className="absolute right-0 mt-2 w-56 rounded-xl bg-[#1B1C27] border border-white/10 shadow-2xl py-1.5 z-50">
+                <div className="absolute right-0 mt-2 w-56 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl py-1.5 z-50">
                   <button
                     type="button"
                     onClick={() => handleNav('viewer-dashboard')}
-                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-[#F5F5F7] hover:bg-white/5 flex items-center gap-2.5 cursor-pointer"
+                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer"
                   >
-                    <User className="w-3.5 h-3.5 text-[#A78BFA]" aria-hidden="true" />
+                    <User className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
                     <span>
                       {locale === 'id' ? 'Dasbor Penonton' : 'Viewer Dashboard'}
                     </span>
@@ -224,9 +238,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     type="button"
                     onClick={() => handleNav('creator-dashboard')}
-                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-[#F5F5F7] hover:bg-white/5 flex items-center gap-2.5 cursor-pointer"
+                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer"
                   >
-                    <Clapperboard className="w-3.5 h-3.5 text-[#A78BFA]" aria-hidden="true" />
+                    <Clapperboard className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
                     <span>
                       {locale === 'id' ? 'Studio Kreator' : 'Creator Studio'}
                     </span>
@@ -235,15 +249,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <button
                       type="button"
                       onClick={() => handleNav('admin-dashboard')}
-                      className="w-full px-4 py-2.5 text-left text-xs font-medium text-[#F5F5F7] hover:bg-white/5 flex items-center gap-2.5 cursor-pointer"
+                      className="w-full px-4 py-2.5 text-left text-xs font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 flex items-center gap-2.5 cursor-pointer"
                     >
-                      <Shield className="w-3.5 h-3.5 text-[#A78BFA]" aria-hidden="true" />
+                      <Shield className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
                       <span>
                         {locale === 'id' ? 'Konsol Admin' : 'Admin Console'}
                       </span>
                     </button>
                   )}
-                  <div className="my-1 border-t border-white/8" />
+                  <div className="my-1 border-t border-slate-200 dark:border-slate-800" />
                   <button
                     type="button"
                     onClick={() => {
@@ -251,7 +265,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       void signOutUser();
                       onNavigate('home');
                     }}
-                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-[#A5A6B2] hover:text-[#F5F5F7] hover:bg-white/5 flex items-center gap-2.5 cursor-pointer"
+                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer"
                   >
                     <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>{locale === 'id' ? 'Keluar' : 'Sign Out'}</span>
@@ -265,7 +279,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={() => handleNav('login')}
-              className="md:hidden min-h-[40px] px-3 py-1.5 rounded-lg bg-[#7957ED] hover:bg-[#6743DF] text-xs font-semibold text-[#F5F5F7] whitespace-nowrap cursor-pointer"
+              className="md:hidden min-h-[40px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-xs font-semibold text-white whitespace-nowrap cursor-pointer"
             >
               {dict.nav.login}
             </button>
@@ -274,9 +288,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               onClick={() => handleNav('viewer-dashboard')}
               aria-label={locale === 'id' ? 'Dasbor Akun' : 'Account Dashboard'}
-              className="md:hidden min-h-[40px] max-w-[120px] px-2.5 py-1.5 rounded-lg bg-[#1B1C27] border border-white/10 text-xs font-medium text-[#F5F5F7] inline-flex items-center gap-1.5 cursor-pointer"
+              className="md:hidden min-h-[40px] max-w-[120px] px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-900 dark:text-slate-100 inline-flex items-center gap-1.5 cursor-pointer"
             >
-              <User className="w-3.5 h-3.5 text-[#A78BFA] shrink-0" aria-hidden="true" />
+              <User className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 shrink-0" aria-hidden="true" />
               <span className="truncate">
                 {userProfile?.displayName?.split(' ')[0] ||
                   firebaseUser.displayName?.split(' ')[0] ||
@@ -290,7 +304,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => setMobileMenuOpen((prev) => !prev)}
             aria-expanded={mobileMenuOpen}
             aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
-            className="md:hidden inline-flex items-center justify-center w-11 h-11 rounded-lg text-[#F5F5F7] hover:bg-white/5 transition-colors cursor-pointer"
+            className="md:hidden inline-flex items-center justify-center w-11 h-11 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -301,172 +315,198 @@ export const Navbar: React.FC<NavbarProps> = ({
       {mobileMenuOpen && (
         <>
           <div
-            className="md:hidden fixed inset-x-0 top-14 bottom-0 bg-black/60 backdrop-blur-sm z-40"
+            className="md:hidden fixed inset-x-0 top-14 bottom-0 bg-slate-900/40 dark:bg-slate-950/70 backdrop-blur-xs z-40"
             onClick={() => setMobileMenuOpen(false)}
             aria-hidden="true"
           />
-          <div className="md:hidden fixed inset-x-0 top-14 max-h-[calc(100dvh-7.5rem)] overflow-y-auto bg-[#11121A] border-b border-white/10 px-4 py-4 space-y-4 shadow-2xl z-50">
-          <nav aria-label="Mobile navigation" className="grid grid-cols-2 gap-2">
-            {(
-              [
-                { route: 'categories' as ViewRoute, label: dict.nav.categories },
-                { route: 'pricing' as ViewRoute, label: dict.nav.pricing },
-                { route: 'guidelines' as ViewRoute, label: dict.footer.guidelines },
-                { route: 'about' as ViewRoute, label: dict.footer.about },
-              ] as const
-            ).map((item) => {
-              const isActive = activeRoute === item.route;
-              return (
+          <div className="md:hidden fixed inset-x-0 top-14 max-h-[calc(100dvh-7.5rem)] overflow-y-auto bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 px-4 py-4 space-y-4 shadow-xl z-50">
+            <nav aria-label="Mobile navigation" className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { route: 'categories' as ViewRoute, label: dict.nav.categories },
+                  { route: 'pricing' as ViewRoute, label: dict.nav.pricing },
+                  { route: 'guidelines' as ViewRoute, label: dict.footer.guidelines },
+                  { route: 'about' as ViewRoute, label: dict.footer.about },
+                ] as const
+              ).map((item) => {
+                const isActive = activeRoute === item.route;
+                return (
+                  <button
+                    key={item.route}
+                    type="button"
+                    onClick={() => handleNav(item.route)}
+                    className={`min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-between ${
+                      isActive
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/70'
+                        : 'bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
+                    }`}
+                  >
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Quick Language, Currency & Theme Toggle inside Mobile Drawer */}
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div
+                className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+                role="group"
+                aria-label={dict.footer.language}
+              >
+                <Globe className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 ml-2 mr-1" aria-hidden="true" />
                 <button
-                  key={item.route}
                   type="button"
-                  onClick={() => handleNav(item.route)}
-                  className={`min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-between ${
-                    isActive
-                      ? 'bg-[#7957ED]/20 text-[#F5F5F7] border border-[#7957ED]/50'
-                      : 'bg-[#1B1C27] text-[#A5A6B2] hover:text-[#F5F5F7] border border-white/8'
+                  onClick={() => onChangeLocale('en')}
+                  className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    locale === 'en'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  <span className="truncate">{item.label}</span>
+                  EN
                 </button>
-              );
-            })}
-          </nav>
-
-          {/* Quick Language & Currency Toggle inside Mobile Drawer */}
-          <div className="pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
-            <div
-              className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#1B1C27] border border-white/8"
-              role="group"
-              aria-label={dict.footer.language}
-            >
-              <Globe className="w-3.5 h-3.5 text-[#A5A6B2] ml-2 mr-1" aria-hidden="true" />
-              <button
-                type="button"
-                onClick={() => onChangeLocale('en')}
-                className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                  locale === 'en'
-                    ? 'bg-[#7957ED] text-[#F5F5F7]'
-                    : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
-                }`}
-              >
-                EN
-              </button>
-              <button
-                type="button"
-                onClick={() => onChangeLocale('id')}
-                className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                  locale === 'id'
-                    ? 'bg-[#7957ED] text-[#F5F5F7]'
-                    : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
-                }`}
-              >
-                ID
-              </button>
-            </div>
-
-            <div
-              className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#1B1C27] border border-white/8"
-              role="group"
-              aria-label={dict.footer.currency}
-            >
-              <button
-                type="button"
-                onClick={() => onChangeCurrency('USD')}
-                className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer ${
-                  currency === 'USD'
-                    ? 'bg-[#7957ED] text-[#F5F5F7]'
-                    : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
-                }`}
-              >
-                USD
-              </button>
-              <button
-                type="button"
-                onClick={() => onChangeCurrency('IDR')}
-                className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer ${
-                  currency === 'IDR'
-                    ? 'bg-[#7957ED] text-[#F5F5F7]'
-                    : 'text-[#A5A6B2] hover:text-[#F5F5F7]'
-                }`}
-              >
-                IDR
-              </button>
-            </div>
-          </div>
-
-          {!firebaseUser ? (
-            <div className="pt-3 border-t border-white/10 space-y-2.5">
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="flex-1"
-                  onClick={() => handleNav('login')}
-                >
-                  {dict.nav.login}
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="flex-1"
-                  onClick={() => handleNav('signup')}
-                >
-                  {dict.nav.signup}
-                </Button>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleNav('creator-dashboard')}
-                className="min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-medium text-[#A78BFA] bg-[#1B1C27] flex items-center gap-2.5 cursor-pointer"
-              >
-                <Clapperboard className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span>{locale === 'id' ? 'Masuk Studio Kreator' : 'Open Creator Studio'}</span>
-              </button>
-            </div>
-          ) : (
-            <div className="pt-3 border-t border-white/10 space-y-2">
-              <button
-                type="button"
-                onClick={() => handleNav('viewer-dashboard')}
-                className="min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-medium text-[#F5F5F7] bg-[#1B1C27] flex items-center gap-2.5 cursor-pointer"
-              >
-                <User className="w-4 h-4 text-[#A78BFA] shrink-0" aria-hidden="true" />
-                <span>{locale === 'id' ? 'Dasbor Penonton' : 'Viewer Dashboard'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleNav('creator-dashboard')}
-                className="min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-medium text-[#F5F5F7] bg-[#1B1C27] flex items-center gap-2.5 cursor-pointer"
-              >
-                <Clapperboard className="w-4 h-4 text-[#A78BFA] shrink-0" aria-hidden="true" />
-                <span>{locale === 'id' ? 'Studio Kreator' : 'Creator Studio'}</span>
-              </button>
-              {isAdmin && (
                 <button
                   type="button"
-                  onClick={() => handleNav('admin-dashboard')}
-                  className="min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-medium text-[#A78BFA] bg-[#1B1C27] flex items-center gap-2.5 cursor-pointer"
+                  onClick={() => onChangeLocale('id')}
+                  className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    locale === 'id'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
                 >
-                  <Shield className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  <span>{locale === 'id' ? 'Konsol Admin' : 'Admin Console'}</span>
+                  ID
                 </button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full"
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  void signOutUser();
-                  onNavigate('home');
-                }}
+              </div>
+
+              <div
+                className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+                role="group"
+                aria-label={dict.footer.currency}
               >
-                {locale === 'id' ? 'Keluar' : 'Sign Out'}
-              </Button>
+                <button
+                  type="button"
+                  onClick={() => onChangeCurrency('USD')}
+                  className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer ${
+                    currency === 'USD'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  USD
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChangeCurrency('IDR')}
+                  className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer ${
+                    currency === 'IDR'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  IDR
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                className="min-h-[44px] w-full px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center justify-between cursor-pointer"
+              >
+                <span className="inline-flex items-center gap-2">
+                  {theme === 'dark' ? (
+                    <Sun className="w-4 h-4 text-amber-300" aria-hidden="true" />
+                  ) : (
+                    <Moon className="w-4 h-4 text-slate-700" aria-hidden="true" />
+                  )}
+                  <span>
+                    {theme === 'dark'
+                      ? locale === 'id'
+                        ? 'Mode Gelap Aktif'
+                        : 'Dark Mode Active'
+                      : locale === 'id'
+                      ? 'Mode Terang Aktif'
+                      : 'Light Mode Active'}
+                  </span>
+                </span>
+                <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                  {locale === 'id' ? 'Ganti' : 'Switch'}
+                </span>
+              </button>
             </div>
-          )}
-        </div>
+
+            {!firebaseUser ? (
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => handleNav('login')}
+                  >
+                    {dict.nav.login}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => handleNav('signup')}
+                  >
+                    {dict.nav.signup}
+                  </Button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleNav('creator-dashboard')}
+                  className="min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 flex items-center gap-2.5 cursor-pointer"
+                >
+                  <Clapperboard className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span>{locale === 'id' ? 'Masuk Studio Kreator' : 'Open Creator Studio'}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => handleNav('viewer-dashboard')}
+                  className="min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center gap-2.5 cursor-pointer"
+                >
+                  <User className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" aria-hidden="true" />
+                  <span>{locale === 'id' ? 'Dasbor Penonton' : 'Viewer Dashboard'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleNav('creator-dashboard')}
+                  className="min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center gap-2.5 cursor-pointer"
+                >
+                  <Clapperboard className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" aria-hidden="true" />
+                  <span>{locale === 'id' ? 'Studio Kreator' : 'Creator Studio'}</span>
+                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => handleNav('admin-dashboard')}
+                    className="min-h-[44px] w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-medium text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 flex items-center gap-2.5 cursor-pointer"
+                  >
+                    <Shield className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    <span>{locale === 'id' ? 'Konsol Admin' : 'Admin Console'}</span>
+                  </button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    void signOutUser();
+                    onNavigate('home');
+                  }}
+                >
+                  {locale === 'id' ? 'Keluar' : 'Sign Out'}
+                </Button>
+              </div>
+            )}
+          </div>
         </>
       )}
     </header>

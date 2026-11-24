@@ -32,6 +32,7 @@ import {
   formatDuration,
   formatLocalizedDate,
   formatPrice,
+  isFreeContent,
 } from '../i18n/translations';
 import { Button } from '../components/ui/Button';
 import { ContentCard } from '../components/ui/ContentCard';
@@ -137,7 +138,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
       await submitContentReview({
         userId: firebaseUser.uid,
         contentId: item.id,
-        authorName: userProfile?.displayName || firebaseUser.displayName || 'VYORA Viewer',
+        authorName: userProfile?.displayName || firebaseUser.displayName || 'DELOKEN Viewer',
         rating: reviewRating,
         comment: reviewComment,
       });
@@ -153,6 +154,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
     }
   };
 
+  const isFree = isFreeContent(item) || Boolean(streamAuth?.isFree);
   const isUnlocked = streamAuth?.mode === 'full' && Boolean(streamAuth.entitlement);
   const resumeSeconds = streamAuth?.resumeSeconds ?? 0;
   const remainingDays = streamAuth?.entitlement?.remainingDays ?? 30;
@@ -161,8 +163,8 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
 
   return (
     <div className="pb-16">
-      {/* Cinematic Backdrop Header */}
-      <section className="relative min-h-[380px] sm:min-h-[460px] lg:min-h-[540px] flex items-end overflow-hidden border-b border-white/8">
+      {/* Cinematic Backdrop Header (high-contrast slate-950 scrim over 16:9 key art) */}
+      <section className="relative min-h-[380px] sm:min-h-[460px] lg:min-h-[540px] flex items-end overflow-hidden border-b border-slate-200 dark:border-slate-800 bg-slate-950">
         <div className="absolute inset-0">
           <MediaImage
             src={item.backdropUrl}
@@ -172,11 +174,11 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
             className="w-full h-full"
           />
           <div
-            className="absolute inset-0 bg-gradient-to-r from-[#11121A] via-[#11121A]/85 sm:via-[#11121A]/80 to-[#11121A]/30 sm:to-[#11121A]/25"
+            className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/85 sm:via-slate-950/80 to-slate-950/35 sm:to-slate-950/25"
             aria-hidden="true"
           />
           <div
-            className="absolute inset-0 bg-gradient-to-t from-[#11121A] via-[#11121A]/55 sm:via-[#11121A]/45 to-transparent"
+            className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/55 sm:via-slate-950/45 to-transparent"
             aria-hidden="true"
           />
         </div>
@@ -185,15 +187,15 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex items-center gap-2 min-h-[44px] text-xs font-semibold text-[#A5A6B2] hover:text-[#F5F5F7] transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 min-h-[44px] text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" aria-hidden="true" />
             <span>{locale === 'id' ? 'Kembali ke Katalog' : 'Back to Catalog'}</span>
           </button>
 
           <div className="max-w-3xl space-y-3 sm:space-y-4">
-            <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-[#A5A6B2]">
-              <span className="text-[#A78BFA] font-semibold">{categoryLabel}</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-slate-300">
+              <span className="text-emerald-400 font-semibold">{categoryLabel}</span>
               <span aria-hidden="true">·</span>
               <span className="font-mono tabular-nums">
                 {formatDuration(item.durationMinutes, locale)}
@@ -203,17 +205,17 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
               <span aria-hidden="true">·</span>
               <span className="font-mono tabular-nums">{item.resolution}</span>
               <span aria-hidden="true">·</span>
-              <span className="inline-flex items-center gap-1 font-mono tabular-nums text-[#F5F5F7]">
-                <Star className="w-3.5 h-3.5 text-[#A78BFA] fill-current" aria-hidden="true" />
+              <span className="inline-flex items-center gap-1 font-mono tabular-nums text-white">
+                <Star className="w-3.5 h-3.5 text-emerald-400 fill-current" aria-hidden="true" />
                 {item.rating.toFixed(1)} ({item.reviewCount})
               </span>
             </div>
 
-            <h1 className="font-display text-2xl sm:text-5xl font-bold tracking-tight text-[#F5F5F7] leading-tight">
+            <h1 className="font-display text-2xl sm:text-5xl font-bold tracking-tight text-white leading-tight">
               {item.title}
             </h1>
 
-            <p className="text-sm sm:text-lg text-[#F5F5F7]/85 leading-relaxed">
+            <p className="text-sm sm:text-lg text-slate-200 leading-relaxed">
               {item.subtitle}
             </p>
 
@@ -225,7 +227,11 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                 leftIcon={<Play className="w-4 h-4 fill-current" />}
                 onClick={() => onWatchPreview(item)}
               >
-                {isUnlocked
+                {isFree
+                  ? locale === 'id'
+                    ? 'Tonton Gratis Sekarang'
+                    : 'Watch Free Now'
+                  : isUnlocked
                   ? resumeSeconds > 0
                     ? locale === 'id'
                       ? `Lanjutkan Tayangan (${formatResumeTime(resumeSeconds)})`
@@ -237,7 +243,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                   ? 'Tonton Pratinjau 5 Menit'
                   : 'Watch 5-Min Free Preview'}
               </Button>
-              {!isUnlocked && (
+              {!isFree && !isUnlocked && (
                 <Button
                   variant="secondary"
                   size="lg"
@@ -251,12 +257,20 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
               )}
             </div>
 
-            {!isUnlocked && (
-              <p className="text-xs text-[#A5A6B2] pt-0.5 tabular-nums">
+            {isFree ? (
+              <p className="text-xs text-emerald-300 pt-0.5">
                 {locale === 'id'
-                  ? `Akses 30 hari penuh · atau gunakan ${item.creditCost} Kredit VYORA`
-                  : `30-day streaming access · or unlock with ${item.creditCost} VYORA Credits`}
+                  ? 'Tayangan gratis dari kreator · Akses penuh tanpa batasan 5 menit & tanpa pembayaran'
+                  : 'Free creator release · Unlimited full playback with no 5-minute cap or checkout'}
               </p>
+            ) : (
+              !isUnlocked && (
+                <p className="text-xs text-slate-300 pt-0.5 tabular-nums">
+                  {locale === 'id'
+                    ? `Akses 30 hari penuh · atau gunakan ${item.creditCost} Kredit DELOKEN`
+                    : `30-day streaming access · or unlock with ${item.creditCost} DELOKEN Credits`}
+                </p>
+              )
             )}
           </div>
         </div>
@@ -267,18 +281,18 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
         {/* Left Column: Synopsis, Technical Specs, Credits, Reviews */}
         <div className="lg:col-span-8 space-y-7 sm:space-y-10">
           <section className="space-y-2.5 sm:space-y-3">
-            <h2 className="font-display text-lg sm:text-xl font-bold text-[#F5F5F7]">
+            <h2 className="font-display text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
               {locale === 'id' ? 'Sinopsis' : 'Synopsis'}
             </h2>
-            <p className="text-sm sm:text-base text-[#A5A6B2] leading-relaxed">{synopsis}</p>
+            <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">{synopsis}</p>
           </section>
 
           {/* Creator & Production Credits */}
-          <section className="bg-[#1B1C27] border border-white/8 rounded-2xl p-5 sm:p-6 space-y-5 sm:space-y-6">
+          <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 sm:space-y-6 shadow-xs">
             {creator && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-white/8">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-full overflow-hidden border border-white/15 shrink-0">
+                  <div className="w-12 h-12 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-100 dark:bg-slate-800">
                     <MediaImage
                       src={creator.avatarUrl}
                       alt={creator.name}
@@ -287,15 +301,15 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                     />
                   </div>
                   <div>
-                    <p className="text-xs text-[#A5A6B2]">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
                       {locale === 'id' ? 'Dipublikasikan oleh' : 'Published by'}
                     </p>
-                    <p className="text-base font-semibold text-[#F5F5F7]">{creator.name}</p>
-                    <p className="text-xs text-[#A5A6B2]">{creator.location}</p>
+                    <p className="text-base font-semibold text-slate-900 dark:text-white">{creator.name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{creator.location}</p>
                   </div>
                 </div>
                 <Button
-                  variant="secondary"
+                  variant="outline"
                   size="sm"
                   onClick={() => onExploreCreator(creator.id)}
                 >
@@ -306,30 +320,30 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
               <div>
-                <p className="text-xs text-[#A5A6B2]">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {locale === 'id' ? 'Sutradara' : 'Director'}
                 </p>
-                <p className="font-medium text-[#F5F5F7] mt-0.5">{item.credits.director}</p>
+                <p className="font-medium text-slate-900 dark:text-slate-100 mt-0.5">{item.credits.director}</p>
               </div>
               <div>
-                <p className="text-xs text-[#A5A6B2]">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {locale === 'id' ? 'Sinematografi' : 'Cinematography'}
                 </p>
-                <p className="font-medium text-[#F5F5F7] mt-0.5">
+                <p className="font-medium text-slate-900 dark:text-slate-100 mt-0.5">
                   {item.credits.cinematography}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-[#A5A6B2]">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {locale === 'id' ? 'Desain Suara' : 'Sound & Mastering'}
                 </p>
-                <p className="font-medium text-[#F5F5F7] mt-0.5">{item.credits.sound}</p>
+                <p className="font-medium text-slate-900 dark:text-slate-100 mt-0.5">{item.credits.sound}</p>
               </div>
               <div>
-                <p className="text-xs text-[#A5A6B2]">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {locale === 'id' ? 'Audio & Bahasa' : 'Audio & Languages'}
                 </p>
-                <p className="font-medium text-[#F5F5F7] mt-0.5">
+                <p className="font-medium text-slate-900 dark:text-slate-100 mt-0.5">
                   {item.audioFormat} · {item.languages.join(', ')}
                 </p>
               </div>
@@ -338,17 +352,17 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
 
           {/* Viewer Reviews */}
           <section className="space-y-4">
-            <h2 className="font-display text-xl font-bold text-[#F5F5F7]">
+            <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
               {locale === 'id' ? 'Ulasan Penonton' : 'Viewer Reviews'}
             </h2>
 
             {firebaseUser && (
               <form
                 onSubmit={handleSubmitReview}
-                className="bg-[#1B1C27] border border-white/8 rounded-xl p-5 space-y-3"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3 shadow-xs"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-[#F5F5F7]">
+                  <span className="text-xs font-semibold text-slate-900 dark:text-white">
                     {locale === 'id' ? 'Tulis Ulasan Anda' : 'Share Your Review'}
                   </span>
                   <div className="flex items-center gap-1">
@@ -359,7 +373,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                         onClick={() => setReviewRating(star)}
                         aria-label={`Rate ${star} stars`}
                         className={`min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
-                          star <= reviewRating ? 'text-[#A78BFA]' : 'text-[#A5A6B2]/40'
+                          star <= reviewRating ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-300 dark:text-slate-600'
                         }`}
                       >
                         <Star className="w-4 h-4 fill-current" aria-hidden="true" />
@@ -368,12 +382,12 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                   </div>
                 </div>
                 {reviewErr && (
-                  <p role="alert" className="text-xs text-rose-300">
+                  <p role="alert" className="text-xs text-rose-700 dark:text-rose-400">
                     {reviewErr}
                   </p>
                 )}
                 {reviewMsg && (
-                  <p role="status" className="text-xs text-[#A78BFA]">
+                  <p role="status" className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
                     {reviewMsg}
                   </p>
                 )}
@@ -387,10 +401,10 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                       ? 'Bagikan kesan Anda tentang kualitas sinematografi, audio, atau materi...'
                       : 'Share your thoughts on cinematography, sound design, or pacing...'
                   }
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#11121A] border border-white/12 text-sm text-[#F5F5F7] placeholder:text-[#A5A6B2]/60 focus:outline-none focus:ring-2 focus:ring-[#7957ED]"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-600"
                 />
                 <div className="flex justify-end">
-                  <Button type="submit" variant="secondary" size="sm" isLoading={submittingReview}>
+                  <Button type="submit" variant="primary" size="sm" isLoading={submittingReview}>
                     {locale === 'id' ? 'Kirim Ulasan' : 'Post Review'}
                   </Button>
                 </div>
@@ -398,7 +412,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
             )}
 
             {combinedReviews.length === 0 ? (
-              <p className="text-sm text-[#A5A6B2] bg-[#1B1C27] border border-white/8 rounded-xl p-5">
+              <p className="text-sm text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
                 {locale === 'id'
                   ? 'Belum ada ulasan untuk tayangan ini. Jadilah penonton pertama yang membagikan ulasan.'
                   : 'No viewer reviews yet. Be the first viewer to leave a review for this release.'}
@@ -408,14 +422,14 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                 {combinedReviews.map((rev) => (
                   <article
                     key={rev.id}
-                    className="bg-[#1B1C27] border border-white/8 rounded-xl p-5 space-y-2"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-2 shadow-xs"
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#A5A6B2]">
-                      <span className="font-semibold text-[#F5F5F7] inline-flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="font-semibold text-slate-900 dark:text-white inline-flex flex-wrap items-center gap-2">
                         <span>
                           {rev.authorName} · {rev.authorLocation}
                         </span>
-                        <span className="inline-flex items-center gap-0.5 text-[#A78BFA] font-mono">
+                        <span className="inline-flex items-center gap-0.5 text-emerald-700 dark:text-emerald-400 font-mono">
                           <Star className="w-3 h-3 fill-current" aria-hidden="true" />
                           {rev.rating}
                         </span>
@@ -424,7 +438,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                         {formatLocalizedDate(rev.createdAt, locale)}
                       </span>
                     </div>
-                    <p className="text-sm text-[#A5A6B2] leading-relaxed">{rev.comment}</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{rev.comment}</p>
                   </article>
                 ))}
               </div>
@@ -434,33 +448,96 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
 
         {/* Right Column: Pay-Per-View & Credit Wallet Access Card */}
         <aside className="lg:col-span-4">
-          <div className="lg:sticky lg:top-24 bg-[#1B1C27] border border-white/10 rounded-2xl p-5 sm:p-6 space-y-5">
-            {checkingAccess && !streamAuth ? (
+          <div className="lg:sticky lg:top-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xs">
+            {checkingAccess && !streamAuth && !isFree ? (
               <div aria-busy="true" className="space-y-4 animate-pulse">
-                <div className="h-3 w-32 bg-[#242636] rounded" />
-                <div className="h-9 w-28 bg-[#242636] rounded" />
-                <div className="space-y-2.5 pt-2 border-t border-white/8">
-                  <div className="h-3 w-full bg-[#242636] rounded" />
-                  <div className="h-3 w-5/6 bg-[#242636] rounded" />
-                  <div className="h-3 w-4/5 bg-[#242636] rounded" />
+                <div className="h-3 w-32 bg-slate-200 dark:bg-slate-800 rounded" />
+                <div className="h-9 w-28 bg-slate-200 dark:bg-slate-800 rounded" />
+                <div className="space-y-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <div className="h-3 w-full bg-slate-200 dark:bg-slate-800 rounded" />
+                  <div className="h-3 w-5/6 bg-slate-200 dark:bg-slate-800 rounded" />
+                  <div className="h-3 w-4/5 bg-slate-200 dark:bg-slate-800 rounded" />
                 </div>
-                <div className="h-11 w-full bg-[#242636] rounded-xl" />
+                <div className="h-11 w-full bg-slate-200 dark:bg-slate-800 rounded-xl" />
               </div>
+            ) : isFree ? (
+              <>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                    <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                    <span>{locale === 'id' ? 'Akses Gratis Penuh' : 'Free Open Access'}</span>
+                  </div>
+                  <div className="text-3xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
+                    {locale === 'id' ? 'Gratis' : 'Free'}
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    {locale === 'id'
+                      ? 'Dirilis gratis oleh kreator · Tanpa batasan 5 menit'
+                      : 'Released free by the creator · No 5-minute preview cap'}
+                  </p>
+                </div>
+
+                <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+                  <div className="flex items-center gap-2.5">
+                    <Clock className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
+                    <span>
+                      {locale === 'id'
+                        ? 'Streaming penuh tanpa perlu checkout atau kredit'
+                        : 'Full unlimited playback with zero checkout required'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <Film className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
+                    <span>
+                      {item.resolution} · {item.audioFormat}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
+                    <span>
+                      {locale === 'id'
+                        ? 'Pemutar terproteksi dari klik keluar sumber'
+                        : 'Protected player blocks accidental external redirects'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 pt-2">
+                  <Button
+                    variant="primary"
+                    size="md"
+                    className="w-full"
+                    leftIcon={<Play className="w-4 h-4 fill-current" />}
+                    onClick={() => onWatchPreview(item)}
+                  >
+                    {locale === 'id' ? 'Putar Tayangan Gratis' : 'Watch Free Release'}
+                  </Button>
+                  {onReportContent && (
+                    <button
+                      type="button"
+                      onClick={() => onReportContent(item)}
+                      className="w-full pt-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+                    >
+                      {locale === 'id' ? 'Laporkan Tayangan Ini' : 'Report this release'}
+                    </button>
+                  )}
+                </div>
+              </>
             ) : isUnlocked && streamAuth?.entitlement ? (
               <>
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-[#A78BFA]">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                     <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
                     <span>
                       {locale === 'id' ? 'Akses 30 Hari Aktif' : '30-Day Access Active'}
                     </span>
                   </div>
-                  <div className="text-2xl font-bold font-mono tabular-nums text-[#F5F5F7]">
+                  <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                     {locale === 'id'
                       ? `Tersisa ${remainingDays} Hari`
                       : `${remainingDays} Days Remaining`}
                   </div>
-                  <p className="text-xs text-[#A5A6B2] font-mono tabular-nums">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
                     {locale === 'id' ? 'Berakhir pada ' : 'Expires '}
                     {formatLocalizedDate(streamAuth.entitlement.expiresAt, locale)}
                     {resumeSeconds > 0
@@ -471,7 +548,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                   </p>
                 </div>
 
-                <div className="space-y-2.5 pt-2 border-t border-white/8">
+                <div className="space-y-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
                   <Button
                     variant="primary"
                     size="md"
@@ -491,7 +568,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                     <button
                       type="button"
                       onClick={() => onReportContent(item)}
-                      className="w-full pt-2 text-xs text-[#A5A6B2] hover:text-[#F5F5F7] transition-colors cursor-pointer"
+                      className="w-full pt-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
                     >
                       {locale === 'id' ? 'Laporkan Tayangan Ini' : 'Report this release'}
                     </button>
@@ -501,25 +578,25 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
             ) : (
               <>
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-[#A78BFA]">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                     <Lock className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>
                       {locale === 'id' ? 'Akses Pay-Per-View' : 'Pay-Per-View Access'}
                     </span>
                   </div>
-                  <div className="text-3xl font-bold font-mono tabular-nums text-[#F5F5F7]">
+                  <div className="text-3xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                     {formatPrice(item.priceUsd, item.priceIdr, currency)}
                   </div>
-                  <p className="text-xs text-[#A5A6B2]">
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
                     {locale === 'id'
-                      ? `Atau buka dengan ${item.creditCost} Kredit VYORA`
-                      : `Or unlock with ${item.creditCost} VYORA Credits`}
+                      ? `Atau buka dengan ${item.creditCost} Kredit DELOKEN`
+                      : `Or unlock with ${item.creditCost} DELOKEN Credits`}
                   </p>
                 </div>
 
-                <div className="space-y-3 pt-2 border-t border-white/8 text-xs text-[#A5A6B2]">
+                <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
                   <div className="flex items-center gap-2.5">
-                    <Clock className="w-4 h-4 text-[#A78BFA] shrink-0" aria-hidden="true" />
+                    <Clock className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
                     <span>
                       {locale === 'id'
                         ? 'Pratinjau gratis 5 menit langsung tersedia'
@@ -527,7 +604,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                     </span>
                   </div>
                   <div className="flex items-center gap-2.5">
-                    <Calendar className="w-4 h-4 text-[#A78BFA] shrink-0" aria-hidden="true" />
+                    <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
                     <span>
                       {locale === 'id'
                         ? 'Akses streaming penuh selama 30 hari'
@@ -535,13 +612,13 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                     </span>
                   </div>
                   <div className="flex items-center gap-2.5">
-                    <Film className="w-4 h-4 text-[#A78BFA] shrink-0" aria-hidden="true" />
+                    <Film className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
                     <span>
                       {item.resolution} · {item.audioFormat}
                     </span>
                   </div>
                   <div className="flex items-center gap-2.5">
-                    <ShieldCheck className="w-4 h-4 text-[#A78BFA] shrink-0" aria-hidden="true" />
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
                     <span>
                       {locale === 'id'
                         ? 'Mendukung PayPal & QRIS Indonesia'
@@ -560,7 +637,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                     {locale === 'id' ? 'Buka dengan PayPal / QRIS' : 'Unlock via PayPal / QRIS'}
                   </Button>
                   <Button
-                    variant="secondary"
+                    variant="outline"
                     size="md"
                     className="w-full"
                     leftIcon={<Wallet className="w-4 h-4" />}
@@ -574,7 +651,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                     <button
                       type="button"
                       onClick={() => onReportContent(item)}
-                      className="w-full pt-2 text-xs text-[#A5A6B2] hover:text-[#F5F5F7] transition-colors cursor-pointer"
+                      className="w-full pt-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
                     >
                       {locale === 'id' ? 'Laporkan Tayangan Ini' : 'Report this release'}
                     </button>
@@ -589,10 +666,10 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
       {/* Related Releases */}
       {relatedItems.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 sm:pt-16 space-y-4 sm:space-y-6">
-          <h2 className="font-display text-xl sm:text-2xl font-bold text-[#F5F5F7]">
+          <h2 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Tayangan Terkait' : 'More to Experience'}
           </h2>
-          <div className="vyora-scroll flex sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 overflow-x-auto sm:overflow-visible pb-2 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-pl-4 sm:scroll-pl-0">
+          <div className="deloken-scroll flex sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 overflow-x-auto sm:overflow-visible pb-2 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-pl-4 sm:scroll-pl-0">
             {relatedItems.map((rel) => (
               <div
                 key={rel.id}

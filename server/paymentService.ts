@@ -61,7 +61,7 @@ interface IdempotencyEntry {
 export interface CreatorMediaBinding {
   videoId: string;
   creatorId: string;
-  provider: 'cloudflare_stream' | 'private_storage';
+  provider: 'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook';
   assetRef: string;
   mimeType?: string;
   updatedAtIso: string;
@@ -93,88 +93,7 @@ const SERVER_DATA_DIR = path.resolve(process.cwd(), '.vyora_server_data');
 const LEDGER_FILE = path.resolve(SERVER_DATA_DIR, 'ledger.json');
 const LEGACY_ENTITLEMENTS_FILE = path.resolve(SERVER_DATA_DIR, 'entitlements.json');
 
-export const SERVER_CATALOG: Record<string, ServerCatalogEntry> = {
-  'obsidian-horizon': {
-    id: 'obsidian-horizon',
-    title: 'Obsidian Horizon',
-    category: 'Movies',
-    creatorId: 'creator-kenji',
-    thumbnailUrl: '/src/assets/images/hero_featured_film_1794930897673.jpg',
-    priceUsd: 4.99,
-    priceIdr: 79000,
-    creditCost: 5,
-  },
-  'ring-of-fire-caldera': {
-    id: 'ring-of-fire-caldera',
-    title: 'Above the Caldera: Nusantara',
-    category: 'Documentary',
-    creatorId: 'creator-aria',
-    thumbnailUrl: '/src/assets/images/thumb_archipelago_doc_1794930897547.jpg',
-    priceUsd: 3.99,
-    priceIdr: 59000,
-    creditCost: 4,
-  },
-  'tokyo-rain-nocturne': {
-    id: 'tokyo-rain-nocturne',
-    title: 'Midnight Rain in Yanaka',
-    category: 'Movies',
-    creatorId: 'creator-kenji',
-    thumbnailUrl: '/src/assets/images/thumb_tokyo_nocturne_1794930898628.jpg',
-    priceUsd: 4.49,
-    priceIdr: 69000,
-    creditCost: 4,
-  },
-  'brutalist-chamber-live': {
-    id: 'brutalist-chamber-live',
-    title: 'Concrete & Strings: Live in Berlin',
-    category: 'Events',
-    creatorId: 'creator-elena',
-    thumbnailUrl: '/src/assets/images/thumb_acoustic_session_1794930899091.jpg',
-    priceUsd: 5.99,
-    priceIdr: 89000,
-    creditCost: 6,
-  },
-  'precision-optics-lab': {
-    id: 'precision-optics-lab',
-    title: 'Tactile Hardware & Optical Craft',
-    category: 'Education',
-    creatorId: 'creator-dimas',
-    thumbnailUrl: '/src/assets/images/thumb_design_masterclass_1794930898532.jpg',
-    priceUsd: 6.99,
-    priceIdr: 109000,
-    creditCost: 7,
-  },
-  'banda-trench-abyss': {
-    id: 'banda-trench-abyss',
-    title: 'Descent to the Banda Trench',
-    category: 'Creator Exclusives',
-    creatorId: 'creator-aria',
-    thumbnailUrl: '/src/assets/images/thumb_deep_ocean_1794930899350.jpg',
-    priceUsd: 4.99,
-    priceIdr: 75000,
-    creditCost: 5,
-  },
-  'sound-of-architecture': {
-    id: 'sound-of-architecture',
-    title: 'The Architecture of Silence',
-    category: 'Creator Exclusives',
-    creatorId: 'creator-dimas',
-    thumbnailUrl: '/src/assets/images/hero_featured_film_1794930897673.jpg',
-    priceUsd: 2.99,
-    priceIdr: 45000,
-    creditCost: 3,
-  },
-  'nocturne-mastering-session': {
-    id: 'nocturne-mastering-session',
-    title: 'Scoring for Cinema: Analog & Spatial',
-    category: 'Education',
-    creatorId: 'creator-elena',
-    thumbnailUrl: '/src/assets/images/thumb_acoustic_session_1794930899091.jpg',
-    priceUsd: 5.49,
-    priceIdr: 85000,
-    creditCost: 5,
-  },
-};
+export const SERVER_CATALOG: Record<string, ServerCatalogEntry> = {};
 
 export const SERVER_CREDIT_PACKAGES: Record<string, ServerCreditPackage> = {
   'pack-starter': {
@@ -376,12 +295,24 @@ export async function resolveServerVideoEntry(
     const f = doc.fields;
     if (!f || f.status?.stringValue !== 'published') return null;
 
-    const priceUsd =
-      typeof f.priceUsd?.doubleValue === 'number'
-        ? f.priceUsd.doubleValue
-        : Number(f.priceUsd?.integerValue ?? 4.99);
-    const priceIdr = Number(f.priceIdr?.integerValue ?? 75000);
-    const creditCost = Number(f.creditCost?.integerValue ?? 5);
+    const parseFirestoreNumber = (
+      field: { integerValue?: string; doubleValue?: number } | undefined,
+      fallback: number
+    ): number => {
+      if (!field) return fallback;
+      if (typeof field.doubleValue === 'number' && Number.isFinite(field.doubleValue)) {
+        return field.doubleValue;
+      }
+      if (field.integerValue !== undefined) {
+        const parsed = Number(field.integerValue);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return fallback;
+    };
+
+    const priceUsd = parseFirestoreNumber(f.priceUsd, 4.99);
+    const priceIdr = Math.round(parseFirestoreNumber(f.priceIdr, 75000));
+    const creditCost = Math.round(parseFirestoreNumber(f.creditCost, 5));
 
     return {
       id: videoId,
@@ -389,9 +320,9 @@ export async function resolveServerVideoEntry(
       category: f.category?.stringValue || 'Movies',
       creatorId: f.creatorId?.stringValue || 'creator-unknown',
       thumbnailUrl: f.thumbnailUrl?.stringValue || '',
-      priceUsd: Number.isFinite(priceUsd) ? priceUsd : 4.99,
-      priceIdr: Number.isFinite(priceIdr) ? priceIdr : 75000,
-      creditCost: Number.isFinite(creditCost) ? creditCost : 5,
+      priceUsd,
+      priceIdr,
+      creditCost,
     };
   } catch {
     return null;
@@ -442,7 +373,7 @@ export function buildQrisPayloadString(orderId: string, amountIdr: number): stri
     `000201010212` +
     `26590014ID.CO.QRIS.WWW01189360091430000000010215ID10200000000010303UME` +
     `520458155303360${amtTag}5802ID` +
-    `5915VYORA STREAMING6007JAKARTA610512190${addlData}6304`;
+    `5914DELOKEN STREAM6007JAKARTA610512190${addlData}6304`;
   return `${bodyWithoutCrc}${crc16Ccitt(bodyWithoutCrc)}`;
 }
 
@@ -510,7 +441,7 @@ export async function createLivePayPalOrder(input: {
         },
       ],
       application_context: {
-        brand_name: 'VYORA Streaming',
+        brand_name: 'DELOKEN Streaming',
         user_action: 'PAY_NOW',
         return_url: input.returnUrl,
         cancel_url: input.cancelUrl,

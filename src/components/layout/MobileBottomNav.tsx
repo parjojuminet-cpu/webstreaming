@@ -78,7 +78,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   return (
     <nav
       aria-label={locale === 'id' ? 'Navigasi cepat mobile' : 'Mobile quick navigation'}
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#11121A]/95 backdrop-blur-md border-t border-white/10 pb-safe"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 pb-safe"
     >
       <div className="grid grid-cols-5 h-14 items-center px-1">
         {tabs.map((tab) => (
@@ -87,15 +87,15 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             type="button"
             onClick={() => onNavigate(tab.route)}
             aria-current={tab.isActive ? 'page' : undefined}
-            className={`relative min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-1 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A78BFA] rounded-lg ${
+            className={`relative min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-1 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 rounded-lg ${
               tab.isActive
-                ? 'text-[#A78BFA]'
-                : 'text-[#A5A6B2] active:text-[#F5F5F7]'
+                ? 'text-emerald-700 dark:text-emerald-400'
+                : 'text-slate-500 dark:text-slate-400 active:text-slate-900 dark:active:text-white'
             }`}
           >
             {tab.isActive && (
               <span
-                className="absolute top-0 inset-x-4 h-[2px] bg-[#7957ED] rounded-full"
+                className="absolute top-0 inset-x-4 h-[2px] bg-emerald-600 dark:bg-emerald-500 rounded-full"
                 aria-hidden="true"
               />
             )}
