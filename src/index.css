@@ -1,31 +1,33 @@
 @import "tailwindcss";
 
 @theme {
-  --color-vyora-bg: #11121A;
-  --color-vyora-surface: #1B1C27;
-  --color-vyora-surface-elevated: #222433;
-  --color-vyora-purple: #7957ED;
-  --color-vyora-purple-hover: #6743DF;
-  --color-vyora-accent: #A78BFA;
-  --color-vyora-text: #F5F5F7;
-  --color-vyora-muted: #A5A6B2;
-  --font-display: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
-  --font-sans: "DM Sans", "Inter", system-ui, sans-serif;
+  --color-deloken-bg: #F8FAFC;
+  --color-deloken-surface: #FFFFFF;
+  --color-deloken-emerald: #059669;
+  --color-deloken-emerald-hover: #047857;
+  --color-deloken-slate: #1E293B;
+  --color-deloken-text: #0F172A;
+  --color-deloken-muted: #64748B;
+  --color-deloken-border: #E2E8F0;
+  --font-display: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
 @layer base {
   html {
-    background-color: #11121A;
-    color: #F5F5F7;
+    background-color: #F8FAFC;
+    color: #0F172A;
     font-family: var(--font-sans);
     scroll-behavior: smooth;
-    color-scheme: dark;
+    color-scheme: light;
     overflow-x: clip;
     -webkit-tap-highlight-color: transparent;
   }
 
   body {
+    background-color: #F8FAFC;
+    color: #0F172A;
     overflow-x: clip;
   }
 
@@ -33,7 +35,6 @@
     font-family: var(--font-display);
   }
 
-  /* Optical compensation & orphan prevention for headlines on dark canvas */
   h1, h2 {
     text-wrap: balance;
   }
@@ -52,27 +53,6 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* Custom subtle horizontal scrollbars for streaming shelves */
-.vyora-scroll::-webkit-scrollbar {
-  height: 6px;
-}
-.vyora-scroll::-webkit-scrollbar-track {
-  background: #11121A;
-}
-.vyora-scroll::-webkit-scrollbar-thumb {
-  background: #2B2D3E;
-  border-radius: 9999px;
-}
-.vyora-scroll::-webkit-scrollbar-thumb:hover {
-  background: #7957ED;
-}
-
-@media (max-width: 767px) {
-  .vyora-scroll::-webkit-scrollbar {
-    display: none;
-  }
-  .vyora-scroll {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }

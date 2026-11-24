@@ -1269,7 +1269,7 @@ async function startServer(): Promise<void> {
         const ppOrder = await createLivePayPalOrder({
           orderId: paymentId,
           amountUsd,
-          description: `VYORA: ${targetTitle}`,
+          description: `DELOKEN: ${targetTitle}`,
           returnUrl: `${origin}/?paypalReturn=1&paymentId=${paymentId}`,
           cancelUrl: `${origin}/?paypalCancel=1&paymentId=${paymentId}`,
         });
@@ -1517,7 +1517,7 @@ async function startServer(): Promise<void> {
     const nowIso = new Date(now).toISOString();
 
     let qrString = '';
-    let gatewayOrderId = `VYORA-QRIS-${paymentId}`;
+    let gatewayOrderId = `DELOKEN-QRIS-${paymentId}`;
     let gatewayMode: 'live' | 'sandbox_preview' = 'sandbox_preview';
 
     if (useLiveMidtrans) {
@@ -1967,7 +1967,7 @@ async function startServer(): Promise<void> {
         creatorName:
           typeof creatorName === 'string' && creatorName.trim().length >= 2
             ? creatorName.trim().slice(0, 80)
-            : req.user!.email || 'VYORA Creator',
+            : req.user!.email || 'DELOKEN Creator',
         currency,
         amount,
         method: validMethod,
@@ -2104,7 +2104,7 @@ async function startServer(): Promise<void> {
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`VYORA server listening on http://0.0.0.0:${PORT}`);
+    console.log(`DELOKEN server listening on http://0.0.0.0:${PORT}`);
   });
 }
 

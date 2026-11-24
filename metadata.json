@@ -1,6 +1,6 @@
 {
-  "name": "VYORA",
-  "description": "Watch More. Experience More. International Pay-Per-View video streaming platform and creator marketplace.",
+  "name": "DELOKEN",
+  "description": "DELOKEN — Hybrid Learning, DIY & Documentary Streaming Platform with 3-role workflow, bilingual IDR/USD catalog, and hybrid video distribution.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
