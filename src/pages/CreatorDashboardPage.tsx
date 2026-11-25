@@ -4,8 +4,10 @@ import {
   BarChart3,
   CheckCircle2,
   Film,
+  HardDriveUpload,
   Image as ImageIcon,
   Link2,
+  Lock,
   Send,
   Upload,
   UserCheck,
@@ -34,13 +36,12 @@ import {
   uploadVideoToCloudflareStream,
   type StreamCapabilities,
 } from '../services/streamService';
-import {
-  extractYouTubeVideoId,
-  getYouTubeThumbnailUrl,
-} from '../utils/youtube';
-import { extractFacebookVideoUrl } from '../utils/facebook';
 import { autoCaptureCoverFromVideoFile } from '../utils/videoThumbnail';
 import { CoverPicker } from '../components/creator/CoverPicker';
+import {
+  UniversalVideoImportPanel,
+  type VerifiedImportedVideoPayload,
+} from '../components/creator/UniversalVideoImportPanel';
 import {
   CATEGORY_LIST,
   formatDuration,
@@ -54,6 +55,7 @@ import type {
   ContentItem,
   CurrencyCode,
   LocaleCode,
+  VideoAssetProvider,
   ViewRoute,
 } from '../types/vyora';
 import { Button } from '../components/ui/Button';
@@ -124,6 +126,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   const [videos, setVideos] = useState<ContentItem[]>([]);
   const [uploadHighlight, setUploadHighlight] = useState(false);
   const uploadSectionRef = useRef<HTMLElement | null>(null);
+  const metadataSectionRef = useRef<HTMLDivElement | null>(null);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Creator Onboarding / Profile state
@@ -146,7 +149,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   const [creatorMsg, setCreatorMsg] = useState<string | null>(null);
   const [creatorErr, setCreatorErr] = useState<string | null>(null);
 
-  // Upload Content state
+  // Upload Content state (2-mode source selector: device vs link)
   const [vTitle, setVTitle] = useState('');
   const [vSubtitle, setVSubtitle] = useState('');
   const [vCategory, setVCategory] = useState<ContentCategory>('Movies');
@@ -156,6 +159,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   const [vVideoPreviewUrl, setVVideoPreviewUrl] = useState<string | null>(null);
   const [autoCapturingCover, setAutoCapturingCover] = useState(false);
   const [vDuration, setVDuration] = useState(65);
+  const [vReleaseYear, setVReleaseYear] = useState(new Date().getFullYear());
+  const [vLanguages, setVLanguages] = useState('Indonesian, English');
   const [vResolution, setVResolution] = useState<'4K HDR' | '4K UHD' | '1080p HD'>(
     '4K HDR'
   );
@@ -164,15 +169,11 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   const [vPriceUsd, setVPriceUsd] = useState(4.99);
   const [vPriceIdr, setVPriceIdr] = useState(75000);
   const [vCreditCost, setVCreditCost] = useState(5);
-  const [vSourceMode, setVSourceMode] = useState<
-    'file' | 'youtube' | 'facebook' | 'preset' | 'manual'
-  >('file');
-  const [vProvider, setVProvider] = useState<
-    'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook'
-  >('private_storage');
+  const [vSourceMode, setVSourceMode] = useState<'device' | 'link'>('device');
+  const [vProvider, setVProvider] = useState<VideoAssetProvider>('private_storage');
   const [vAssetRef, setVAssetRef] = useState('');
-  const [vYoutubeUrl, setVYoutubeUrl] = useState('');
-  const [vFacebookUrl, setVFacebookUrl] = useState('');
+  const [verifiedImportPayload, setVerifiedImportPayload] =
+    useState<VerifiedImportedVideoPayload | null>(null);
   const [vUploadedFileName, setVUploadedFileName] = useState<string | null>(null);
   const [vUploadedMimeType, setVUploadedMimeType] = useState<string | undefined>(undefined);
   const [uploadingVideoFile, setUploadingVideoFile] = useState(false);
@@ -413,6 +414,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
     }
 
     setUploadingVideoFile(true);
+    setVerifiedImportPayload(null);
 
     if (vVideoPreviewUrl) {
       URL.revokeObjectURL(vVideoPreviewUrl);
@@ -484,6 +486,24 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
     setVideoMsg(null);
     setVideoErr(null);
 
+    if (vSourceMode === 'link') {
+      if (!verifiedImportPayload) {
+        setVideoErr(
+          locale === 'id'
+            ? 'Tautan video wajib diperiksa, diputar di Preview hingga status VIDEO BERHASIL DIPUTAR, dan klik LANJUTKAN terlebih dahulu.'
+            : 'External video URLs must pass link check, verified live PLAY playback, and Continue before saving.'
+        );
+        return;
+      }
+    } else if (!vUploadedFileName || vAssetRef.trim().length < 3) {
+      setVideoErr(
+        locale === 'id'
+          ? 'Unggah file video dari perangkat Anda terlebih dahulu hingga selesai.'
+          : 'Please upload a video file from your device before continuing.'
+      );
+      return;
+    }
+
     if (vTitle.trim().length < 2) {
       setVideoErr(
         locale === 'id'
@@ -509,60 +529,33 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
       return;
     }
 
-    const parsedYoutubeId =
-      vSourceMode === 'youtube' ? extractYouTubeVideoId(vYoutubeUrl) : null;
-    const parsedFacebookUrl =
-      vSourceMode === 'facebook' ? extractFacebookVideoUrl(vFacebookUrl) : null;
-
-    if (vSourceMode === 'youtube' && !parsedYoutubeId) {
-      setVideoErr(
-        locale === 'id'
-          ? 'Link atau ID video YouTube tidak valid. Tempel link seperti https://www.youtube.com/watch?v=... atau https://youtu.be/...'
-          : 'Invalid YouTube link or video ID. Paste a link like https://www.youtube.com/watch?v=... or https://youtu.be/...'
-      );
-      return;
-    }
-
-    if (vSourceMode === 'facebook' && !parsedFacebookUrl) {
-      setVideoErr(
-        locale === 'id'
-          ? 'Link video Facebook tidak valid. Gunakan link publik seperti facebook.com/.../videos/..., facebook.com/watch?v=..., facebook.com/reel/..., atau fb.watch/...'
-          : 'Invalid Facebook video URL. Paste a public link like facebook.com/.../videos/..., facebook.com/watch?v=..., facebook.com/reel/..., or fb.watch/...'
-      );
-      return;
-    }
-
-    const effectiveProvider:
-      | 'cloudflare_stream'
-      | 'private_storage'
-      | 'youtube'
-      | 'facebook' =
-      vSourceMode === 'preset'
-        ? 'private_storage'
-        : vSourceMode === 'youtube'
-        ? 'youtube'
-        : vSourceMode === 'facebook'
-        ? 'facebook'
+    const effectiveProvider: VideoAssetProvider =
+      vSourceMode === 'link' && verifiedImportPayload
+        ? verifiedImportPayload.provider
         : vProvider;
     const effectiveAssetRef =
-      vSourceMode === 'preset' && vAssetRef.trim().length < 3
-        ? vCategory === 'Documentary' || vCategory === 'Education'
-          ? 'stream-doc'
-          : 'stream-cinema'
-        : vSourceMode === 'youtube' && parsedYoutubeId
-        ? parsedYoutubeId
-        : vSourceMode === 'facebook' && parsedFacebookUrl
-        ? parsedFacebookUrl
+      vSourceMode === 'link' && verifiedImportPayload
+        ? verifiedImportPayload.assetRef
         : vAssetRef.trim();
 
     if (effectiveAssetRef.length < 3) {
       setVideoErr(
         locale === 'id'
-          ? 'Silakan unggah file video, masukkan link YouTube/Facebook, atau pilih tab "Stream Studio".'
-          : 'Please upload a video file, paste a YouTube/Facebook link, or select "Studio Stream".'
+          ? 'Sumber video belum siap atau tidak valid.'
+          : 'Video source is missing or invalid.'
       );
       return;
     }
+
+    const parsedLanguages = vLanguages
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    const safeYear = Math.min(
+      2100,
+      Math.max(1950, Number.isFinite(Number(vReleaseYear)) ? Number(vReleaseYear) : new Date().getFullYear())
+    );
 
     setSubmittingVideo(true);
     try {
@@ -579,10 +572,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
         priceUsd: isFreeUpload ? 0 : Number(vPriceUsd),
         priceIdr: isFreeUpload ? 0 : Number(vPriceIdr),
         creditCost: isFreeUpload ? 0 : Number(vCreditCost),
-        releaseYear: new Date().getFullYear(),
+        releaseYear: safeYear,
         resolution: vResolution,
         audioFormat: vAudio,
-        languages: ['Indonesian', 'English'],
+        languages: parsedLanguages.length > 0 ? parsedLanguages : ['Indonesian', 'English'],
         assetProvider: effectiveProvider,
         assetRef: effectiveAssetRef,
         initialStatus,
@@ -593,10 +586,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
         provider: effectiveProvider,
         assetRef: effectiveAssetRef,
         mimeType:
-          effectiveProvider === 'youtube'
-            ? 'video/youtube'
-            : effectiveProvider === 'facebook'
-            ? 'video/facebook'
+          vSourceMode === 'link' && verifiedImportPayload?.mimeType
+            ? verifiedImportPayload.mimeType
             : vUploadedMimeType,
       });
 
@@ -605,10 +596,11 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
       setVDescription('');
       setVPricingMode('paid');
       setVAssetRef('');
-      setVYoutubeUrl('');
-      setVFacebookUrl('');
+      setVerifiedImportPayload(null);
       setVUploadedFileName(null);
       setVUploadedMimeType(undefined);
+      setVReleaseYear(new Date().getFullYear());
+      setVLanguages('Indonesian, English');
       setVThumbnail(THUMBNAIL_PRESETS[0].url);
       setVHasExplicitCover(false);
       if (vVideoPreviewUrl) {
@@ -618,8 +610,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
       setVideoMsg(
         initialStatus === 'pending_review'
           ? locale === 'id'
-            ? 'Konten berhasil diunggah dan diajukan ke antrean moderasi Admin.'
-            : 'Release uploaded and submitted to Admin moderation queue.'
+            ? 'Konten berhasil disimpan dan diajukan ke antrean moderasi Admin.'
+            : 'Release saved and submitted to Admin moderation queue.'
           : locale === 'id'
           ? 'Draf konten tersimpan di database Firestore.'
           : 'Draft saved to Firestore database.'
@@ -1003,8 +995,20 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                     </div>
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
-                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold uppercase tracking-wide">
-                          {vid.status.replace('_', ' ')}
+                        <span
+                          className={`font-semibold uppercase tracking-wide ${
+                            vid.status === 'deletion_pending'
+                              ? 'text-rose-700 dark:text-rose-400'
+                              : vid.status === 'archived'
+                              ? 'text-amber-700 dark:text-amber-400'
+                              : 'text-emerald-700 dark:text-emerald-400'
+                          }`}
+                        >
+                          {vid.status === 'deletion_pending'
+                            ? locale === 'id'
+                              ? 'PENGHAPUSAN DIPROSES'
+                              : 'DELETION PENDING'
+                            : vid.status.replace('_', ' ')}
                         </span>
                         <span aria-hidden="true">·</span>
                         <span>{vid.category}</span>
@@ -1037,7 +1041,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-200 dark:border-slate-800 md:border-t-0 md:pt-0 shrink-0">
-                    {vid.status !== 'archived' && (
+                    {vid.status !== 'archived' && vid.status !== 'deletion_pending' && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -1095,674 +1099,598 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
       )}
 
       {/* SUBMIT NEW CONTENT */}
-      {activeTab === 'upload' && (
-        <section
-          ref={uploadSectionRef}
-          className={`max-w-3xl bg-white dark:bg-slate-900 border rounded-2xl p-5 sm:p-8 space-y-6 scroll-mt-20 shadow-xs transition-all duration-300 ${
-            uploadHighlight
-              ? 'border-emerald-600 ring-2 ring-emerald-600/30'
-              : 'border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          <div>
-            <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
-              {locale === 'id'
-                ? 'Unggah Video & Ajukan Tayangan Baru'
-                : 'Upload Video & Submit New Release'}
-            </h2>
-            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
-              {locale === 'id'
-                ? 'Unggah file video (.MP4 / .WebM / .MOV), tempel link YouTube atau Facebook, atau pilih Stream Studio.'
-                : 'Upload a video file (.MP4 / .WebM / .MOV), paste a YouTube or Facebook link, or select a Studio Stream.'}
-            </p>
-          </div>
+      {activeTab === 'upload' && (() => {
+        const isDeviceReady =
+          vSourceMode === 'device' &&
+          Boolean(vUploadedFileName && vAssetRef.trim().length >= 3) &&
+          !uploadingVideoFile;
+        const isLinkReady =
+          vSourceMode === 'link' &&
+          Boolean(verifiedImportPayload && vAssetRef.trim().length >= 3);
+        const isStep2Unlocked = isDeviceReady || isLinkReady;
 
-          {videoErr && (
-            <div
-              role="alert"
-              className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300"
-            >
-              {videoErr}
+        return (
+          <section
+            ref={uploadSectionRef}
+            className={`max-w-3xl bg-white dark:bg-slate-900 border rounded-2xl p-5 sm:p-8 space-y-6 scroll-mt-20 shadow-xs transition-all duration-300 ${
+              uploadHighlight
+                ? 'border-emerald-600 ring-2 ring-emerald-600/30'
+                : 'border-slate-200 dark:border-slate-800'
+            }`}
+          >
+            <div>
+              <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
+                {locale === 'id'
+                  ? 'Unggah atau Impor Video Baru'
+                  : 'Upload or Import New Video'}
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+                {locale === 'id'
+                  ? 'Pilih unggah file video langsung dari perangkat atau gunakan satu tautan video universal dengan verifikasi pemutaran nyata.'
+                  : 'Choose direct video upload from your device or paste a single universal video link with verified live playback.'}
+              </p>
             </div>
-          )}
 
-          <div className="space-y-5">
-            {/* Step 1: Video Media Source Picker */}
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-900 dark:text-white">
-                  {locale === 'id' ? '1. Sumber Berkas Video' : '1. Video Media Source'}
+            {videoErr && (
+              <div
+                role="alert"
+                className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-xs text-rose-700 dark:text-rose-300"
+              >
+                {videoErr}
+              </div>
+            )}
+
+            <div className="space-y-5">
+              {/* Step 1: 2-Mode Source Selector (A. Upload dari Perangkat | B. Gunakan Tautan Video) */}
+              <div className="p-4 sm:p-5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-4">
+                <span className="block text-xs font-semibold text-slate-900 dark:text-white">
+                  {locale === 'id' ? '1. Pilih Sumber Video' : '1. Choose Video Source'}
                 </span>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1 p-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                  {[
-                    {
-                      id: 'file' as const,
-                      label: locale === 'id' ? 'Unggah File' : 'Upload File',
-                    },
-                    {
-                      id: 'youtube' as const,
-                      label: locale === 'id' ? 'Link YouTube' : 'YouTube',
-                    },
-                    {
-                      id: 'facebook' as const,
-                      label: locale === 'id' ? 'Link Facebook' : 'Facebook',
-                    },
-                    {
-                      id: 'preset' as const,
-                      label: locale === 'id' ? 'Stream Studio' : 'Studio Stream',
-                    },
-                    {
-                      id: 'manual' as const,
-                      label: 'Stream UID',
-                    },
-                  ].map((modeOpt) => (
-                    <button
-                      key={modeOpt.id}
-                      type="button"
-                      onClick={() => {
-                        setVSourceMode(modeOpt.id);
-                        if (modeOpt.id === 'preset') {
-                          setVProvider('private_storage');
-                          setVAssetRef(
-                            vCategory === 'Documentary' || vCategory === 'Education'
-                              ? 'stream-doc'
-                              : 'stream-cinema'
-                          );
-                        } else if (modeOpt.id === 'youtube') {
-                          setVProvider('youtube');
-                        } else if (modeOpt.id === 'facebook') {
-                          setVProvider('facebook');
-                        } else if (modeOpt.id === 'manual') {
-                          setVProvider('cloudflare_stream');
-                          if (vAssetRef === 'stream-cinema' || vAssetRef === 'stream-doc') {
-                            setVAssetRef('');
-                          }
-                        } else if (
-                          modeOpt.id === 'file' &&
-                          (vProvider === 'youtube' || vProvider === 'facebook')
-                        ) {
-                          setVProvider('private_storage');
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVSourceMode('device');
+                      setVideoErr(null);
+                      setVerifiedImportPayload(null);
+                      if (!vUploadedFileName) {
+                        setVProvider('private_storage');
+                        setVAssetRef('');
+                      }
+                    }}
+                    className={`min-h-[68px] p-3.5 rounded-xl border text-left transition-colors cursor-pointer flex items-start gap-3 ${
+                      vSourceMode === 'device'
+                        ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-emerald-500'
+                    }`}
+                  >
+                    <HardDriveUpload className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold tracking-wide">
+                        {locale === 'id' ? 'UPLOAD DARI PERANGKAT' : 'UPLOAD FROM DEVICE'}
+                      </p>
+                      <p
+                        className={`text-[11px] mt-0.5 ${
+                          vSourceMode === 'device'
+                            ? 'text-emerald-50'
+                            : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        {locale === 'id'
+                          ? 'File MP4 / WebM / MOV dari HP, tablet, atau komputer'
+                          : 'MP4 / WebM / MOV file from phone, tablet, or desktop'}
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVSourceMode('link');
+                      setVideoErr(null);
+                      if (!verifiedImportPayload) {
+                        setVAssetRef('');
+                      }
+                    }}
+                    className={`min-h-[68px] p-3.5 rounded-xl border text-left transition-colors cursor-pointer flex items-start gap-3 ${
+                      vSourceMode === 'link'
+                        ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-emerald-500'
+                    }`}
+                  >
+                    <Link2 className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold tracking-wide">
+                        {locale === 'id' ? 'GUNAKAN TAUTAN VIDEO' : 'USE VIDEO LINK'}
+                      </p>
+                      <p
+                        className={`text-[11px] mt-0.5 ${
+                          vSourceMode === 'link'
+                            ? 'text-emerald-50'
+                            : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        {locale === 'id'
+                          ? '1 kolom URL universal · deteksi otomatis & wajib tes PLAY'
+                          : '1 universal URL input · auto-detect & mandatory PLAY test'}
+                      </p>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Mode A: Upload from Device */}
+                {vSourceMode === 'device' && (
+                  <div className="space-y-3 pt-1">
+                    <div className="relative flex flex-col items-center justify-center gap-2 p-5 rounded-xl border border-dashed border-emerald-500 bg-white dark:bg-slate-900 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/30 transition-colors text-center">
+                      <input
+                        ref={videoFileInputRef}
+                        type="file"
+                        accept="video/*,.mp4,.webm,.mov"
+                        disabled={uploadingVideoFile}
+                        onChange={(e) => void handleVideoFileChange(e)}
+                        aria-label={
+                          locale === 'id'
+                            ? 'Pilih file video untuk diunggah'
+                            : 'Choose video file to upload'
+                        }
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
+                      />
+                      <div className="pointer-events-none flex flex-col items-center gap-1.5">
+                        <Video className="w-6 h-6 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                        <span className="text-xs font-semibold text-slate-900 dark:text-white">
+                          {uploadingVideoFile
+                            ? videoUploadProgress !== null
+                              ? locale === 'id'
+                                ? `Mengunggah langsung ke Cloudflare Stream... ${videoUploadProgress}%`
+                                : `Uploading directly to Cloudflare Stream... ${videoUploadProgress}%`
+                              : locale === 'id'
+                              ? 'Sedang mengunggah video ke server...'
+                              : 'Uploading video file to server...'
+                            : vUploadedFileName
+                            ? locale === 'id'
+                              ? `Terunggah: ${vUploadedFileName}`
+                              : `Uploaded: ${vUploadedFileName}`
+                            : streamCaps.cloudflareStreamConfigured
+                            ? locale === 'id'
+                              ? 'Pilih Film Panjang (.MP4, .WebM, .MOV · maks 10GB via Cloudflare HLS)'
+                              : 'Select Feature Film (.MP4, .WebM, .MOV · up to 10GB via Cloudflare HLS)'
+                            : locale === 'id'
+                            ? 'Pilih File Video dari HP / Laptop (.MP4, .WebM, .MOV · maks 100MB)'
+                            : 'Select Video File from Device (.MP4, .WebM, .MOV · max 100MB)'}
+                        </span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {vAssetRef && vUploadedFileName
+                            ? vProvider === 'cloudflare_stream'
+                              ? locale === 'id'
+                                ? 'Terhubung ke Cloudflare Stream HLS terenkripsi & siap dilengkapi di bawah.'
+                                : 'Encoded target ready on Cloudflare Stream HLS below.'
+                              : locale === 'id'
+                              ? 'File siap diputar & dilengkapi detailnya di bawah.'
+                              : 'File ready for streaming and metadata below.'
+                            : streamCaps.cloudflareStreamConfigured
+                            ? locale === 'id'
+                              ? 'Unggahan dikirim per-chunk langsung ke Cloudflare Stream (tidak membebani RAM/disk server).'
+                              : 'Chunked TUS upload goes directly to Cloudflare Stream without loading server RAM/disk.'
+                            : locale === 'id'
+                            ? 'Mode server lokal maks 100MB. Tambahkan CLOUDFLARE_STREAM_* di Secrets untuk film panjang (>100MB).'
+                            : 'Local server fallback max 100MB. Add CLOUDFLARE_STREAM_* Secrets for >100MB encrypted HLS.'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {uploadingVideoFile && videoUploadProgress !== null && (
+                      <div className="space-y-1">
+                        <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-600 transition-all duration-200"
+                            style={{ width: `${videoUploadProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {vVideoPreviewUrl && (
+                      <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-200 dark:border-slate-800">
+                        <video
+                          src={vVideoPreviewUrl}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        leftIcon={<Upload className="w-3.5 h-3.5" />}
+                        isLoading={uploadingVideoFile}
+                        onClick={() => videoFileInputRef.current?.click()}
+                      >
+                        {vUploadedFileName
+                          ? locale === 'id'
+                            ? 'Ganti File Video'
+                            : 'Replace Video File'
+                          : locale === 'id'
+                          ? 'Pilih File Video'
+                          : 'Browse Video File'}
+                      </Button>
+                      {vUploadedFileName && (
+                        <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400 font-semibold truncate max-w-xs">
+                          ✓ {vUploadedFileName}
+                          {vProvider === 'cloudflare_stream' ? ' · Cloudflare HLS' : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Mode B: Universal Video Link with Live Preview + Mandatory PLAY Verification */}
+                {vSourceMode === 'link' && (
+                  <div className="pt-1">
+                    <UniversalVideoImportPanel
+                      locale={locale}
+                      isContinued={Boolean(verifiedImportPayload)}
+                      onContinue={(payload) => {
+                        setVideoErr(null);
+                        setVerifiedImportPayload(payload);
+                        setVProvider(payload.provider);
+                        setVAssetRef(payload.assetRef);
+                        setVUploadedFileName(null);
+                        setVUploadedMimeType(payload.mimeType);
+                        if (!vTitle.trim() && payload.titleHint) {
+                          setVTitle(payload.titleHint.slice(0, 140));
+                        }
+                        if (payload.durationMinutesHint) {
+                          setVDuration(payload.durationMinutesHint);
+                        }
+                        if (!vHasExplicitCover && payload.thumbnailUrl) {
+                          setVThumbnail(payload.thumbnailUrl);
+                        }
+                        window.requestAnimationFrame(() => {
+                          metadataSectionRef.current?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start',
+                          });
+                        });
+                      }}
+                      onInvalidate={() => {
+                        setVerifiedImportPayload(null);
+                        if (vSourceMode === 'link') {
+                          setVAssetRef('');
                         }
                       }}
-                      className={`min-h-[34px] px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                        vSourceMode === modeOpt.id
-                          ? 'bg-emerald-600 text-white'
-                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      {modeOpt.label}
-                    </button>
-                  ))}
-                </div>
+                    />
+                  </div>
+                )}
               </div>
 
-              {vSourceMode === 'file' && (
-                <div className="space-y-3">
-                  <div className="relative flex flex-col items-center justify-center gap-2 p-5 rounded-xl border border-dashed border-emerald-500 bg-white dark:bg-slate-900 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/30 transition-colors text-center">
-                    <input
-                      ref={videoFileInputRef}
-                      type="file"
-                      accept="video/*,.mp4,.webm,.mov"
-                      disabled={uploadingVideoFile}
-                      onChange={(e) => void handleVideoFileChange(e)}
-                      aria-label={
-                        locale === 'id'
-                          ? 'Pilih file video untuk diunggah'
-                          : 'Choose video file to upload'
-                      }
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
-                    />
-                    <div className="pointer-events-none flex flex-col items-center gap-1.5">
-                      <Video className="w-6 h-6 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-                      <span className="text-xs font-semibold text-slate-900 dark:text-white">
-                        {uploadingVideoFile
-                          ? videoUploadProgress !== null
-                            ? locale === 'id'
-                              ? `Mengunggah langsung ke Cloudflare Stream... ${videoUploadProgress}%`
-                              : `Uploading directly to Cloudflare Stream... ${videoUploadProgress}%`
-                            : locale === 'id'
-                            ? 'Sedang mengunggah video ke server...'
-                            : 'Uploading video file to server...'
-                          : vUploadedFileName
-                          ? locale === 'id'
-                            ? `Terunggah: ${vUploadedFileName}`
-                            : `Uploaded: ${vUploadedFileName}`
-                          : streamCaps.cloudflareStreamConfigured
-                          ? locale === 'id'
-                            ? 'Pilih Film Panjang (.MP4, .WebM, .MOV · maks 10GB via Cloudflare HLS)'
-                            : 'Select Feature Film (.MP4, .WebM, .MOV · up to 10GB via Cloudflare HLS)'
-                          : locale === 'id'
-                          ? 'Pilih File Video dari HP / Laptop (.MP4, .WebM, .MOV · maks 100MB)'
-                          : 'Select Video File from Device (.MP4, .WebM, .MOV · max 100MB)'}
-                      </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {vAssetRef && vUploadedFileName
-                          ? vProvider === 'cloudflare_stream'
-                            ? locale === 'id'
-                              ? 'Terhubung ke Cloudflare Stream HLS terenkripsi & siap diajukan ke moderasi.'
-                              : 'Encoded target ready on Cloudflare Stream HLS for moderation.'
-                            : locale === 'id'
-                            ? 'File siap diputar & diajukan ke moderasi.'
-                            : 'File ready for streaming and moderation.'
-                          : streamCaps.cloudflareStreamConfigured
-                          ? locale === 'id'
-                            ? 'Unggahan dikirim per-chunk langsung ke Cloudflare Stream (tidak membebani RAM/disk server).'
-                            : 'Chunked TUS upload goes directly to Cloudflare Stream without loading server RAM/disk.'
-                          : locale === 'id'
-                          ? 'Mode server lokal maks 100MB. Tambahkan CLOUDFLARE_STREAM_* di Secrets untuk film panjang (>100MB) HLS terenkripsi.'
-                          : 'Local server fallback max 100MB. Add CLOUDFLARE_STREAM_* Secrets for >100MB encrypted HLS.'}
-                      </span>
-                    </div>
-                  </div>
-                  {uploadingVideoFile && videoUploadProgress !== null && (
-                    <div className="space-y-1">
-                      <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
-                        <div
-                          className="h-full bg-emerald-600 transition-all duration-200"
-                          style={{ width: `${videoUploadProgress}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      leftIcon={<Upload className="w-3.5 h-3.5" />}
-                      isLoading={uploadingVideoFile}
-                      onClick={() => videoFileInputRef.current?.click()}
-                    >
-                      {vUploadedFileName
+              {/* Step 2: Metadata Form Gate */}
+              {!isStep2Unlocked ? (
+                <div className="p-5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-dashed border-slate-300 dark:border-slate-700 flex items-start gap-3">
+                  <Lock className="w-5 h-5 text-slate-400 dark:text-slate-500 shrink-0 mt-0.5" aria-hidden="true" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {locale === 'id'
+                        ? '2. Formulir Informasi Video (Terkunci Hingga Video Terverifikasi)'
+                        : '2. Video Metadata Form (Locked Until Video Is Verified)'}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                      {vSourceMode === 'link'
                         ? locale === 'id'
-                          ? 'Ganti File Video'
-                          : 'Replace Video File'
+                          ? 'Periksa tautan, buka Preview, tekan PLAY hingga status VIDEO BERHASIL DIPUTAR, lalu klik LANJUTKAN untuk membuka formulir judul, sinopsis, kategori, thumbnail, dan harga.'
+                          : 'Inspect the URL, open Preview, press PLAY until playback is verified, then click CONTINUE to unlock the metadata and pricing form.'
                         : locale === 'id'
-                        ? 'Pilih File Video'
-                        : 'Browse Video File'}
-                    </Button>
-                    {vUploadedFileName && (
-                      <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400 font-semibold truncate max-w-xs">
-                        ✓ {vUploadedFileName}
-                        {vProvider === 'cloudflare_stream' ? ' · Cloudflare HLS' : ''}
+                        ? 'Pilih dan unggah file video dari perangkat Anda terlebih dahulu untuk membuka formulir informasi video.'
+                        : 'Select and finish uploading a video file from your device first to unlock the metadata form.'}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div ref={metadataSectionRef} className="space-y-5 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs text-emerald-800 dark:text-emerald-300 font-semibold">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      <span>
+                        {vSourceMode === 'link' && verifiedImportPayload
+                          ? locale === 'id'
+                            ? `Sumber Tautan Terverifikasi (${verifiedImportPayload.platformLabel})`
+                            : `Verified Link Source (${verifiedImportPayload.platformLabel})`
+                          : locale === 'id'
+                          ? `File Terunggah (${vUploadedFileName})`
+                          : `Uploaded File (${vUploadedFileName})`}
+                      </span>
+                    </div>
+                    {vSourceMode === 'link' && verifiedImportPayload && (
+                      <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400 truncate max-w-xs">
+                        {verifiedImportPayload.canonicalUrl}
                       </span>
                     )}
                   </div>
-                </div>
-              )}
 
-              {vSourceMode === 'youtube' && (() => {
-                const parsedYtId = extractYouTubeVideoId(vYoutubeUrl);
-                const ytThumb = parsedYtId ? getYouTubeThumbnailUrl(parsedYtId) : '';
-                return (
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1.5">
-                        {locale === 'id'
-                          ? 'URL Video YouTube (Disarankan status Unlisted / Tidak Publik)'
-                          : 'YouTube Video URL (Unlisted or Public recommended)'}
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                        {locale === 'id' ? 'Judul Tayangan' : 'Title'}
                       </label>
-                      <div className="relative">
-                        <Link2
-                          className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                          aria-hidden="true"
-                        />
-                        <input
-                          type="text"
-                          value={vYoutubeUrl}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setVYoutubeUrl(val);
-                            setVProvider('youtube');
-                            const id = extractYouTubeVideoId(val);
-                            setVAssetRef(id || '');
-                            if (id && !vHasExplicitCover) {
-                              setVThumbnail(getYouTubeThumbnailUrl(id));
-                            }
-                          }}
-                          placeholder="https://www.youtube.com/watch?v=... atau https://youtu.be/..."
-                          className={`${inputClass} pl-10 font-mono text-xs`}
-                        />
-                      </div>
+                      <input
+                        type="text"
+                        maxLength={140}
+                        value={vTitle}
+                        onChange={(e) => setVTitle(e.target.value)}
+                        placeholder={
+                          locale === 'id'
+                            ? 'Contoh: Horizon di Atas Sulawesi'
+                            : 'e.g., Horizon Over Sulawesi'
+                        }
+                        className={inputClass}
+                      />
                     </div>
-
-                    {vYoutubeUrl.trim().length > 0 && (
-                      parsedYtId ? (
-                        <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/70 flex flex-col sm:flex-row sm:items-center gap-3">
-                          <div className="w-full sm:w-32 aspect-video rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0">
-                            <img
-                              src={ytThumb}
-                              alt="YouTube preview thumbnail"
-                              className="w-full h-full object-cover"
-                            />
-                          </div>
-                          <div className="flex-1 min-w-0 space-y-1.5">
-                            <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-                              <CheckCircle2 className="w-4 h-4 shrink-0" />
-                              <span>
-                                {locale === 'id'
-                                  ? `ID Video YouTube valid: ${parsedYtId}`
-                                  : `Valid YouTube Video ID: ${parsedYtId}`}
-                              </span>
-                            </p>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                              {locale === 'id'
-                                ? 'Pastikan di YouTube Studio opsi "Izinkan penyematan / Allow embedding" aktif dan visibilitas disetel Unlisted atau Publik.'
-                                : 'Ensure "Allow embedding" is enabled in YouTube Studio and visibility is set to Unlisted or Public.'}
-                            </p>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setVThumbnail(ytThumb);
-                                setVHasExplicitCover(true);
-                              }}
-                            >
-                              {locale === 'id'
-                                ? 'Gunakan Thumbnail YouTube Ini'
-                                : 'Use This YouTube Thumbnail'}
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-rose-600 dark:text-rose-400">
-                          {locale === 'id'
-                            ? 'Format link belum dikenali. Gunakan tautan youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., atau ID 11 karakter.'
-                            : 'Unrecognized link format. Paste a youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., or 11-char ID.'}
-                        </p>
-                      )
-                    )}
-
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                      {locale === 'id'
-                        ? 'Video YouTube diputar melalui YouTube IFrame Player API tanpa memakan kuota server, dengan pembatasan pratinjau 5 menit di pemutar DELOKEN sebelum transaksi selesai.'
-                        : 'YouTube videos stream via the official YouTube IFrame Player API with zero server storage overhead and a 5-minute preview gate in the DELOKEN player.'}
-                    </p>
-                  </div>
-                );
-              })()}
-
-              {vSourceMode === 'facebook' && (() => {
-                const parsedFbUrl = extractFacebookVideoUrl(vFacebookUrl);
-                return (
-                  <div className="space-y-3">
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1.5">
-                        {locale === 'id'
-                          ? 'URL Video / Reel Facebook (Wajib berstatus Publik)'
-                          : 'Facebook Video / Reel URL (Must be Public)'}
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                        {locale === 'id' ? 'Kategori' : 'Category'}
                       </label>
-                      <div className="relative">
-                        <Link2
-                          className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                          aria-hidden="true"
-                        />
-                        <input
-                          type="text"
-                          value={vFacebookUrl}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setVFacebookUrl(val);
-                            setVProvider('facebook');
-                            const canonical = extractFacebookVideoUrl(val);
-                            setVAssetRef(canonical || '');
-                          }}
-                          placeholder="https://www.facebook.com/.../videos/1234567890 atau https://fb.watch/..."
-                          className={`${inputClass} pl-10 font-mono text-xs`}
-                        />
-                      </div>
+                      <select
+                        value={vCategory}
+                        onChange={(e) => setVCategory(e.target.value as ContentCategory)}
+                        className={inputClass}
+                      >
+                        {CATEGORY_LIST.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-
-                    {vFacebookUrl.trim().length > 0 && (
-                      parsedFbUrl ? (
-                        <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/70 space-y-1">
-                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4 shrink-0" />
-                            <span className="truncate">
-                              {locale === 'id'
-                                ? `Link Facebook valid: ${parsedFbUrl}`
-                                : `Valid Facebook URL: ${parsedFbUrl}`}
-                            </span>
-                          </p>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                            {locale === 'id'
-                              ? 'Pastikan postingan video Facebook disetel "Publik" (bukan Teman/Privat) dan pilih thumbnail sampul di bawah.'
-                              : 'Ensure the Facebook video post privacy is set to Public (not Friends/Private) and pick a cover thumbnail below.'}
-                          </p>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-rose-600 dark:text-rose-400">
-                          {locale === 'id'
-                            ? 'Format link Facebook belum dikenali. Gunakan tautan facebook.com/.../videos/..., facebook.com/watch?v=..., facebook.com/reel/..., atau fb.watch/...'
-                            : 'Unrecognized Facebook URL. Paste a facebook.com/.../videos/..., facebook.com/watch?v=..., facebook.com/reel/..., or fb.watch/... link.'}
-                        </p>
-                      )
-                    )}
-
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                      {locale === 'id'
-                        ? 'Video Facebook disematkan melalui Facebook Embedded Video Player. Catatan: sebagian browser HP atau pemblokir iklan dapat membatasi embed Facebook; untuk kontrol lebih stabil disarankan YouTube Unlisted atau unggahan langsung.'
-                        : 'Facebook videos embed via the official Facebook Video Plugin. Note: privacy blockers or mobile browsers may prompt Facebook login; YouTube Unlisted or direct upload is recommended for stricter paywalls.'}
-                    </p>
                   </div>
-                );
-              })()}
 
-              {vSourceMode === 'preset' && (
-                <div className="space-y-2">
-                  <label className="block text-xs text-slate-600 dark:text-slate-300">
-                    {locale === 'id'
-                      ? 'Pilih Master Stream HLS Terenkripsi (Siap Uji Tayang Instan)'
-                      : 'Choose Encrypted Studio HLS Master (Instant Playback Ready)'}
-                  </label>
-                  <select
-                    value={vAssetRef === 'stream-doc' ? 'stream-doc' : 'stream-cinema'}
-                    onChange={(e) => {
-                      setVProvider('private_storage');
-                      setVAssetRef(e.target.value);
-                    }}
-                    className={inputClass}
-                  >
-                    <option value="stream-cinema">
-                      {locale === 'id'
-                        ? 'Studio Cinema Master 4K (HLS Adaptif)'
-                        : 'Studio Cinema Master 4K (Adaptive HLS)'}
-                    </option>
-                    <option value="stream-doc">
-                      {locale === 'id'
-                        ? 'Studio Documentary & Masterclass (HLS Adaptif)'
-                        : 'Studio Documentary & Masterclass (Adaptive HLS)'}
-                    </option>
-                  </select>
-                </div>
-              )}
-
-              {vSourceMode === 'manual' && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                      {locale === 'id' ? 'Penyedia Stream' : 'Stream Provider'}
-                    </label>
-                    <select
-                      value={vProvider}
-                      onChange={(e) =>
-                        setVProvider(
-                          e.target.value as 'cloudflare_stream' | 'private_storage'
-                        )
-                      }
-                      className={inputClass}
-                    >
-                      <option value="cloudflare_stream">Cloudflare Stream</option>
-                      <option value="private_storage">Private Object Storage</option>
-                    </select>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                      {locale === 'id'
-                        ? 'Referensi Aset / Stream UID'
-                        : 'Private Video Asset Reference / Stream UID'}
+                      {locale === 'id' ? 'Subjudul / Tagline Singkat' : 'Subtitle / Logline'}
                     </label>
                     <input
                       type="text"
-                      maxLength={300}
-                      value={vAssetRef}
-                      onChange={(e) => setVAssetRef(e.target.value)}
-                      placeholder="cf-stream-uid-9482a7... / private/masters/film.mp4"
-                      className={`${inputClass} font-mono`}
+                      maxLength={220}
+                      value={vSubtitle}
+                      onChange={(e) => setVSubtitle(e.target.value)}
+                      placeholder={
+                        locale === 'id'
+                          ? 'Ringkasan 1 baris yang tampil di bawah judul (min. 4 karakter)'
+                          : 'Short one-line hook shown below the title'
+                      }
+                      className={inputClass}
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                      {locale === 'id'
+                        ? 'Sinopsis / Deskripsi Lengkap (min. 10 karakter)'
+                        : 'Description / Synopsis (min. 10 characters)'}
+                    </label>
+                    <textarea
+                      rows={4}
+                      maxLength={2000}
+                      value={vDescription}
+                      onChange={(e) => setVDescription(e.target.value)}
+                      placeholder={
+                        locale === 'id'
+                          ? 'Ceritakan alur film, dokumenter, atau materi kelas master Anda...'
+                          : 'Describe the film, documentary, or educational curriculum...'
+                      }
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                    />
+                  </div>
+
+                  <CoverPicker
+                    locale={locale}
+                    value={vThumbnail}
+                    titleHint={vTitle}
+                    presets={THUMBNAIL_PRESETS}
+                    youtubeVideoId={
+                      vSourceMode === 'link' && vProvider === 'youtube' ? vAssetRef : null
+                    }
+                    videoPreviewUrl={vSourceMode === 'device' ? vVideoPreviewUrl : null}
+                    videoFileName={vUploadedFileName}
+                    autoCapturing={autoCapturingCover}
+                    onChange={(nextUrl, isExplicit) => {
+                      setVThumbnail(nextUrl);
+                      if (isExplicit) setVHasExplicitCover(true);
+                    }}
+                  />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                        {locale === 'id' ? 'Tahun Rilis' : 'Release Year'}
+                      </label>
+                      <input
+                        type="number"
+                        min={1950}
+                        max={2100}
+                        value={vReleaseYear}
+                        onChange={(e) => setVReleaseYear(Number(e.target.value))}
+                        className={`${inputClass} font-mono tabular-nums`}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                        {locale === 'id' ? 'Bahasa / Subtitle (pisahkan koma)' : 'Languages (comma separated)'}
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={120}
+                        value={vLanguages}
+                        onChange={(e) => setVLanguages(e.target.value)}
+                        placeholder="Indonesian, English"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                      {locale === 'id' ? 'Resolusi & Format Audio' : 'Resolution & Audio'}
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <select
+                        value={vResolution}
+                        onChange={(e) =>
+                          setVResolution(e.target.value as '4K HDR' | '4K UHD' | '1080p HD')
+                        }
+                        className={inputClass}
+                      >
+                        <option value="4K HDR">4K HDR</option>
+                        <option value="4K UHD">4K UHD</option>
+                        <option value="1080p HD">1080p HD</option>
+                      </select>
+                      <input
+                        type="text"
+                        value={vAudio}
+                        onChange={(e) => setVAudio(e.target.value)}
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <span className="block text-xs font-semibold text-slate-900 dark:text-white">
+                          {locale === 'id' ? 'Model Akses & Harga' : 'Access & Pricing Model'}
+                        </span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {locale === 'id'
+                            ? 'Pilih apakah tayangan ini berbayar (PPV + pratinjau 5 menit) atau gratis penuh.'
+                            : 'Choose whether viewers pay per view (5-min preview) or stream completely free.'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setVPricingMode('paid')}
+                          className={`min-h-[36px] px-3 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                            vPricingMode === 'paid'
+                              ? 'bg-emerald-600 text-white'
+                              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          {locale === 'id' ? 'Berbayar (PPV)' : 'Paid (PPV)'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVPricingMode('free')}
+                          className={`min-h-[36px] px-3 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                            vPricingMode === 'free'
+                              ? 'bg-emerald-600 text-white'
+                              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          {locale === 'id' ? 'Gratis (Bebas Akses)' : 'Free Release'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {vPricingMode === 'free' && (
+                      <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/70 text-xs text-emerald-800 dark:text-emerald-300">
+                        {locale === 'id'
+                          ? 'Mode Gratis aktif (Rp 0 / $0.00 · 0 Kredit). Penonton dapat menonton tayangan penuh tanpa batas pratinjau 5 menit dan tanpa pembayaran.'
+                          : 'Free Release active ($0.00 / Rp 0 · 0 Credits). Viewers can watch the full release immediately with no 5-minute paywall or checkout.'}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                        {locale === 'id' ? 'Durasi (menit)' : 'Duration (min)'}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={600}
+                        value={vDuration}
+                        onChange={(e) => setVDuration(Number(e.target.value))}
+                        className={`${inputClass} font-mono tabular-nums`}
+                      />
+                    </div>
+                    {vPricingMode === 'paid' && (
+                      <>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                            {locale === 'id' ? 'Harga (USD)' : 'Price (USD)'}
+                          </label>
+                          <input
+                            type="number"
+                            step="0.50"
+                            min={0.99}
+                            value={vPriceUsd}
+                            onChange={(e) => setVPriceUsd(Number(e.target.value))}
+                            className={`${inputClass} font-mono tabular-nums`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                            {locale === 'id' ? 'Harga (IDR)' : 'Price (IDR)'}
+                          </label>
+                          <input
+                            type="number"
+                            step="1000"
+                            min={10000}
+                            value={vPriceIdr}
+                            onChange={(e) => setVPriceIdr(Number(e.target.value))}
+                            className={`${inputClass} font-mono tabular-nums`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                            {locale === 'id' ? 'Harga Kredit' : 'Credit Cost'}
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={500}
+                            value={vCreditCost}
+                            onChange={(e) => setVCreditCost(Number(e.target.value))}
+                            className={`${inputClass} font-mono tabular-nums`}
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 pt-2">
+                    <Button
+                      variant="primary"
+                      size="md"
+                      className="w-full sm:w-auto"
+                      isLoading={submittingVideo}
+                      disabled={uploadingVideoFile || autoCapturingCover}
+                      onClick={() => void handleSubmitVideo('pending_review')}
+                    >
+                      {locale === 'id' ? 'Simpan & Ajukan ke Moderasi' : 'Save & Submit for Moderation'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="md"
+                      className="w-full sm:w-auto"
+                      isLoading={submittingVideo}
+                      disabled={uploadingVideoFile || autoCapturingCover}
+                      onClick={() => void handleSubmitVideo('draft')}
+                    >
+                      {locale === 'id' ? 'Simpan sebagai Draf' : 'Save as Draft'}
+                    </Button>
                   </div>
                 </div>
               )}
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                  {locale === 'id' ? 'Judul Tayangan' : 'Title'}
-                </label>
-                <input
-                  type="text"
-                  maxLength={140}
-                  value={vTitle}
-                  onChange={(e) => setVTitle(e.target.value)}
-                  placeholder={
-                    locale === 'id'
-                      ? 'Contoh: Horizon di Atas Sulawesi'
-                      : 'e.g., Horizon Over Sulawesi'
-                  }
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                  {locale === 'id' ? 'Kategori' : 'Category'}
-                </label>
-                <select
-                  value={vCategory}
-                  onChange={(e) => setVCategory(e.target.value as ContentCategory)}
-                  className={inputClass}
-                >
-                  {CATEGORY_LIST.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                {locale === 'id' ? 'Subjudul / Tagline Singkat' : 'Subtitle / Logline'}
-              </label>
-              <input
-                type="text"
-                maxLength={220}
-                value={vSubtitle}
-                onChange={(e) => setVSubtitle(e.target.value)}
-                placeholder={
-                  locale === 'id'
-                    ? 'Ringkasan 1 baris yang tampil di bawah judul (min. 4 karakter)'
-                    : 'Short one-line hook shown below the title'
-                }
-                className={inputClass}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                {locale === 'id'
-                  ? 'Sinopsis / Deskripsi Lengkap (min. 10 karakter)'
-                  : 'Description / Synopsis (min. 10 characters)'}
-              </label>
-              <textarea
-                rows={4}
-                maxLength={2000}
-                value={vDescription}
-                onChange={(e) => setVDescription(e.target.value)}
-                placeholder={
-                  locale === 'id'
-                    ? 'Ceritakan alur film, dokumenter, atau materi kelas master Anda...'
-                    : 'Describe the film, documentary, or educational curriculum...'
-                }
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-600"
-              />
-            </div>
-
-            <CoverPicker
-              locale={locale}
-              value={vThumbnail}
-              titleHint={vTitle}
-              presets={THUMBNAIL_PRESETS}
-              youtubeVideoId={
-                vSourceMode === 'youtube' ? extractYouTubeVideoId(vYoutubeUrl) : null
-              }
-              videoPreviewUrl={vSourceMode === 'file' ? vVideoPreviewUrl : null}
-              videoFileName={vUploadedFileName}
-              autoCapturing={autoCapturingCover}
-              onChange={(nextUrl, isExplicit) => {
-                setVThumbnail(nextUrl);
-                if (isExplicit) setVHasExplicitCover(true);
-              }}
-            />
-
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                {locale === 'id' ? 'Resolusi & Format Audio' : 'Resolution & Audio'}
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <select
-                  value={vResolution}
-                  onChange={(e) =>
-                    setVResolution(e.target.value as '4K HDR' | '4K UHD' | '1080p HD')
-                  }
-                  className={inputClass}
-                >
-                  <option value="4K HDR">4K HDR</option>
-                  <option value="4K UHD">4K UHD</option>
-                  <option value="1080p HD">1080p HD</option>
-                </select>
-                <input
-                  type="text"
-                  value={vAudio}
-                  onChange={(e) => setVAudio(e.target.value)}
-                  className={inputClass}
-                />
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <span className="block text-xs font-semibold text-slate-900 dark:text-white">
-                    {locale === 'id' ? 'Model Akses & Harga' : 'Access & Pricing Model'}
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {locale === 'id'
-                      ? 'Pilih apakah tayangan ini berbayar (PPV + pratinjau 5 menit) atau gratis penuh.'
-                      : 'Choose whether viewers pay per view (5-min preview) or stream completely free.'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setVPricingMode('paid')}
-                    className={`min-h-[36px] px-3 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                      vPricingMode === 'paid'
-                        ? 'bg-emerald-600 text-white'
-                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                    }`}
-                  >
-                    {locale === 'id' ? 'Berbayar (PPV)' : 'Paid (PPV)'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVPricingMode('free')}
-                    className={`min-h-[36px] px-3 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                      vPricingMode === 'free'
-                        ? 'bg-emerald-600 text-white'
-                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                    }`}
-                  >
-                    {locale === 'id' ? 'Gratis (Bebas Akses)' : 'Free Release'}
-                  </button>
-                </div>
-              </div>
-
-              {vPricingMode === 'free' && (
-                <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/70 text-xs text-emerald-800 dark:text-emerald-300">
-                  {locale === 'id'
-                    ? 'Mode Gratis aktif (Rp 0 / $0.00 · 0 Kredit). Penonton dapat menonton tayangan penuh tanpa batas pratinjau 5 menit dan tanpa pembayaran.'
-                    : 'Free Release active ($0.00 / Rp 0 · 0 Credits). Viewers can watch the full release immediately with no 5-minute paywall or checkout.'}
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                  {locale === 'id' ? 'Durasi (menit)' : 'Duration (min)'}
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={600}
-                  value={vDuration}
-                  onChange={(e) => setVDuration(Number(e.target.value))}
-                  className={`${inputClass} font-mono tabular-nums`}
-                />
-              </div>
-              {vPricingMode === 'paid' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                      {locale === 'id' ? 'Harga (USD)' : 'Price (USD)'}
-                    </label>
-                    <input
-                      type="number"
-                      step="0.50"
-                      min={0.99}
-                      value={vPriceUsd}
-                      onChange={(e) => setVPriceUsd(Number(e.target.value))}
-                      className={`${inputClass} font-mono tabular-nums`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                      {locale === 'id' ? 'Harga (IDR)' : 'Price (IDR)'}
-                    </label>
-                    <input
-                      type="number"
-                      step="1000"
-                      min={10000}
-                      value={vPriceIdr}
-                      onChange={(e) => setVPriceIdr(Number(e.target.value))}
-                      className={`${inputClass} font-mono tabular-nums`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                      {locale === 'id' ? 'Harga Kredit' : 'Credit Cost'}
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={500}
-                      value={vCreditCost}
-                      onChange={(e) => setVCreditCost(Number(e.target.value))}
-                      className={`${inputClass} font-mono tabular-nums`}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 pt-2">
-              <Button
-                variant="primary"
-                size="md"
-                className="w-full sm:w-auto"
-                isLoading={submittingVideo}
-                disabled={uploadingVideoFile || autoCapturingCover}
-                onClick={() => void handleSubmitVideo('pending_review')}
-              >
-                {locale === 'id' ? 'Ajukan ke Moderasi' : 'Submit for Moderation'}
-              </Button>
-              <Button
-                variant="outline"
-                size="md"
-                className="w-full sm:w-auto"
-                isLoading={submittingVideo}
-                disabled={uploadingVideoFile || autoCapturingCover}
-                onClick={() => void handleSubmitVideo('draft')}
-              >
-                {locale === 'id' ? 'Simpan sebagai Draf' : 'Save as Draft'}
-              </Button>
-            </div>
-          </div>
-        </section>
-      )}
+          </section>
+        );
+      })()}
 
       {/* ANALYTICS, EARNINGS & PAYOUTS */}
       {activeTab === 'analytics' && (

@@ -32,6 +32,7 @@ import type {
   ReviewItem,
   UserProfile,
   UserRole,
+  VideoAssetProvider,
   WalletRecord,
   WalletTransactionRecord,
 } from '../types/vyora';
@@ -328,7 +329,7 @@ export interface CreateVideoInput {
   resolution: '4K HDR' | '4K UHD' | '1080p HD';
   audioFormat: string;
   languages: string[];
-  assetProvider: 'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook';
+  assetProvider: VideoAssetProvider;
   assetRef: string;
   initialStatus: 'draft' | 'pending_review';
 }
@@ -415,26 +416,11 @@ export async function createCreatorVideo(
   }
 
   try {
-    const firestoreAssetProvider =
-      input.assetProvider === 'youtube' || input.assetProvider === 'facebook'
-        ? 'private_storage'
-        : input.assetProvider;
-    const firestoreAssetRef =
-      input.assetProvider === 'youtube'
-        ? input.assetRef.startsWith('youtube:')
-          ? input.assetRef
-          : `youtube:${input.assetRef}`
-        : input.assetProvider === 'facebook'
-        ? input.assetRef.startsWith('facebook:')
-          ? input.assetRef
-          : `facebook:${input.assetRef}`
-        : input.assetRef;
-
     await setDoc(doc(db, 'video_assets', videoId), {
       videoId,
       creatorId,
-      provider: firestoreAssetProvider,
-      assetRef: clampString(firestoreAssetRef, 300),
+      provider: input.assetProvider,
+      assetRef: clampString(input.assetRef, 1000),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });

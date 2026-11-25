@@ -5,15 +5,16 @@ var __export = (target, all) => {
 };
 
 // server/app.ts
-import crypto3 from "node:crypto";
-import fs2 from "node:fs";
+import crypto4 from "node:crypto";
+import fs4 from "node:fs";
 import os2 from "node:os";
-import path3 from "node:path";
+import path4 from "node:path";
 import express from "express";
 import dotenv from "dotenv";
 
 // server/paymentService.ts
 import crypto from "node:crypto";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import QRCode from "qrcode";
@@ -51,12 +52,102 @@ var SERVER_CREDIT_PACKAGES = {
   }
 };
 var mutexTail = Promise.resolve();
+async function withLedgerLock(task) {
+  const previous = mutexTail;
+  let release;
+  mutexTail = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+  }
+}
+function ensureDataDir() {
+  if (!fs.existsSync(SERVER_DATA_DIR)) {
+    fs.mkdirSync(SERVER_DATA_DIR, { recursive: true });
+  }
+}
+function loadLedger() {
+  ensureDataDir();
+  if (fs.existsSync(LEDGER_FILE)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(LEDGER_FILE, "utf-8"));
+      return {
+        wallets: parsed.wallets ?? {},
+        walletTransactions: parsed.walletTransactions ?? [],
+        payments: parsed.payments ?? {},
+        purchases: parsed.purchases ?? [],
+        entitlements: parsed.entitlements ?? {},
+        creatorEarnings: parsed.creatorEarnings ?? [],
+        payouts: parsed.payouts ?? [],
+        idempotency: parsed.idempotency ?? {},
+        processedWebhooks: parsed.processedWebhooks ?? {},
+        creatorMedia: parsed.creatorMedia ?? {},
+        videoDeletionJobs: parsed.videoDeletionJobs ?? [],
+        platformSettings: parsed.platformSettings ?? {
+          commissionPercent: 20,
+          minPriceUsd: 1.99,
+          minPriceIdr: 29e3
+        }
+      };
+    } catch {
+    }
+  }
+  let initialEntitlements = {};
+  if (fs.existsSync(LEGACY_ENTITLEMENTS_FILE)) {
+    try {
+      initialEntitlements = JSON.parse(
+        fs.readFileSync(LEGACY_ENTITLEMENTS_FILE, "utf-8")
+      );
+    } catch {
+      initialEntitlements = {};
+    }
+  }
+  const initial = {
+    wallets: {},
+    walletTransactions: [],
+    payments: {},
+    purchases: [],
+    entitlements: initialEntitlements,
+    creatorEarnings: [],
+    payouts: [],
+    idempotency: {},
+    processedWebhooks: {},
+    creatorMedia: {},
+    videoDeletionJobs: [],
+    platformSettings: {
+      commissionPercent: 20,
+      minPriceUsd: 1.99,
+      minPriceIdr: 29e3
+    }
+  };
+  saveLedger(initial);
+  return initial;
+}
+function saveLedger(state) {
+  ensureDataDir();
+  const idemKeys = Object.keys(state.idempotency);
+  if (idemKeys.length > 1e3) {
+    idemKeys.sort((a, b) => state.idempotency[a].createdAtMs - state.idempotency[b].createdAtMs).slice(0, idemKeys.length - 1e3).forEach((k) => {
+      delete state.idempotency[k];
+    });
+  }
+  const tempFile = path.resolve(
+    SERVER_DATA_DIR,
+    `ledger.${process.pid}.${Date.now()}.tmp`
+  );
+  fs.writeFileSync(tempFile, JSON.stringify(state, null, 2), "utf-8");
+  fs.renameSync(tempFile, LEDGER_FILE);
+}
 function entitlementKey(uid, videoId) {
   return `${uid}::${videoId}`;
 }
-async function resolveServerVideoEntry(videoId, projectId, databaseId) {
+async function resolveServerVideoState(videoId, projectId, databaseId, callerIdToken) {
   if (SERVER_CATALOG[videoId]) {
-    return SERVER_CATALOG[videoId];
+    return { state: "published", entry: SERVER_CATALOG[videoId] };
   }
   try {
     const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
@@ -64,11 +155,33 @@ async function resolveServerVideoEntry(videoId, projectId, databaseId) {
     )}/databases/${encodeURIComponent(databaseId)}/documents/videos/${encodeURIComponent(
       videoId
     )}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    const res = await fetch(
+      url,
+      callerIdToken ? { headers: { Authorization: `Bearer ${callerIdToken}` } } : void 0
+    );
+    if (res.status === 404) {
+      return { state: "not_found", entry: null };
+    }
+    if (res.status === 403 || res.status === 401) {
+      return { state: "unavailable", entry: null };
+    }
+    if (!res.ok) {
+      return { state: "error", entry: null };
+    }
     const doc = await res.json();
     const f = doc.fields;
-    if (!f || f.status?.stringValue !== "published") return null;
+    if (!f) return { state: "not_found", entry: null };
+    const rawStatus = f.status?.stringValue || "draft";
+    const validStates = /* @__PURE__ */ new Set([
+      "published",
+      "archived",
+      "deletion_pending",
+      "draft",
+      "pending_review",
+      "approved",
+      "rejected"
+    ]);
+    const state = validStates.has(rawStatus) ? rawStatus : "unavailable";
     const parseFirestoreNumber = (field, fallback) => {
       if (!field) return fallback;
       if (typeof field.doubleValue === "number" && Number.isFinite(field.doubleValue)) {
@@ -84,18 +197,26 @@ async function resolveServerVideoEntry(videoId, projectId, databaseId) {
     const priceIdr = Math.round(parseFirestoreNumber(f.priceIdr, 75e3));
     const creditCost = Math.round(parseFirestoreNumber(f.creditCost, 5));
     return {
-      id: videoId,
-      title: f.title?.stringValue || videoId,
-      category: f.category?.stringValue || "Movies",
-      creatorId: f.creatorId?.stringValue || "creator-unknown",
-      thumbnailUrl: f.thumbnailUrl?.stringValue || "",
-      priceUsd,
-      priceIdr,
-      creditCost
+      state,
+      entry: {
+        id: videoId,
+        title: f.title?.stringValue || videoId,
+        category: f.category?.stringValue || "Movies",
+        creatorId: f.creatorId?.stringValue || "creator-unknown",
+        thumbnailUrl: f.thumbnailUrl?.stringValue || "",
+        priceUsd,
+        priceIdr,
+        creditCost
+      }
     };
   } catch {
-    return null;
+    return { state: "error", entry: null };
   }
+}
+async function resolveServerVideoEntry(videoId, projectId, databaseId) {
+  const resolved = await resolveServerVideoState(videoId, projectId, databaseId);
+  if (resolved.state !== "published") return null;
+  return resolved.entry;
 }
 function crc16Ccitt(payload) {
   let crc = 65535;
@@ -284,6 +405,7 @@ __export(schema_exports, {
   processedWebhooks: () => processedWebhooks,
   purchases: () => purchases,
   users: () => users,
+  videoDeletionJobs: () => videoDeletionJobs,
   walletTransactions: () => walletTransactions,
   wallets: () => wallets
 });
@@ -416,6 +538,24 @@ var platformSettings = pgTable("platform_settings", {
   minPriceUsd: doublePrecision("min_price_usd").notNull().default(1.99),
   minPriceIdr: integer("min_price_idr").notNull().default(29e3)
 });
+var videoDeletionJobs = pgTable("video_deletion_jobs", {
+  operationId: text("operation_id").primaryKey(),
+  videoId: text("video_id").notNull(),
+  videoTitleSnapshot: text("video_title_snapshot").notNull(),
+  provider: text("provider").notNull(),
+  assetRefFingerprint: text("asset_ref_fingerprint").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  requestedAt: text("requested_at").notNull(),
+  status: text("status").notNull(),
+  providerResult: text("provider_result").notNull().default("pending"),
+  firestoreResult: text("firestore_result").notNull().default("pending"),
+  sqlResult: text("sql_result").notNull().default("pending"),
+  thumbnailResult: text("thumbnail_result").notNull().default("skipped"),
+  externalMediaWarning: text("external_media_warning"),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  completedAt: text("completed_at")
+});
 
 // src/db/index.ts
 function isSqlConfigured() {
@@ -454,7 +594,7 @@ var pool = createPool();
 var db = drizzle(pool, { schema: schema_exports });
 
 // src/db/ledgerRepository.ts
-import fs from "node:fs";
+import fs2 from "node:fs";
 import path2 from "node:path";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 var SERVER_DATA_DIR2 = path2.resolve(process.cwd(), ".vyora_server_data");
@@ -604,6 +744,26 @@ async function ensureSqlTablesExist() {
       min_price_idr INTEGER NOT NULL DEFAULT 29000
     )
   `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS video_deletion_jobs (
+      operation_id TEXT PRIMARY KEY,
+      video_id TEXT NOT NULL,
+      video_title_snapshot TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      asset_ref_fingerprint TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      requested_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider_result TEXT NOT NULL DEFAULT 'pending',
+      firestore_result TEXT NOT NULL DEFAULT 'pending',
+      sql_result TEXT NOT NULL DEFAULT 'pending',
+      thumbnail_result TEXT NOT NULL DEFAULT 'skipped',
+      external_media_warning TEXT,
+      error_code TEXT,
+      error_message TEXT,
+      completed_at TEXT
+    )
+  `);
 }
 async function ensureLegacyLedgerMigrated() {
   if (!isSqlConfigured()) {
@@ -619,8 +779,8 @@ async function ensureLegacyLedgerMigrated() {
           minPriceUsd: 1.99,
           minPriceIdr: 29e3
         }).onConflictDoNothing();
-        if (!fs.existsSync(LEGACY_LEDGER_FILE)) return;
-        const raw = fs.readFileSync(LEGACY_LEDGER_FILE, "utf-8");
+        if (!fs2.existsSync(LEGACY_LEDGER_FILE)) return;
+        const raw = fs2.readFileSync(LEGACY_LEDGER_FILE, "utf-8");
         const parsed = JSON.parse(raw);
         await db.transaction(async (tx) => {
           if (parsed.platformSettings) {
@@ -1993,6 +2153,99 @@ async function updatePlatformSettingsSql(input) {
     throw new Error("Failed to save platform settings.", { cause: error });
   }
 }
+function mapDeletionJobRow(row) {
+  return {
+    operationId: row.operationId,
+    videoId: row.videoId,
+    videoTitleSnapshot: row.videoTitleSnapshot,
+    provider: row.provider,
+    assetRefFingerprint: row.assetRefFingerprint,
+    requestedBy: row.requestedBy,
+    requestedAt: row.requestedAt,
+    status: row.status,
+    providerResult: row.providerResult,
+    firestoreResult: row.firestoreResult,
+    sqlResult: row.sqlResult,
+    thumbnailResult: row.thumbnailResult,
+    externalMediaWarning: row.externalMediaWarning ?? null,
+    errorCode: row.errorCode ?? null,
+    errorMessage: row.errorMessage ?? null,
+    completedAt: row.completedAt ?? null
+  };
+}
+async function createVideoDeletionJobSql(job) {
+  await ensureLegacyLedgerMigrated();
+  await db.insert(videoDeletionJobs).values({
+    operationId: job.operationId,
+    videoId: job.videoId,
+    videoTitleSnapshot: job.videoTitleSnapshot,
+    provider: job.provider,
+    assetRefFingerprint: job.assetRefFingerprint,
+    requestedBy: job.requestedBy,
+    requestedAt: job.requestedAt,
+    status: job.status,
+    providerResult: job.providerResult,
+    firestoreResult: job.firestoreResult,
+    sqlResult: job.sqlResult,
+    thumbnailResult: job.thumbnailResult,
+    externalMediaWarning: job.externalMediaWarning ?? null,
+    errorCode: job.errorCode ?? null,
+    errorMessage: job.errorMessage ?? null,
+    completedAt: job.completedAt ?? null
+  });
+  return job;
+}
+async function updateVideoDeletionJobSql(operationId, patch) {
+  await ensureLegacyLedgerMigrated();
+  await db.update(videoDeletionJobs).set({
+    ...patch.videoTitleSnapshot !== void 0 ? { videoTitleSnapshot: patch.videoTitleSnapshot } : {},
+    ...patch.provider !== void 0 ? { provider: patch.provider } : {},
+    ...patch.assetRefFingerprint !== void 0 ? { assetRefFingerprint: patch.assetRefFingerprint } : {},
+    ...patch.status !== void 0 ? { status: patch.status } : {},
+    ...patch.providerResult !== void 0 ? { providerResult: patch.providerResult } : {},
+    ...patch.firestoreResult !== void 0 ? { firestoreResult: patch.firestoreResult } : {},
+    ...patch.sqlResult !== void 0 ? { sqlResult: patch.sqlResult } : {},
+    ...patch.thumbnailResult !== void 0 ? { thumbnailResult: patch.thumbnailResult } : {},
+    ...patch.externalMediaWarning !== void 0 ? { externalMediaWarning: patch.externalMediaWarning } : {},
+    ...patch.errorCode !== void 0 ? { errorCode: patch.errorCode } : {},
+    ...patch.errorMessage !== void 0 ? { errorMessage: patch.errorMessage } : {},
+    ...patch.completedAt !== void 0 ? { completedAt: patch.completedAt } : {}
+  }).where(eq(videoDeletionJobs.operationId, operationId));
+}
+async function getLatestVideoDeletionJobSql(videoId) {
+  await ensureLegacyLedgerMigrated();
+  const rows = await db.select().from(videoDeletionJobs).where(eq(videoDeletionJobs.videoId, videoId)).orderBy(desc(videoDeletionJobs.requestedAt));
+  return rows[0] ? mapDeletionJobRow(rows[0]) : null;
+}
+async function listVideoDeletionJobsSql(limitCount = 40) {
+  await ensureLegacyLedgerMigrated();
+  const rows = await db.select().from(videoDeletionJobs).orderBy(desc(videoDeletionJobs.requestedAt)).limit(Math.max(1, Math.min(100, limitCount)));
+  return rows.map(mapDeletionJobRow);
+}
+async function getCreatorMediaByVideoIdSql(videoId) {
+  await ensureLegacyLedgerMigrated();
+  const rows = await db.select().from(creatorMedia).where(eq(creatorMedia.videoId, videoId));
+  const m = rows[0];
+  if (!m || m.provider === "thumbnail") return null;
+  return {
+    videoId: m.videoId,
+    creatorId: m.creatorId,
+    provider: m.provider,
+    assetRef: m.assetRef,
+    mimeType: m.mimeType ?? void 0,
+    updatedAtIso: m.updatedAtIso
+  };
+}
+async function deleteCreatorMediaByVideoIdSql(videoId) {
+  await ensureLegacyLedgerMigrated();
+  const deleted = await db.delete(creatorMedia).where(eq(creatorMedia.videoId, videoId)).returning();
+  return { deletedCount: deleted.length };
+}
+async function deleteThumbnailAssetSql(key) {
+  await ensureLegacyLedgerMigrated();
+  const deleted = await db.delete(creatorMedia).where(and(eq(creatorMedia.videoId, key), eq(creatorMedia.provider, "thumbnail"))).returning();
+  return { deletedCount: deleted.length };
+}
 
 // src/db/users.ts
 async function getOrCreateSqlUser(uid, email) {
@@ -2161,74 +2414,34 @@ async function getCloudflareVideoStatus(uid) {
     thumbnailUrl: result?.thumbnail
   };
 }
-
-// firebase-applet-config.json
-var firebase_applet_config_default = {
-  projectId: "yttriferous-bastion-ngtt6",
-  appId: "1:621901173577:web:98e7b6fe05126414104098",
-  apiKey: "AIzaSyA1JGFW57HPUsFgeDdpKGpNQt6-ad-Ubck",
-  authDomain: "yttriferous-bastion-ngtt6.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-vyora-43c45f27-10b7-475d-a607-c73b1a69a858",
-  storageBucket: "yttriferous-bastion-ngtt6.firebasestorage.app",
-  messagingSenderId: "621901173577",
-  measurementId: "",
-  oAuthClientId: "621901173577-i90eh24hnuuuhi34q0leeavvdl1kb7ci.apps.googleusercontent.com",
-  recaptchaSiteKey: ""
-};
-
-// src/utils/youtube.ts
-var YOUTUBE_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/;
-var ALLOWED_YOUTUBE_HOSTS = /* @__PURE__ */ new Set([
-  "youtube.com",
-  "www.youtube.com",
-  "m.youtube.com",
-  "music.youtube.com",
-  "youtu.be",
-  "www.youtu.be",
-  "youtube-nocookie.com",
-  "www.youtube-nocookie.com"
-]);
-function extractYouTubeVideoId(rawInput) {
-  const trimmed = rawInput.trim();
-  if (!trimmed) return null;
-  const withoutPrefix = trimmed.startsWith("youtube:") ? trimmed.slice("youtube:".length).trim() : trimmed;
-  if (YOUTUBE_ID_REGEX.test(withoutPrefix)) {
-    return withoutPrefix;
+async function deleteCloudflareVideo(uid) {
+  const cleanUid = uid.trim();
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(cleanUid)) {
+    throw new Error("Invalid Cloudflare Stream video UID.");
   }
-  let parsed;
-  try {
-    const withScheme = withoutPrefix.startsWith("http://") || withoutPrefix.startsWith("https://") ? withoutPrefix : `https://${withoutPrefix}`;
-    parsed = new URL(withScheme);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    return null;
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (!ALLOWED_YOUTUBE_HOSTS.has(host)) {
-    return null;
-  }
-  let candidate = null;
-  if (host === "youtu.be" || host === "www.youtu.be") {
-    const seg = parsed.pathname.split("/").filter(Boolean)[0] || "";
-    candidate = seg;
-  } else {
-    const vParam = parsed.searchParams.get("v");
-    if (vParam) {
-      candidate = vParam;
-    } else {
-      const parts = parsed.pathname.split("/").filter(Boolean);
-      if (parts.length >= 2 && (parts[0] === "embed" || parts[0] === "shorts" || parts[0] === "live" || parts[0] === "v")) {
-        candidate = parts[1];
-      }
+  const { accountId, apiToken } = getAccountAndToken();
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+    accountId
+  )}/stream/${encodeURIComponent(cleanUid)}`;
+  const res = await fetch(endpoint, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${apiToken}`
     }
+  });
+  if (res.status === 404) {
+    return { deleted: true, alreadyMissing: true };
   }
-  if (candidate && YOUTUBE_ID_REGEX.test(candidate)) {
-    return candidate;
+  if (!res.ok) {
+    throw new Error(`Cloudflare Stream deletion failed with HTTP ${res.status}.`);
   }
-  return null;
+  return { deleted: true, alreadyMissing: false };
 }
+
+// server/mediaLifecycle.ts
+import crypto3 from "node:crypto";
+import fs3 from "node:fs";
+import path3 from "node:path";
 
 // src/utils/facebook.ts
 var ALLOWED_FACEBOOK_HOSTS = /* @__PURE__ */ new Set([
@@ -2299,6 +2512,1742 @@ function getFacebookEmbedUrl(rawUrl, options) {
   return `https://www.facebook.com/plugins/video.php?${params.toString()}`;
 }
 
+// src/utils/youtube.ts
+var YOUTUBE_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/;
+var ALLOWED_YOUTUBE_HOSTS = /* @__PURE__ */ new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+  "youtu.be",
+  "www.youtu.be",
+  "youtube-nocookie.com",
+  "www.youtube-nocookie.com"
+]);
+function extractYouTubeVideoId(rawInput) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const withoutPrefix = trimmed.startsWith("youtube:") ? trimmed.slice("youtube:".length).trim() : trimmed;
+  if (YOUTUBE_ID_REGEX.test(withoutPrefix)) {
+    return withoutPrefix;
+  }
+  let parsed;
+  try {
+    const withScheme = withoutPrefix.startsWith("http://") || withoutPrefix.startsWith("https://") ? withoutPrefix : `https://${withoutPrefix}`;
+    parsed = new URL(withScheme);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return null;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (!ALLOWED_YOUTUBE_HOSTS.has(host)) {
+    return null;
+  }
+  let candidate = null;
+  if (host === "youtu.be" || host === "www.youtu.be") {
+    const seg = parsed.pathname.split("/").filter(Boolean)[0] || "";
+    candidate = seg;
+  } else {
+    const vParam = parsed.searchParams.get("v");
+    if (vParam) {
+      candidate = vParam;
+    } else {
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      if (parts.length >= 2 && (parts[0] === "embed" || parts[0] === "shorts" || parts[0] === "live" || parts[0] === "v")) {
+        candidate = parts[1];
+      }
+    }
+  }
+  if (candidate && YOUTUBE_ID_REGEX.test(candidate)) {
+    return candidate;
+  }
+  return null;
+}
+function getYouTubeThumbnailUrl(videoId) {
+  const cleanId = extractYouTubeVideoId(videoId);
+  if (!cleanId) return "";
+  return `https://i.ytimg.com/vi/${cleanId}/hqdefault.jpg`;
+}
+function getYouTubeNoCookieEmbedUrl(videoId) {
+  const cleanId = extractYouTubeVideoId(videoId);
+  if (!cleanId) return "";
+  return `https://www.youtube-nocookie.com/embed/${cleanId}`;
+}
+
+// src/services/videoImport/urlGuards.ts
+var PRIVATE_IPV4_REGEX = /^(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}|0\.0\.0\.0)$/;
+function isDisallowedClientHost(hostname, allowLocalDev = false) {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (!host) return true;
+  if (host === "localhost" || host === "localhost.localdomain" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0") {
+    return !allowLocalDev;
+  }
+  if (host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost") || host.endsWith(".arpa")) {
+    return true;
+  }
+  if (PRIVATE_IPV4_REGEX.test(host)) {
+    return true;
+  }
+  if (/^(?:fc|fd|fe8|fe9|fea|feb)[0-9a-f]{1,2}:/i.test(host) || host.startsWith("::ffff:")) {
+    return true;
+  }
+  return false;
+}
+function parseStrictHttpsUrl(rawInput, options) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      reasonCode: "EMPTY_URL",
+      messageId: "Masukkan tautan video terlebih dahulu.",
+      messageEn: "Please paste a video URL first."
+    };
+  }
+  if (/[\u0000-\u001f\u007f]/.test(trimmed) || /\s/.test(trimmed)) {
+    return {
+      ok: false,
+      reasonCode: "MALFORMED_URL",
+      messageId: "Tautan mengandung spasi atau karakter kontrol yang tidak valid.",
+      messageEn: "URL contains invalid whitespace or control characters."
+    };
+  }
+  if (trimmed.length > 980) {
+    return {
+      ok: false,
+      reasonCode: "URL_TOO_LONG",
+      messageId: "Tautan terlalu panjang (maksimal 980 karakter).",
+      messageEn: "URL is too long (maximum 980 characters)."
+    };
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("javascript:") || lower.startsWith("data:") || lower.startsWith("blob:") || lower.startsWith("file:") || lower.startsWith("vbscript:") || lower.startsWith("ftp:")) {
+    return {
+      ok: false,
+      reasonCode: "UNSUPPORTED_SCHEME",
+      messageId: "Skema tautan tidak diizinkan. Hanya tautan HTTPS resmi yang diperbolehkan.",
+      messageEn: "URL scheme is not allowed. Only official HTTPS links are permitted."
+    };
+  }
+  const hasExplicitScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
+  if (!hasExplicitScheme && options?.allowBareHostname === false) {
+    return {
+      ok: false,
+      reasonCode: "MISSING_HTTPS",
+      messageId: "Tautan harus diawali dengan https://.",
+      messageEn: "URL must start with https://."
+    };
+  }
+  const candidate = hasExplicitScheme ? trimmed : `https://${trimmed}`;
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return {
+      ok: false,
+      reasonCode: "INVALID_URL",
+      messageId: "Format URL tidak valid.",
+      messageEn: "Invalid URL syntax."
+    };
+  }
+  if (parsed.username || parsed.password) {
+    return {
+      ok: false,
+      reasonCode: "CREDENTIALS_IN_URL",
+      messageId: "Tautan tidak boleh menyertakan username atau password.",
+      messageEn: "URLs with embedded credentials are not allowed."
+    };
+  }
+  const isLocalHost = parsed.hostname.toLowerCase() === "localhost" || parsed.hostname === "127.0.0.1";
+  const allowLocal = Boolean(options?.allowLocalHttp && isLocalHost);
+  if (parsed.protocol !== "https:" && !(allowLocal && parsed.protocol === "http:")) {
+    return {
+      ok: false,
+      reasonCode: "HTTPS_REQUIRED",
+      messageId: "Hanya protokol HTTPS yang diizinkan untuk tautan video eksternal.",
+      messageEn: "Only HTTPS URLs are permitted for external video links."
+    };
+  }
+  if (isDisallowedClientHost(parsed.hostname, allowLocal)) {
+    return {
+      ok: false,
+      reasonCode: "PRIVATE_OR_LOCAL_HOST_BLOCKED",
+      messageId: "Alamat jaringan lokal atau IP internal tidak diizinkan.",
+      messageEn: "Local network or private IP addresses are not permitted."
+    };
+  }
+  if (!parsed.hostname.includes(".") && !allowLocal) {
+    return {
+      ok: false,
+      reasonCode: "INVALID_HOST",
+      messageId: "Domain pada tautan tidak valid.",
+      messageEn: "Invalid domain name in URL."
+    };
+  }
+  return { ok: true, url: parsed };
+}
+
+// src/services/videoImport/adapters.ts
+var YOUTUBE_HOSTS = /* @__PURE__ */ new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+  "youtu.be",
+  "www.youtu.be",
+  "youtube-nocookie.com",
+  "www.youtube-nocookie.com"
+]);
+var VIMEO_HOSTS = /* @__PURE__ */ new Set([
+  "vimeo.com",
+  "www.vimeo.com",
+  "player.vimeo.com"
+]);
+var DAILYMOTION_HOSTS = /* @__PURE__ */ new Set([
+  "dailymotion.com",
+  "www.dailymotion.com",
+  "dai.ly",
+  "www.dai.ly",
+  "geo.dailymotion.com"
+]);
+var STREAMABLE_HOSTS = /* @__PURE__ */ new Set([
+  "streamable.com",
+  "www.streamable.com"
+]);
+var TIKTOK_HOSTS = /* @__PURE__ */ new Set([
+  "tiktok.com",
+  "www.tiktok.com",
+  "m.tiktok.com",
+  "vt.tiktok.com",
+  "vm.tiktok.com"
+]);
+var FACEBOOK_HOSTS = /* @__PURE__ */ new Set([
+  "facebook.com",
+  "www.facebook.com",
+  "m.facebook.com",
+  "web.facebook.com",
+  "mbasic.facebook.com",
+  "fb.watch",
+  "www.fb.watch"
+]);
+var X_HOSTS = /* @__PURE__ */ new Set([
+  "x.com",
+  "www.x.com",
+  "mobile.x.com",
+  "twitter.com",
+  "www.twitter.com",
+  "mobile.twitter.com"
+]);
+var INSTAGRAM_HOSTS = /* @__PURE__ */ new Set([
+  "instagram.com",
+  "www.instagram.com",
+  "m.instagram.com"
+]);
+function extractVimeoVideoRef(rawInput) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith("vimeo:") ? trimmed.slice("vimeo:".length).trim() : trimmed;
+  if (/^\d{5,14}(?::[a-zA-Z0-9]{6,24})?$/.test(cleaned)) {
+    const [id2, hash2] = cleaned.split(":");
+    const qs2 = hash2 ? `?h=${encodeURIComponent(hash2)}` : "";
+    return {
+      id: id2,
+      hash: hash2,
+      canonicalRef: hash2 ? `${id2}:${hash2}` : id2,
+      canonicalUrl: hash2 ? `https://vimeo.com/${id2}/${hash2}` : `https://vimeo.com/${id2}`,
+      embedUrl: `https://player.vimeo.com/video/${id2}${qs2}`
+    };
+  }
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  const host = parsed.hostname.toLowerCase();
+  if (!VIMEO_HOSTS.has(host)) return null;
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  let id = null;
+  let hash = parsed.searchParams.get("h") || void 0;
+  if (host === "player.vimeo.com" && segments[0] === "video" && /^\d{5,14}$/.test(segments[1] || "")) {
+    id = segments[1];
+  } else if (segments.length >= 1) {
+    for (let i = 0; i < segments.length; i += 1) {
+      if (/^\d{5,14}$/.test(segments[i])) {
+        id = segments[i];
+        if (!hash && segments[i + 1] && /^[a-zA-Z0-9]{6,24}$/.test(segments[i + 1])) {
+          hash = segments[i + 1];
+        }
+        break;
+      }
+    }
+  }
+  if (!id) return null;
+  const safeHash = hash && /^[a-zA-Z0-9]{6,24}$/.test(hash) ? hash : void 0;
+  const qs = safeHash ? `?h=${encodeURIComponent(safeHash)}` : "";
+  return {
+    id,
+    hash: safeHash,
+    canonicalRef: safeHash ? `${id}:${safeHash}` : id,
+    canonicalUrl: safeHash ? `https://vimeo.com/${id}/${safeHash}` : `https://vimeo.com/${id}`,
+    embedUrl: `https://player.vimeo.com/video/${id}${qs}`
+  };
+}
+function extractDailymotionVideoId(rawInput) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith("dailymotion:") ? trimmed.slice("dailymotion:".length).trim() : trimmed;
+  if (/^x[a-zA-Z0-9]{5,12}$/.test(cleaned)) {
+    return cleaned;
+  }
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  const host = parsed.hostname.toLowerCase();
+  if (!DAILYMOTION_HOSTS.has(host)) return null;
+  const segs = parsed.pathname.split("/").filter(Boolean);
+  let candidate = null;
+  if (host === "dai.ly" || host === "www.dai.ly") {
+    candidate = segs[0] || null;
+  } else if (host === "geo.dailymotion.com") {
+    candidate = parsed.searchParams.get("video");
+  } else if (segs[0] === "video" && segs[1]) {
+    candidate = segs[1].split("_")[0] || null;
+  } else if (segs[0] === "embed" && segs[1] === "video" && segs[2]) {
+    candidate = segs[2].split("_")[0] || null;
+  }
+  if (candidate && /^[a-zA-Z0-9]{5,16}$/.test(candidate)) {
+    return candidate;
+  }
+  return null;
+}
+function extractStreamableId(rawInput) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith("streamable:") ? trimmed.slice("streamable:".length).trim() : trimmed;
+  if (/^[a-zA-Z0-9]{4,14}$/.test(cleaned) && trimmed.startsWith("streamable:")) {
+    return cleaned;
+  }
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  if (!STREAMABLE_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+  const segs = parsed.pathname.split("/").filter(Boolean);
+  const candidate = segs[0] === "e" || segs[0] === "o" || segs[0] === "s" ? segs[1] : segs[0];
+  if (candidate && /^[a-zA-Z0-9]{4,14}$/.test(candidate)) {
+    return candidate;
+  }
+  return null;
+}
+function extractTikTokVideoInfo(rawInput) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith("tiktok:") ? trimmed.slice("tiktok:".length).trim() : trimmed;
+  if (/^\d{15,24}$/.test(cleaned) && trimmed.startsWith("tiktok:")) {
+    return {
+      videoId: cleaned,
+      canonicalUrl: `https://www.tiktok.com/video/${cleaned}`,
+      canonicalRef: cleaned,
+      isShortUrl: false
+    };
+  }
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  const host = parsed.hostname.toLowerCase();
+  if (!TIKTOK_HOSTS.has(host)) return null;
+  const segs = parsed.pathname.split("/").filter(Boolean);
+  if (host === "vm.tiktok.com" || host === "vt.tiktok.com" || segs[0] === "t") {
+    const code = host === "vm.tiktok.com" || host === "vt.tiktok.com" ? segs[0] : segs[1];
+    if (!code || !/^[a-zA-Z0-9_-]{4,40}$/.test(code)) return null;
+    const canonicalUrl = `https://${host}/${segs[0] === "t" ? `t/${code}` : code}/`;
+    return {
+      videoId: null,
+      canonicalUrl,
+      canonicalRef: canonicalUrl,
+      isShortUrl: true
+    };
+  }
+  const vidIndex = segs.indexOf("video");
+  if (vidIndex >= 0 && segs[vidIndex + 1] && /^\d{15,24}$/.test(segs[vidIndex + 1])) {
+    const videoId = segs[vidIndex + 1];
+    const handle = vidIndex === 1 && segs[0].startsWith("@") ? segs[0] : null;
+    const canonicalUrl = handle ? `https://www.tiktok.com/${handle}/video/${videoId}` : `https://www.tiktok.com/video/${videoId}`;
+    return {
+      videoId,
+      canonicalUrl,
+      canonicalRef: canonicalUrl,
+      isShortUrl: false
+    };
+  }
+  if (segs[0] === "embed" && segs[1] === "v2" && segs[2] && /^\d{15,24}$/.test(segs[2])) {
+    const videoId = segs[2];
+    return {
+      videoId,
+      canonicalUrl: `https://www.tiktok.com/video/${videoId}`,
+      canonicalRef: `https://www.tiktok.com/video/${videoId}`,
+      isShortUrl: false
+    };
+  }
+  return null;
+}
+function extractXPostInfo(rawInput) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith("x:") ? trimmed.slice("x:".length).trim() : trimmed;
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  const host = parsed.hostname.toLowerCase();
+  if (!X_HOSTS.has(host)) return null;
+  const segs = parsed.pathname.split("/").filter(Boolean);
+  let statusId = null;
+  let username = "i";
+  if (segs.length >= 3 && (segs[1] === "status" || segs[1] === "statuses") && /^\d{10,24}$/.test(segs[2])) {
+    username = segs[0];
+    statusId = segs[2];
+  } else if (segs.length >= 4 && segs[0] === "i" && segs[2] === "status" && /^\d{10,24}$/.test(segs[3])) {
+    username = "i";
+    statusId = segs[3];
+  }
+  if (!statusId || !/^[a-zA-Z0-9_]{1,32}$/.test(username)) return null;
+  const canonicalUrl = `https://x.com/${username}/status/${statusId}`;
+  return { statusId, username, canonicalUrl };
+}
+function extractInstagramPostInfo(rawInput) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith("instagram:") ? trimmed.slice("instagram:".length).trim() : trimmed;
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  if (!INSTAGRAM_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+  const segs = parsed.pathname.split("/").filter(Boolean);
+  if (segs.length < 2) return null;
+  const rawKind = segs[0];
+  const kind = rawKind === "p" ? "p" : rawKind === "reel" || rawKind === "reels" ? "reel" : rawKind === "tv" ? "tv" : null;
+  const shortcode = segs[1];
+  if (!kind || !shortcode || !/^[a-zA-Z0-9_-]{5,40}$/.test(shortcode)) return null;
+  const canonicalUrl = `https://www.instagram.com/${kind}/${shortcode}/`;
+  const embedUrl = `https://www.instagram.com/${kind}/${shortcode}/embed/`;
+  return { kind, shortcode, canonicalUrl, embedUrl };
+}
+function inferDirectFormatFromUrl(url) {
+  const pathname = url.pathname.toLowerCase();
+  if (pathname.endsWith(".m3u8")) return "hls";
+  if (pathname.endsWith(".mpd")) return "dash";
+  if (pathname.endsWith(".mp4") || pathname.endsWith(".m4v") || pathname.endsWith(".webm") || pathname.endsWith(".mov") || pathname.endsWith(".ogv") || pathname.endsWith(".ogg")) {
+    return "mp4";
+  }
+  const formatParam = (url.searchParams.get("format") || "").toLowerCase();
+  if (formatParam === "m3u8" || formatParam === "hls") return "hls";
+  if (formatParam === "mpd" || formatParam === "dash") return "dash";
+  if (formatParam === "mp4" || formatParam === "webm") return "mp4";
+  return null;
+}
+var youtubeAdapter = {
+  id: "youtube",
+  label: "YouTube",
+  allowedHosts: YOUTUBE_HOSTS,
+  verifiability: "verifiable",
+  detect: (rawInput) => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) return null;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
+      const check = parseStrictHttpsUrl(trimmed, { allowBareHostname: false });
+      if (!check.ok) return null;
+      if (!YOUTUBE_HOSTS.has(check.url.hostname.toLowerCase())) return null;
+    } else if (!trimmed.startsWith("youtube:") && !/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
+      const check = parseStrictHttpsUrl(trimmed, { allowBareHostname: true });
+      if (!check.ok || !YOUTUBE_HOSTS.has(check.url.hostname.toLowerCase())) return null;
+    }
+    const ytId = extractYouTubeVideoId(trimmed);
+    if (!ytId) return null;
+    return {
+      provider: "youtube",
+      platformLabel: "YouTube",
+      originalUrl: trimmed,
+      canonicalRef: ytId,
+      canonicalUrl: `https://www.youtube.com/watch?v=${ytId}`,
+      embedUrl: getYouTubeNoCookieEmbedUrl(ytId),
+      thumbnailUrl: getYouTubeThumbnailUrl(ytId),
+      verifiability: "verifiable",
+      verifiabilityNoteId: "Menggunakan YouTube IFrame Player API resmi. Sistem dapat memverifikasi pemutaran nyata dan izin penyematan.",
+      verifiabilityNoteEn: "Uses official YouTube IFrame Player API. Real playback and embed permissions are verified directly."
+    };
+  }
+};
+var vimeoAdapter = {
+  id: "vimeo",
+  label: "Vimeo",
+  allowedHosts: VIMEO_HOSTS,
+  verifiability: "verifiable",
+  detect: (rawInput) => {
+    const info = extractVimeoVideoRef(rawInput);
+    if (!info) return null;
+    return {
+      provider: "vimeo",
+      platformLabel: "Vimeo",
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.canonicalRef,
+      canonicalUrl: info.canonicalUrl,
+      embedUrl: info.embedUrl,
+      verifiability: "verifiable",
+      verifiabilityNoteId: "Menggunakan Vimeo Player API resmi (postMessage). Pemutaran nyata diverifikasi langsung dari event player.",
+      verifiabilityNoteEn: "Uses official Vimeo Player API (postMessage). Real playback is verified from live player events."
+    };
+  }
+};
+var dailymotionAdapter = {
+  id: "dailymotion",
+  label: "Dailymotion",
+  allowedHosts: DAILYMOTION_HOSTS,
+  verifiability: "verifiable",
+  detect: (rawInput) => {
+    const dmId = extractDailymotionVideoId(rawInput);
+    if (!dmId) return null;
+    return {
+      provider: "dailymotion",
+      platformLabel: "Dailymotion",
+      originalUrl: rawInput.trim(),
+      canonicalRef: dmId,
+      canonicalUrl: `https://www.dailymotion.com/video/${dmId}`,
+      embedUrl: `https://www.dailymotion.com/embed/video/${dmId}?api=postMessage&autoplay=0`,
+      verifiability: "verifiable",
+      verifiabilityNoteId: "Menggunakan Dailymotion Embed Player API resmi. Status putar diverifikasi dari event player resmi.",
+      verifiabilityNoteEn: "Uses official Dailymotion Embed Player API. Playback status is verified from live player events."
+    };
+  }
+};
+var streamableAdapter = {
+  id: "streamable",
+  label: "Streamable",
+  allowedHosts: STREAMABLE_HOSTS,
+  verifiability: "conditional",
+  detect: (rawInput) => {
+    const id = extractStreamableId(rawInput);
+    if (!id) return null;
+    return {
+      provider: "streamable",
+      platformLabel: "Streamable",
+      originalUrl: rawInput.trim(),
+      canonicalRef: id,
+      canonicalUrl: `https://streamable.com/${id}`,
+      embedUrl: `https://streamable.com/e/${id}`,
+      verifiability: "conditional",
+      verifiabilityNoteId: "Menggunakan embed resmi Streamable. Tombol Lanjutkan aktif hanya jika player mengirim event pemutaran nyata.",
+      verifiabilityNoteEn: "Uses official Streamable embed. Continue unlocks only if the embed emits real playback events."
+    };
+  }
+};
+var tiktokAdapter = {
+  id: "tiktok",
+  label: "TikTok",
+  allowedHosts: TIKTOK_HOSTS,
+  verifiability: "conditional",
+  detect: (rawInput) => {
+    const info = extractTikTokVideoInfo(rawInput);
+    if (!info) return null;
+    return {
+      provider: "tiktok",
+      platformLabel: "TikTok",
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.canonicalRef,
+      canonicalUrl: info.canonicalUrl,
+      embedUrl: info.videoId ? `https://www.tiktok.com/player/v1/${info.videoId}?autoplay=0&controls=1` : void 0,
+      verifiability: "conditional",
+      verifiabilityNoteId: "Menggunakan TikTok Embed Player resmi. Jika browser atau TikTok membatasi event lintas-domain, status akan dilaporkan jujur sebagai Tidak Dapat Diverifikasi.",
+      verifiabilityNoteEn: "Uses official TikTok Embed Player. If cross-origin playback events are blocked by TikTok or the browser, status will honestly report as Not Verifiable."
+    };
+  }
+};
+var facebookAdapter = {
+  id: "facebook",
+  label: "Facebook",
+  allowedHosts: FACEBOOK_HOSTS,
+  verifiability: "unverifiable",
+  detect: (rawInput) => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) return null;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
+      const check = parseStrictHttpsUrl(trimmed, { allowBareHostname: false });
+      if (!check.ok || !FACEBOOK_HOSTS.has(check.url.hostname.toLowerCase())) return null;
+    } else if (!trimmed.startsWith("facebook:")) {
+      const check = parseStrictHttpsUrl(trimmed, { allowBareHostname: true });
+      if (!check.ok || !FACEBOOK_HOSTS.has(check.url.hostname.toLowerCase())) return null;
+    }
+    const fbUrl = extractFacebookVideoUrl(trimmed);
+    if (!fbUrl) return null;
+    return {
+      provider: "facebook",
+      platformLabel: "Facebook",
+      originalUrl: trimmed,
+      canonicalRef: fbUrl,
+      canonicalUrl: fbUrl,
+      embedUrl: getFacebookEmbedUrl(fbUrl, { autoplay: false }),
+      verifiability: "unverifiable",
+      verifiabilityNoteId: "Facebook Video Plugin berjalan di iframe terisolasi dan tidak menyediakan konfirmasi status PLAY lintas-domain. Pemutaran video ini tidak dapat diverifikasi otomatis oleh sistem.",
+      verifiabilityNoteEn: "Facebook Video Plugin runs in an isolated iframe without reliable cross-origin PLAY verification. Playback cannot be automatically confirmed."
+    };
+  }
+};
+var xAdapter = {
+  id: "x",
+  label: "X (Twitter)",
+  allowedHosts: X_HOSTS,
+  verifiability: "unverifiable",
+  detect: (rawInput) => {
+    const info = extractXPostInfo(rawInput);
+    if (!info) return null;
+    return {
+      provider: "x",
+      platformLabel: "X (Twitter)",
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.canonicalUrl,
+      canonicalUrl: info.canonicalUrl,
+      verifiability: "unverifiable",
+      verifiabilityNoteId: "X (Twitter) hanya menyediakan embed postingan (oEmbed) tanpa API verifikasi playback video langsung yang andal lintas-domain.",
+      verifiabilityNoteEn: "X (Twitter) provides post oEmbed cards without a reliable cross-origin HTML5 video playback confirmation API."
+    };
+  }
+};
+var instagramAdapter = {
+  id: "instagram",
+  label: "Instagram",
+  allowedHosts: INSTAGRAM_HOSTS,
+  verifiability: "unverifiable",
+  detect: (rawInput) => {
+    const info = extractInstagramPostInfo(rawInput);
+    if (!info) return null;
+    return {
+      provider: "instagram",
+      platformLabel: "Instagram",
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.canonicalUrl,
+      canonicalUrl: info.canonicalUrl,
+      embedUrl: info.embedUrl,
+      verifiability: "unverifiable",
+      verifiabilityNoteId: "Embed Instagram tidak menyediakan API status pemutaran lintas-domain dan sering meminta login Instagram.",
+      verifiabilityNoteEn: "Instagram embeds expose no cross-origin playback verification API and frequently trigger login walls."
+    };
+  }
+};
+var directVideoAdapter = {
+  id: "direct_video",
+  label: "Direct Video / Stream",
+  verifiability: "verifiable",
+  detect: (rawInput) => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) return null;
+    const clean = trimmed.startsWith("direct:") ? trimmed.slice("direct:".length).trim() : trimmed;
+    const parsedRes = parseStrictHttpsUrl(clean, {
+      allowBareHostname: false,
+      allowLocalHttp: false
+    });
+    if (!parsedRes.ok) return null;
+    const host = parsedRes.url.hostname.toLowerCase();
+    if (YOUTUBE_HOSTS.has(host) || VIMEO_HOSTS.has(host) || DAILYMOTION_HOSTS.has(host) || STREAMABLE_HOSTS.has(host) || TIKTOK_HOSTS.has(host) || FACEBOOK_HOSTS.has(host) || X_HOSTS.has(host) || INSTAGRAM_HOSTS.has(host)) {
+      return null;
+    }
+    const directFormat = inferDirectFormatFromUrl(parsedRes.url) ?? void 0;
+    const formatLabel = directFormat === "hls" ? "Direct Stream (HLS .m3u8)" : directFormat === "dash" ? "Direct Stream (MPEG-DASH .mpd)" : directFormat === "mp4" ? "Direct Video (MP4 / WebM / MOV)" : "Direct HTTPS Video URL";
+    return {
+      provider: "direct_video",
+      platformLabel: formatLabel,
+      originalUrl: trimmed,
+      canonicalRef: parsedRes.url.toString(),
+      canonicalUrl: parsedRes.url.toString(),
+      directFormat,
+      verifiability: "verifiable",
+      verifiabilityNoteId: "Pemutaran MP4, WebM, MOV, HLS (.m3u8), atau MPEG-DASH (.mpd) diverifikasi langsung melalui HTML5 Video, hls.js, atau dash.js.",
+      verifiabilityNoteEn: "MP4, WebM, MOV, HLS (.m3u8), or MPEG-DASH (.mpd) playback is verified directly via HTML5 Video, hls.js, or dash.js."
+    };
+  }
+};
+var VIDEO_PLATFORM_ADAPTERS = [
+  youtubeAdapter,
+  vimeoAdapter,
+  dailymotionAdapter,
+  streamableAdapter,
+  tiktokAdapter,
+  facebookAdapter,
+  xAdapter,
+  instagramAdapter,
+  directVideoAdapter
+];
+
+// server/mediaLifecycle.ts
+var EXTERNAL_LINK_PROVIDERS = /* @__PURE__ */ new Set([
+  "youtube",
+  "vimeo",
+  "dailymotion",
+  "tiktok",
+  "facebook",
+  "x",
+  "instagram",
+  "streamable",
+  "direct_video"
+]);
+function isExternalLinkProvider(provider) {
+  return provider !== "unknown" && EXTERNAL_LINK_PROVIDERS.has(provider);
+}
+var VALID_RESTORABLE_STATUSES = /* @__PURE__ */ new Set([
+  "draft",
+  "pending_review",
+  "approved",
+  "rejected",
+  "published"
+]);
+function isValidSafePathSegment(value) {
+  return typeof value === "string" && value.length >= 1 && value.length <= 128 && /^[a-zA-Z0-9_-]+$/.test(value);
+}
+function safeResolveInUploadsDir(uploadsDir, ownerUid, fileName) {
+  if (!isValidSafePathSegment(ownerUid) || !/^[a-zA-Z0-9._-]+$/.test(fileName)) {
+    return null;
+  }
+  if (fileName === "." || fileName === ".." || fileName.includes("..")) {
+    return null;
+  }
+  const rootResolved = path3.resolve(uploadsDir);
+  const ownerDir = path3.resolve(rootResolved, ownerUid);
+  const target = path3.resolve(ownerDir, fileName);
+  if (!ownerDir.startsWith(rootResolved + path3.sep) || !target.startsWith(ownerDir + path3.sep)) {
+    return null;
+  }
+  return target;
+}
+function validatePrivateStorageAssetRef(uploadsDir, rawRef) {
+  const trimmed = rawRef.trim();
+  if (trimmed === "stream-cinema" || trimmed === "stream-doc") {
+    return { kind: "shared_preset", preset: trimmed };
+  }
+  if (!trimmed.startsWith("private/uploads/") || trimmed.includes("..") || trimmed.includes("\\") || trimmed.includes("?") || trimmed.includes("#")) {
+    return { kind: "invalid", reason: "Asset path violates private/uploads/ format." };
+  }
+  const match = /^private\/uploads\/([a-zA-Z0-9_-]{1,128})\/([a-zA-Z0-9._-]+)$/.exec(
+    trimmed
+  );
+  if (!match) {
+    return { kind: "invalid", reason: "Asset path segments contain disallowed characters." };
+  }
+  const [, ownerUid, fileName] = match;
+  const resolvedPath = safeResolveInUploadsDir(uploadsDir, ownerUid, fileName);
+  if (!resolvedPath) {
+    return { kind: "invalid", reason: "Resolved path escaped upload root directory." };
+  }
+  return {
+    kind: "uploaded_file",
+    ownerUid,
+    fileName,
+    resolvedPath
+  };
+}
+function normalizeMediaSource(rawProvider, rawRef) {
+  const p = (rawProvider || "").trim();
+  const r = (rawRef || "").trim();
+  if (p === "cloudflare_stream") {
+    return { provider: "cloudflare_stream", assetRef: r };
+  }
+  if (p === "youtube" || r.startsWith("youtube:")) {
+    return {
+      provider: "youtube",
+      assetRef: r.startsWith("youtube:") ? r.slice("youtube:".length).trim() : r
+    };
+  }
+  if (p === "facebook" || r.startsWith("facebook:")) {
+    return {
+      provider: "facebook",
+      assetRef: r.startsWith("facebook:") ? r.slice("facebook:".length).trim() : r
+    };
+  }
+  if (p === "vimeo" || r.startsWith("vimeo:")) {
+    return {
+      provider: "vimeo",
+      assetRef: r.startsWith("vimeo:") ? r.slice("vimeo:".length).trim() : r
+    };
+  }
+  if (p === "dailymotion" || r.startsWith("dailymotion:")) {
+    return {
+      provider: "dailymotion",
+      assetRef: r.startsWith("dailymotion:") ? r.slice("dailymotion:".length).trim() : r
+    };
+  }
+  if (p === "streamable" || r.startsWith("streamable:")) {
+    return {
+      provider: "streamable",
+      assetRef: r.startsWith("streamable:") ? r.slice("streamable:".length).trim() : r
+    };
+  }
+  if (p === "tiktok" || r.startsWith("tiktok:")) {
+    return {
+      provider: "tiktok",
+      assetRef: r.startsWith("tiktok:") ? r.slice("tiktok:".length).trim() : r
+    };
+  }
+  if (p === "x" || r.startsWith("x:")) {
+    return {
+      provider: "x",
+      assetRef: r.startsWith("x:") ? r.slice("x:".length).trim() : r
+    };
+  }
+  if (p === "instagram" || r.startsWith("instagram:")) {
+    return {
+      provider: "instagram",
+      assetRef: r.startsWith("instagram:") ? r.slice("instagram:".length).trim() : r
+    };
+  }
+  if (p === "direct_video" || r.startsWith("direct:")) {
+    return {
+      provider: "direct_video",
+      assetRef: r.startsWith("direct:") ? r.slice("direct:".length).trim() : r
+    };
+  }
+  if (p === "private_storage") {
+    return { provider: "private_storage", assetRef: r };
+  }
+  return { provider: "unknown", assetRef: r };
+}
+function validateExternalProviderAssetRef(provider, assetRef) {
+  if (provider === "youtube") return Boolean(extractYouTubeVideoId(assetRef));
+  if (provider === "facebook") return Boolean(extractFacebookVideoUrl(assetRef));
+  if (provider === "vimeo") return Boolean(extractVimeoVideoRef(assetRef));
+  if (provider === "dailymotion") return Boolean(extractDailymotionVideoId(assetRef));
+  if (provider === "streamable") return Boolean(extractStreamableId(assetRef));
+  if (provider === "tiktok") return Boolean(extractTikTokVideoInfo(assetRef));
+  if (provider === "x") return Boolean(extractXPostInfo(assetRef));
+  if (provider === "instagram") return Boolean(extractInstagramPostInfo(assetRef));
+  if (provider === "direct_video") {
+    return parseStrictHttpsUrl(assetRef, { allowBareHostname: false }).ok;
+  }
+  return false;
+}
+function buildAssetRefFingerprint(provider, assetRef) {
+  const clean = assetRef.trim();
+  if (!clean) return `${provider}:empty`;
+  const shortHash = crypto3.createHash("sha256").update(`${provider}:${clean}`).digest("hex").slice(0, 10);
+  if (provider === "cloudflare_stream") {
+    const head = clean.slice(0, 6);
+    const tail = clean.length > 10 ? clean.slice(-4) : "";
+    return `cf:${head}...${tail}#${shortHash}`;
+  }
+  if (provider === "private_storage") {
+    if (clean === "stream-cinema" || clean === "stream-doc") {
+      return `preset:${clean}`;
+    }
+    const base = path3.posix.basename(clean).slice(0, 28);
+    return `local:${base}#${shortHash}`;
+  }
+  if (provider === "youtube") {
+    const ytId = extractYouTubeVideoId(clean);
+    return ytId ? `yt:${ytId}` : `yt:#${shortHash}`;
+  }
+  if (provider === "vimeo") {
+    const vimeo = extractVimeoVideoRef(clean);
+    return vimeo ? `vimeo:${vimeo.id}` : `vimeo:#${shortHash}`;
+  }
+  if (provider === "dailymotion") {
+    const dmId = extractDailymotionVideoId(clean);
+    return dmId ? `dm:${dmId}` : `dm:#${shortHash}`;
+  }
+  if (provider === "streamable") {
+    const stId = extractStreamableId(clean);
+    return stId ? `streamable:${stId}` : `streamable:#${shortHash}`;
+  }
+  if (provider === "tiktok") {
+    return `tiktok:#${shortHash}`;
+  }
+  if (provider === "x") {
+    return `x:#${shortHash}`;
+  }
+  if (provider === "instagram") {
+    return `ig:#${shortHash}`;
+  }
+  if (provider === "direct_video") {
+    try {
+      const u = new URL(clean);
+      return `direct:${u.hostname}#${shortHash}`;
+    } catch {
+      return `direct:#${shortHash}`;
+    }
+  }
+  if (provider === "facebook") {
+    const fbUrl = extractFacebookVideoUrl(clean);
+    return fbUrl ? `fb:#${shortHash}` : `fb:invalid#${shortHash}`;
+  }
+  return `unknown:#${shortHash}`;
+}
+var PROVIDER_DISPLAY_NAMES = {
+  youtube: "YouTube",
+  facebook: "Facebook",
+  vimeo: "Vimeo",
+  dailymotion: "Dailymotion",
+  tiktok: "TikTok",
+  x: "X (Twitter)",
+  instagram: "Instagram",
+  streamable: "Streamable",
+  direct_video: "URL Video/Stream Eksternal"
+};
+function getExternalPlatformWarning(provider) {
+  const label = PROVIDER_DISPLAY_NAMES[provider];
+  if (!label) return null;
+  return `Video berasal dari ${label}. Menghapus dari DELOKEN hanya menghapus katalog dan referensi tautan internal; media asli di sumber eksternal tidak dihapus.`;
+}
+function getFirestoreBaseUrl(projectId, databaseId) {
+  return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/${encodeURIComponent(databaseId)}/documents`;
+}
+async function firestoreGetDocument(projectId, databaseId, collectionName, docId, bearerToken) {
+  const url = `${getFirestoreBaseUrl(projectId, databaseId)}/${encodeURIComponent(
+    collectionName
+  )}/${encodeURIComponent(docId)}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${bearerToken}` }
+  });
+  if (res.status === 404) {
+    return { exists: false, status: 404, fields: {} };
+  }
+  if (!res.ok) {
+    throw new Error(
+      `Firestore read failed for ${collectionName}/${docId} (HTTP ${res.status}).`
+    );
+  }
+  const json = await res.json();
+  return {
+    exists: true,
+    status: res.status,
+    fields: json.fields ?? {}
+  };
+}
+async function firestoreCommitVideoFields(projectId, databaseId, videoId, fields, bearerToken) {
+  const baseUrl = getFirestoreBaseUrl(projectId, databaseId);
+  const docName = `projects/${projectId}/databases/${databaseId}/documents/videos/${videoId}`;
+  const fieldPaths = Object.keys(fields);
+  const res = await fetch(`${baseUrl}:commit`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearerToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          update: {
+            name: docName,
+            fields
+          },
+          updateMask: {
+            fieldPaths
+          },
+          updateTransforms: [
+            {
+              fieldPath: "updatedAt",
+              setToServerValue: "REQUEST_TIME"
+            }
+          ],
+          currentDocument: {
+            exists: true
+          }
+        }
+      ]
+    })
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    throw new Error(
+      `Firestore commit failed for videos/${videoId} (HTTP ${res.status}): ${errBody.slice(0, 180)}`
+    );
+  }
+}
+async function firestoreDeleteDocument(projectId, databaseId, collectionName, docId, bearerToken) {
+  const url = `${getFirestoreBaseUrl(projectId, databaseId)}/${encodeURIComponent(
+    collectionName
+  )}/${encodeURIComponent(docId)}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${bearerToken}` }
+  });
+  if (res.status === 404) {
+    return { deleted: true, alreadyMissing: true };
+  }
+  if (!res.ok) {
+    throw new Error(
+      `Firestore delete failed for ${collectionName}/${docId} (HTTP ${res.status}).`
+    );
+  }
+  return { deleted: true, alreadyMissing: false };
+}
+async function runFirestoreEqualityQuery(projectId, databaseId, collectionId, fieldPath, value, limit, bearerToken) {
+  const url = `${getFirestoreBaseUrl(projectId, databaseId)}:runQuery`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearerToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath },
+            op: "EQUAL",
+            value: { stringValue: value }
+          }
+        },
+        limit
+      }
+    })
+  });
+  if (!res.ok) {
+    throw new Error(`Firestore runQuery failed (${res.status}).`);
+  }
+  const rows = await res.json();
+  return rows.map((r) => r.document?.name).filter((n) => typeof n === "string" && n.length > 0).map((n) => n.split("/").pop() || "").filter(Boolean);
+}
+async function verifyExclusiveLocalThumbnail(input) {
+  const rawUrl = (input.thumbUrl || "").trim();
+  const match = /^\/api\/media\/thumb\/([^/]+)\/([^/?#]+)$/.exec(rawUrl);
+  if (!match) {
+    return { safeToDelete: false, reason: "external_or_builtin_asset" };
+  }
+  let ownerUid = "";
+  let fileName = "";
+  try {
+    ownerUid = decodeURIComponent(match[1]);
+    fileName = decodeURIComponent(match[2]);
+  } catch {
+    return { safeToDelete: false, reason: "invalid_thumbnail_encoding" };
+  }
+  const resolvedPath = safeResolveInUploadsDir(
+    input.thumbnailsDir,
+    ownerUid,
+    fileName
+  );
+  if (!resolvedPath) {
+    return { safeToDelete: false, reason: "invalid_thumbnail_path" };
+  }
+  if (!input.expectedCreatorId || ownerUid !== input.expectedCreatorId) {
+    return { safeToDelete: false, reason: "thumbnail_ownership_unclear" };
+  }
+  try {
+    const [thumbMatches, backdropMatches, creatorAvatarMatches] = await Promise.all([
+      runFirestoreEqualityQuery(
+        input.projectId,
+        input.databaseId,
+        "videos",
+        "thumbnailUrl",
+        rawUrl,
+        5,
+        input.bearerToken
+      ),
+      runFirestoreEqualityQuery(
+        input.projectId,
+        input.databaseId,
+        "videos",
+        "backdropUrl",
+        rawUrl,
+        5,
+        input.bearerToken
+      ),
+      runFirestoreEqualityQuery(
+        input.projectId,
+        input.databaseId,
+        "creators",
+        "avatarUrl",
+        rawUrl,
+        2,
+        input.bearerToken
+      )
+    ]);
+    const otherVideos = [...thumbMatches, ...backdropMatches].filter(
+      (id) => id !== input.excludeVideoId
+    );
+    if (otherVideos.length > 0 || creatorAvatarMatches.length > 0) {
+      return { safeToDelete: false, reason: "shared_thumbnail_retained" };
+    }
+    return {
+      safeToDelete: true,
+      ownerUid,
+      fileName,
+      resolvedPath,
+      sqlThumbKey: `thumb:${ownerUid}:${fileName}`
+    };
+  } catch {
+    return { safeToDelete: false, reason: "sharing_check_failed_retained" };
+  }
+}
+function deleteFileIfExists(resolvedPath) {
+  if (!fs3.existsSync(resolvedPath)) {
+    return "already_missing";
+  }
+  fs3.unlinkSync(resolvedPath);
+  return "deleted";
+}
+
+// server/videoInspector.ts
+import dns from "node:dns/promises";
+import net from "node:net";
+
+// src/services/videoImport/registry.ts
+function detectVideoSourceFromInput(rawInput) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) {
+    return {
+      detected: null,
+      errorCode: "EMPTY_URL",
+      errorMessageId: "Masukkan tautan video terlebih dahulu.",
+      errorMessageEn: "Please paste a video link first."
+    };
+  }
+  for (const adapter of VIDEO_PLATFORM_ADAPTERS) {
+    const match = adapter.detect(trimmed);
+    if (match) {
+      return { detected: match };
+    }
+  }
+  const guard = parseStrictHttpsUrl(trimmed, { allowBareHostname: true });
+  if (!guard.ok) {
+    return {
+      detected: null,
+      errorCode: guard.reasonCode,
+      errorMessageId: guard.messageId,
+      errorMessageEn: guard.messageEn
+    };
+  }
+  return {
+    detected: null,
+    errorCode: "UNSUPPORTED_PLATFORM_OR_PATH",
+    errorMessageId: "Tautan dari domain atau format ini belum dikenali/didukung untuk embed resmi atau stream langsung.",
+    errorMessageEn: "This URL format or domain is not recognized as a supported official embed or direct stream."
+  };
+}
+
+// server/videoInspector.ts
+var INSPECT_TIMEOUT_MS = 7e3;
+var MAX_REDIRECT_HOPS = 3;
+var MAX_PROBE_BYTES = 32 * 1024;
+var TIKTOK_ALLOWED_HOSTS = /* @__PURE__ */ new Set([
+  "tiktok.com",
+  "www.tiktok.com",
+  "m.tiktok.com",
+  "vt.tiktok.com",
+  "vm.tiktok.com"
+]);
+function ipv4ToInt(ip) {
+  const parts = ip.split(".").map(Number);
+  return (parts[0] << 24 | parts[1] << 16 | parts[2] << 8 | parts[3]) >>> 0;
+}
+function inCidr4(ipInt, base, maskBits) {
+  const baseInt = ipv4ToInt(base);
+  const mask = maskBits === 0 ? 0 : ~0 << 32 - maskBits >>> 0;
+  return (ipInt & mask) === (baseInt & mask);
+}
+function isPrivateOrReservedIp(rawIp) {
+  const ip = rawIp.trim().toLowerCase().replace(/%.*$/, "");
+  const kind = net.isIP(ip);
+  if (kind === 0) return true;
+  if (kind === 4) {
+    const n = ipv4ToInt(ip);
+    return inCidr4(n, "0.0.0.0", 8) || // "This" network
+    inCidr4(n, "10.0.0.0", 8) || // RFC1918
+    inCidr4(n, "100.64.0.0", 10) || // CGNAT
+    inCidr4(n, "127.0.0.0", 8) || // Loopback
+    inCidr4(n, "169.254.0.0", 16) || // Link-local & AWS/GCP metadata
+    inCidr4(n, "172.16.0.0", 12) || // RFC1918
+    inCidr4(n, "192.0.0.0", 24) || // IETF Protocol Assignments
+    inCidr4(n, "192.0.2.0", 24) || // TEST-NET-1
+    inCidr4(n, "192.168.0.0", 16) || // RFC1918
+    inCidr4(n, "198.18.0.0", 15) || // Benchmarking
+    inCidr4(n, "198.51.100.0", 24) || // TEST-NET-2
+    inCidr4(n, "203.0.113.0", 24) || // TEST-NET-3
+    inCidr4(n, "224.0.0.0", 4) || // Multicast
+    inCidr4(n, "240.0.0.0", 4);
+  }
+  if (ip === "::" || ip === "::1") return true;
+  if (ip.startsWith("::ffff:")) {
+    const mapped = ip.slice("::ffff:".length);
+    if (net.isIPv4(mapped)) {
+      return isPrivateOrReservedIp(mapped);
+    }
+    return true;
+  }
+  if (ip.startsWith("fc") || ip.startsWith("fd") || // ULA fc00::/7
+  ip.startsWith("fe8") || ip.startsWith("fe9") || ip.startsWith("fea") || ip.startsWith("feb") || // Link-local fe80::/10
+  ip.startsWith("ff")) {
+    return true;
+  }
+  return false;
+}
+async function assertPublicRoutableTarget(rawUrl, allowedHosts) {
+  const parsedGuard = parseStrictHttpsUrl(rawUrl, {
+    allowBareHostname: false,
+    allowLocalHttp: false
+  });
+  if (!parsedGuard.ok) {
+    throw new Error(parsedGuard.messageEn);
+  }
+  const parsed = parsedGuard.url;
+  if (parsed.port && parsed.port !== "443") {
+    throw new Error("Only standard HTTPS port 443 is allowed.");
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (allowedHosts && !allowedHosts.has(host)) {
+    throw new Error("Target host outside allowed platform domains.");
+  }
+  if (net.isIP(host)) {
+    if (isPrivateOrReservedIp(host)) {
+      throw new Error("Direct private/internal IP targets are blocked.");
+    }
+    return parsed;
+  }
+  const records = await dns.lookup(host, { all: true });
+  if (!records || records.length === 0) {
+    throw new Error("DNS lookup returned no addresses.");
+  }
+  for (const rec of records) {
+    if (isPrivateOrReservedIp(rec.address)) {
+      throw new Error("Target domain resolved to a blocked private or internal IP address.");
+    }
+  }
+  return parsed;
+}
+async function readCappedTextSnippet(response, maxBytes) {
+  if (!response.body) {
+    return { text: "", bytes: new Uint8Array(0) };
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      const take = Math.min(value.byteLength, maxBytes - total);
+      chunks.push(value.subarray(0, take));
+      total += take;
+      if (total >= maxBytes) {
+        await reader.cancel().catch(() => {
+        });
+        break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return {
+    text: new TextDecoder("utf-8", { fatal: false }).decode(combined),
+    bytes: combined
+  };
+}
+async function safePublicFetch(initialUrl, options) {
+  let currentUrl = initialUrl;
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+    const validatedUrl = await assertPublicRoutableTarget(
+      currentUrl,
+      options.allowedHosts
+    );
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), INSPECT_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(validatedUrl.toString(), {
+        method: options.method,
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "DELOKEN-MediaInspector/1.0",
+          ...options.headers || {}
+        }
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location) {
+        return { response: res, finalUrl: validatedUrl.toString() };
+      }
+      if (hop === MAX_REDIRECT_HOPS) {
+        throw new Error("Too many HTTP redirects while inspecting video link.");
+      }
+      currentUrl = new URL(location, validatedUrl).toString();
+      continue;
+    }
+    return { response: res, finalUrl: validatedUrl.toString() };
+  }
+  throw new Error("Redirect limit exceeded.");
+}
+async function probeOfficialOEmbed(oEmbedUrl, platformLabel) {
+  try {
+    const { response } = await safePublicFetch(oEmbedUrl, {
+      method: "GET",
+      headers: { Accept: "application/json" }
+    });
+    if (response.ok) {
+      const snippet = await readCappedTextSnippet(response, MAX_PROBE_BYTES);
+      try {
+        const parsed = JSON.parse(snippet.text);
+        return {
+          status: "ok",
+          httpStatus: response.status,
+          title: typeof parsed.title === "string" ? parsed.title.slice(0, 140) : void 0,
+          authorName: typeof parsed.author_name === "string" ? parsed.author_name.slice(0, 80) : void 0,
+          thumbnailUrl: typeof parsed.thumbnail_url === "string" && parsed.thumbnail_url.startsWith("https://") ? parsed.thumbnail_url.slice(0, 500) : void 0,
+          durationSeconds: typeof parsed.duration === "number" && Number.isFinite(parsed.duration) ? Math.round(parsed.duration) : void 0
+        };
+      } catch {
+        return {
+          status: "uncertain",
+          httpStatus: response.status,
+          errorDetail: `${platformLabel} returned an unexpected oEmbed response.`
+        };
+      }
+    }
+    if (response.status === 401 || response.status === 403) {
+      return { status: "blocked", httpStatus: response.status };
+    }
+    if (response.status === 404 || response.status === 400 || response.status === 410) {
+      return { status: "not_found", httpStatus: response.status };
+    }
+    return { status: "uncertain", httpStatus: response.status };
+  } catch (err) {
+    return {
+      status: "uncertain",
+      errorDetail: err instanceof Error ? err.message : "Network timeout during link probe."
+    };
+  }
+}
+function detectDirectFormatFromProbe(urlObj, contentTypeRaw, snippetText, snippetBytes) {
+  const mime = contentTypeRaw.split(";")[0].trim().toLowerCase();
+  const isHtmlPage = mime === "text/html" || mime === "application/xhtml+xml" || snippetText.trimStart().toLowerCase().startsWith("<!doctype html") || snippetText.trimStart().toLowerCase().startsWith("<html");
+  if (isHtmlPage) {
+    return { isLikelyVideo: false, isHtmlPage: true, directFormat: void 0 };
+  }
+  if (mime === "application/vnd.apple.mpegurl" || mime === "application/x-mpegurl" || mime === "audio/mpegurl" || snippetText.trimStart().startsWith("#EXTM3U")) {
+    return { isLikelyVideo: true, isHtmlPage: false, directFormat: "hls" };
+  }
+  if (mime === "application/dash+xml" || snippetText.includes("<MPD") && snippetText.includes("urn:mpeg:dash:schema:mpd")) {
+    return { isLikelyVideo: true, isHtmlPage: false, directFormat: "dash" };
+  }
+  const hasMp4Box = snippetBytes.byteLength >= 8 && snippetBytes[4] === 102 && snippetBytes[5] === 116 && snippetBytes[6] === 121 && snippetBytes[7] === 112;
+  const hasWebmHeader = snippetBytes.byteLength >= 4 && snippetBytes[0] === 26 && snippetBytes[1] === 69 && snippetBytes[2] === 223 && snippetBytes[3] === 163;
+  if (mime.startsWith("video/") || hasMp4Box || hasWebmHeader) {
+    const inferred = inferDirectFormatFromUrl(urlObj) ?? "mp4";
+    return { isLikelyVideo: true, isHtmlPage: false, directFormat: inferred };
+  }
+  const urlFormat = inferDirectFormatFromUrl(urlObj);
+  if (urlFormat && (mime === "" || mime === "application/octet-stream" || mime === "binary/octet-stream")) {
+    return { isLikelyVideo: true, isHtmlPage: false, directFormat: urlFormat };
+  }
+  return { isLikelyVideo: false, isHtmlPage: false, directFormat: urlFormat ?? void 0 };
+}
+async function inspectUniversalVideoLink(rawUrl) {
+  const detectedOutcome = detectVideoSourceFromInput(rawUrl);
+  if (!detectedOutcome.detected) {
+    return {
+      detected: false,
+      provider: null,
+      platformLabel: "Tidak Dikenal",
+      canonicalRef: "",
+      canonicalUrl: "",
+      linkStatus: "unavailable",
+      reasonCode: detectedOutcome.errorCode || "UNSUPPORTED_URL",
+      messageId: detectedOutcome.errorMessageId || "Tautan tidak valid atau platform tidak didukung.",
+      messageEn: detectedOutcome.errorMessageEn || "Invalid link or unsupported platform.",
+      verifiability: "unverifiable",
+      verifiabilityNoteId: "Tautan tidak dapat ditampilkan.",
+      verifiabilityNoteEn: "Link cannot be embedded or played."
+    };
+  }
+  const source = detectedOutcome.detected;
+  if (source.provider === "youtube" || source.provider === "vimeo" || source.provider === "dailymotion" || source.provider === "streamable") {
+    const oEmbedEndpoint = source.provider === "youtube" ? `https://www.youtube.com/oembed?url=${encodeURIComponent(
+      source.canonicalUrl
+    )}&format=json` : source.provider === "vimeo" ? `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(
+      source.canonicalUrl
+    )}` : source.provider === "dailymotion" ? `https://www.dailymotion.com/services/oembed?url=${encodeURIComponent(
+      source.canonicalUrl
+    )}&format=json` : `https://api.streamable.com/oembed.json?url=${encodeURIComponent(
+      source.canonicalUrl
+    )}`;
+    const probe = await probeOfficialOEmbed(oEmbedEndpoint, source.platformLabel);
+    if (probe.status === "ok") {
+      return {
+        detected: true,
+        provider: source.provider,
+        platformLabel: source.platformLabel,
+        canonicalRef: source.canonicalRef,
+        canonicalUrl: source.canonicalUrl,
+        embedUrl: source.embedUrl,
+        linkStatus: "embeddable",
+        reasonCode: "OEMBED_VERIFIED",
+        messageId: `${source.platformLabel} mengenali video ini dan mengizinkan embed resmi. Klik PREVIEW lalu PLAY untuk memverifikasi pemutaran nyata.`,
+        messageEn: `${source.platformLabel} confirmed official embed availability. Click PREVIEW and then PLAY to verify real playback.`,
+        titleHint: probe.title,
+        authorHint: probe.authorName,
+        thumbnailUrl: probe.thumbnailUrl || source.thumbnailUrl,
+        durationSecondsHint: probe.durationSeconds,
+        verifiability: source.verifiability,
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    if (probe.status === "blocked") {
+      return {
+        detected: true,
+        provider: source.provider,
+        platformLabel: source.platformLabel,
+        canonicalRef: source.canonicalRef,
+        canonicalUrl: source.canonicalUrl,
+        embedUrl: source.embedUrl,
+        linkStatus: "unavailable",
+        reasonCode: "EMBED_DISABLED_BY_OWNER",
+        messageId: `${source.platformLabel} menolak penyematan (HTTP ${probe.httpStatus}). Pemilik video menonaktifkan izin embed atau mengatur video menjadi privat.`,
+        messageEn: `${source.platformLabel} rejected embedding (HTTP ${probe.httpStatus}). Embedding is disabled by owner or video is private.`,
+        thumbnailUrl: source.thumbnailUrl,
+        verifiability: source.verifiability,
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    if (probe.status === "not_found") {
+      return {
+        detected: true,
+        provider: source.provider,
+        platformLabel: source.platformLabel,
+        canonicalRef: source.canonicalRef,
+        canonicalUrl: source.canonicalUrl,
+        embedUrl: source.embedUrl,
+        linkStatus: "unavailable",
+        reasonCode: "VIDEO_NOT_FOUND_OR_PRIVATE",
+        messageId: `Video tidak ditemukan di ${source.platformLabel} atau berstatus privat (HTTP ${probe.httpStatus}).`,
+        messageEn: `Video not found on ${source.platformLabel} or marked private (HTTP ${probe.httpStatus}).`,
+        verifiability: source.verifiability,
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    return {
+      detected: true,
+      provider: source.provider,
+      platformLabel: source.platformLabel,
+      canonicalRef: source.canonicalRef,
+      canonicalUrl: source.canonicalUrl,
+      embedUrl: source.embedUrl,
+      linkStatus: "uncertain",
+      reasonCode: "OEMBED_INCONCLUSIVE",
+      messageId: `Format ${source.platformLabel} valid, namun respons pemeriksaan oEmbed belum dapat dipastikan (${probe.httpStatus || probe.errorDetail || "timeout"}). Anda tetap dapat menekan PREVIEW dan PLAY untuk menguji pemutaran langsung.`,
+      messageEn: `${source.platformLabel} link format is valid, but oEmbed probe was inconclusive (${probe.httpStatus || probe.errorDetail || "timeout"}). You can still press PREVIEW and PLAY to test live playback.`,
+      thumbnailUrl: source.thumbnailUrl,
+      verifiability: source.verifiability,
+      verifiabilityNoteId: source.verifiabilityNoteId,
+      verifiabilityNoteEn: source.verifiabilityNoteEn
+    };
+  }
+  if (source.provider === "tiktok") {
+    let resolvedUrl = source.canonicalUrl;
+    let resolvedRef = source.canonicalRef;
+    let resolvedEmbedUrl = source.embedUrl;
+    if (!resolvedEmbedUrl) {
+      try {
+        const redirectRes = await safePublicFetch(source.canonicalUrl, {
+          method: "HEAD",
+          allowedHosts: TIKTOK_ALLOWED_HOSTS
+        });
+        const resolvedInfo = extractTikTokVideoInfo(redirectRes.finalUrl);
+        if (resolvedInfo?.videoId) {
+          resolvedUrl = resolvedInfo.canonicalUrl;
+          resolvedRef = resolvedInfo.canonicalRef;
+          resolvedEmbedUrl = `https://www.tiktok.com/player/v1/${resolvedInfo.videoId}?autoplay=0&controls=1`;
+        }
+      } catch {
+      }
+    }
+    const probe = await probeOfficialOEmbed(
+      `https://www.tiktok.com/oembed?url=${encodeURIComponent(resolvedUrl)}`,
+      "TikTok"
+    );
+    if (probe.status === "ok") {
+      return {
+        detected: true,
+        provider: "tiktok",
+        platformLabel: "TikTok",
+        canonicalRef: resolvedRef,
+        canonicalUrl: resolvedUrl,
+        embedUrl: resolvedEmbedUrl,
+        linkStatus: resolvedEmbedUrl ? "embeddable" : "uncertain",
+        reasonCode: resolvedEmbedUrl ? "OEMBED_VERIFIED" : "SHORT_URL_NO_VIDEO_ID",
+        messageId: resolvedEmbedUrl ? "TikTok mengembalikan metadata embed resmi. Klik PREVIEW lalu PLAY \u2014 sistem akan jujur melaporkan apakah player TikTok mengirim status putar nyata." : "Tautan pendek TikTok ditemukan, namun ID numerik video belum berhasil diurai untuk player embed.",
+        messageEn: resolvedEmbedUrl ? "TikTok returned official embed metadata. Click PREVIEW then PLAY \u2014 the player will verify whether TikTok emits real playback events." : "TikTok short URL resolved metadata, but numeric video ID could not be extracted for embed playback.",
+        titleHint: probe.title,
+        authorHint: probe.authorName,
+        thumbnailUrl: probe.thumbnailUrl,
+        verifiability: source.verifiability,
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    if (probe.status === "not_found") {
+      return {
+        detected: true,
+        provider: "tiktok",
+        platformLabel: "TikTok",
+        canonicalRef: resolvedRef,
+        canonicalUrl: resolvedUrl,
+        embedUrl: resolvedEmbedUrl,
+        linkStatus: "unavailable",
+        reasonCode: "TIKTOK_UNAVAILABLE",
+        messageId: "Video TikTok tidak ditemukan, privat, atau penyematan dinonaktifkan.",
+        messageEn: "TikTok video is unavailable, private, or embedding is disabled.",
+        verifiability: source.verifiability,
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    return {
+      detected: true,
+      provider: "tiktok",
+      platformLabel: "TikTok",
+      canonicalRef: resolvedRef,
+      canonicalUrl: resolvedUrl,
+      embedUrl: resolvedEmbedUrl,
+      linkStatus: "uncertain",
+      reasonCode: "TIKTOK_OEMBED_UNCERTAIN",
+      messageId: "Pemeriksaan TikTok belum dapat dipastikan karena pembatasan jaringan/API platform. Anda bisa mencoba PREVIEW untuk melihat perilaku embed.",
+      messageEn: "TikTok embed support could not be confirmed due to network/platform restrictions. You can still test PREVIEW.",
+      verifiability: source.verifiability,
+      verifiabilityNoteId: source.verifiabilityNoteId,
+      verifiabilityNoteEn: source.verifiabilityNoteEn
+    };
+  }
+  if (source.provider === "x") {
+    const probe = await probeOfficialOEmbed(
+      `https://publish.twitter.com/oembed?url=${encodeURIComponent(
+        source.canonicalUrl
+      )}&omit_script=true`,
+      "X (Twitter)"
+    );
+    if (probe.status === "ok") {
+      return {
+        detected: true,
+        provider: "x",
+        platformLabel: "X (Twitter)",
+        canonicalRef: source.canonicalRef,
+        canonicalUrl: source.canonicalUrl,
+        linkStatus: "embeddable",
+        reasonCode: "OEMBED_POST_FOUND",
+        messageId: "Postingan X ditemukan melalui oEmbed resmi. Catatan: X tidak menyediakan konfirmasi status pemutaran video lintas-domain yang dapat diverifikasi.",
+        messageEn: "X post confirmed via official oEmbed. Note: X does not provide verifiable cross-origin video playback state.",
+        authorHint: probe.authorName,
+        verifiability: "unverifiable",
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    if (probe.status === "not_found" || probe.status === "blocked") {
+      return {
+        detected: true,
+        provider: "x",
+        platformLabel: "X (Twitter)",
+        canonicalRef: source.canonicalRef,
+        canonicalUrl: source.canonicalUrl,
+        linkStatus: "unavailable",
+        reasonCode: "X_POST_UNAVAILABLE",
+        messageId: `Postingan X tidak ditemukan atau bersifat privat (HTTP ${probe.httpStatus}).`,
+        messageEn: `X post not found or protected (HTTP ${probe.httpStatus}).`,
+        verifiability: "unverifiable",
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    return {
+      detected: true,
+      provider: "x",
+      platformLabel: "X (Twitter)",
+      canonicalRef: source.canonicalRef,
+      canonicalUrl: source.canonicalUrl,
+      linkStatus: "uncertain",
+      reasonCode: "X_OEMBED_UNCERTAIN",
+      messageId: "Pemeriksaan oEmbed X belum dapat dipastikan karena batas akses jaringan/platform.",
+      messageEn: "X oEmbed verification was inconclusive due to network or platform limits.",
+      verifiability: "unverifiable",
+      verifiabilityNoteId: source.verifiabilityNoteId,
+      verifiabilityNoteEn: source.verifiabilityNoteEn
+    };
+  }
+  if (source.provider === "facebook" || source.provider === "instagram") {
+    return {
+      detected: true,
+      provider: source.provider,
+      platformLabel: source.platformLabel,
+      canonicalRef: source.canonicalRef,
+      canonicalUrl: source.canonicalUrl,
+      embedUrl: source.embedUrl,
+      linkStatus: "uncertain",
+      reasonCode: "PLATFORM_NO_PUBLIC_OEMBED",
+      messageId: `Tautan ${source.platformLabel} dikenali, tetapi ketersediaan privasi dan status putar lintas-domain tidak dapat dipastikan dari server. Anda dapat mencoba PREVIEW, namun pemutaran di iframe ${source.platformLabel} tidak dapat diverifikasi oleh sistem.`,
+      messageEn: `${source.platformLabel} URL recognized, but privacy and cross-origin playback cannot be verified automatically. You may try PREVIEW, though playback inside ${source.platformLabel} iframe cannot be confirmed.`,
+      verifiability: "unverifiable",
+      verifiabilityNoteId: source.verifiabilityNoteId,
+      verifiabilityNoteEn: source.verifiabilityNoteEn
+    };
+  }
+  try {
+    let headResult = await safePublicFetch(source.canonicalUrl, {
+      method: "HEAD"
+    });
+    if (headResult.response.status === 405 || headResult.response.status === 403 || headResult.response.status === 501) {
+      headResult = await safePublicFetch(source.canonicalUrl, {
+        method: "GET",
+        headers: { Range: "bytes=0-2047" }
+      });
+    }
+    const res = headResult.response;
+    const finalParsed = new URL(headResult.finalUrl);
+    if (!res.ok) {
+      return {
+        detected: true,
+        provider: "direct_video",
+        platformLabel: source.platformLabel,
+        canonicalRef: headResult.finalUrl,
+        canonicalUrl: headResult.finalUrl,
+        directFormat: source.directFormat,
+        linkStatus: "unavailable",
+        reasonCode: `DIRECT_HTTP_${res.status}`,
+        messageId: res.status === 401 || res.status === 403 ? `Akses ke file video ditolak atau URL kedaluwarsa (HTTP ${res.status}).` : `Tautan video langsung gagal diakses (HTTP ${res.status}).`,
+        messageEn: res.status === 401 || res.status === 403 ? `Direct video access denied or link expired (HTTP ${res.status}).` : `Direct video URL returned HTTP ${res.status}.`,
+        verifiability: "verifiable",
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    const contentType = res.headers.get("content-type") || "";
+    const contentLengthHeader = res.headers.get("content-length");
+    const acceptRanges = res.headers.get("accept-ranges") || "";
+    const acao = res.headers.get("access-control-allow-origin");
+    let snippetText = "";
+    let snippetBytes = new Uint8Array(0);
+    if (contentType.includes("mpegurl") || contentType.includes("dash+xml") || contentType.includes("text/html") || !contentType || contentType.includes("octet-stream")) {
+      try {
+        const rangeRes = await safePublicFetch(headResult.finalUrl, {
+          method: "GET",
+          headers: { Range: "bytes=0-4095" }
+        });
+        if (rangeRes.response.ok) {
+          const snip = await readCappedTextSnippet(rangeRes.response, MAX_PROBE_BYTES);
+          snippetText = snip.text;
+          snippetBytes = snip.bytes;
+        }
+      } catch {
+      }
+    }
+    const formatInspection = detectDirectFormatFromProbe(
+      finalParsed,
+      contentType,
+      snippetText,
+      snippetBytes
+    );
+    if (formatInspection.isHtmlPage || !formatInspection.isLikelyVideo) {
+      return {
+        detected: true,
+        provider: "direct_video",
+        platformLabel: "URL Bukan Media Video",
+        canonicalRef: headResult.finalUrl,
+        canonicalUrl: headResult.finalUrl,
+        linkStatus: "unavailable",
+        reasonCode: formatInspection.isHtmlPage ? "HTML_PAGE_NOT_VIDEO" : "UNSUPPORTED_MIME_TYPE",
+        mimeType: contentType.split(";")[0].trim() || void 0,
+        messageId: formatInspection.isHtmlPage ? "Tautan ini mengarah ke halaman web HTML, bukan file video langsung (.mp4/.webm/.mov/.m3u8/.mpd)." : `Tipe media server (${contentType || "tidak diketahui"}) tidak dikenali sebagai format video atau manifest streaming yang didukung.`,
+        messageEn: formatInspection.isHtmlPage ? "URL points to an HTML web page rather than a direct video or streaming manifest (.mp4/.webm/.mov/.m3u8/.mpd)." : `Server media type (${contentType || "unknown"}) is not a supported video or streaming manifest format.`,
+        verifiability: "verifiable",
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    const resolvedFormat = formatInspection.directFormat || "mp4";
+    const needsCorsForXhr = resolvedFormat === "hls" || resolvedFormat === "dash";
+    const corsReady = acao ? acao.trim().length > 0 : null;
+    const labelByFormat = resolvedFormat === "hls" ? "Direct Stream (HLS .m3u8)" : resolvedFormat === "dash" ? "Direct Stream (MPEG-DASH .mpd)" : "Direct Video (MP4 / WebM / MOV)";
+    if (needsCorsForXhr && corsReady === null) {
+      return {
+        detected: true,
+        provider: "direct_video",
+        platformLabel: labelByFormat,
+        canonicalRef: headResult.finalUrl,
+        canonicalUrl: headResult.finalUrl,
+        directFormat: resolvedFormat,
+        mimeType: contentType.split(";")[0].trim() || void 0,
+        contentLength: contentLengthHeader ? Number(contentLengthHeader) : void 0,
+        supportsRange: acceptRanges.toLowerCase().includes("bytes") || res.status === 206,
+        corsReady: false,
+        linkStatus: "uncertain",
+        reasonCode: "MISSING_CORS_HEADER_FOR_MANIFEST",
+        messageId: `${labelByFormat} ditemukan, namun header CORS (Access-Control-Allow-Origin) tidak terdeteksi. Klik PREVIEW lalu PLAY untuk menguji apakah browser mengizinkan pemutarannya.`,
+        messageEn: `${labelByFormat} detected, but Access-Control-Allow-Origin header was not present. Click PREVIEW and PLAY to test browser playback.`,
+        verifiability: "verifiable",
+        verifiabilityNoteId: source.verifiabilityNoteId,
+        verifiabilityNoteEn: source.verifiabilityNoteEn
+      };
+    }
+    return {
+      detected: true,
+      provider: "direct_video",
+      platformLabel: labelByFormat,
+      canonicalRef: headResult.finalUrl,
+      canonicalUrl: headResult.finalUrl,
+      directFormat: resolvedFormat,
+      mimeType: contentType.split(";")[0].trim() || void 0,
+      contentLength: contentLengthHeader ? Number(contentLengthHeader) : void 0,
+      supportsRange: acceptRanges.toLowerCase().includes("bytes") || res.status === 206,
+      corsReady: corsReady ?? true,
+      linkStatus: "embeddable",
+      reasonCode: "DIRECT_MEDIA_READY",
+      messageId: `${labelByFormat} valid (${contentType.split(";")[0].trim() || "stream ready"}). Klik PREVIEW lalu PLAY untuk memverifikasi pemutaran di browser Anda.`,
+      messageEn: `${labelByFormat} verified (${contentType.split(";")[0].trim() || "stream ready"}). Click PREVIEW and PLAY to confirm browser playback.`,
+      verifiability: "verifiable",
+      verifiabilityNoteId: source.verifiabilityNoteId,
+      verifiabilityNoteEn: source.verifiabilityNoteEn
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Network error during media inspection.";
+    const isBlockedIp = msg.toLowerCase().includes("blocked") || msg.toLowerCase().includes("private") || msg.toLowerCase().includes("https");
+    return {
+      detected: true,
+      provider: "direct_video",
+      platformLabel: source.platformLabel,
+      canonicalRef: source.canonicalRef,
+      canonicalUrl: source.canonicalUrl,
+      directFormat: source.directFormat,
+      linkStatus: isBlockedIp ? "unavailable" : "uncertain",
+      reasonCode: isBlockedIp ? "SSRF_OR_PROTOCOL_BLOCKED" : "DIRECT_PROBE_TIMEOUT_OR_ERROR",
+      messageId: isBlockedIp ? `Tautan ditolak oleh kebijakan keamanan: ${msg}` : `Pemeriksaan server belum dapat memastikan tautan ini (${msg}). Anda masih bisa menekan PREVIEW dan PLAY untuk menguji langsung di browser.`,
+      messageEn: isBlockedIp ? `Rejected by security policy: ${msg}` : `Server probe could not confirm this URL (${msg}). You can still test PREVIEW and PLAY directly in your browser.`,
+      verifiability: "verifiable",
+      verifiabilityNoteId: source.verifiabilityNoteId,
+      verifiabilityNoteEn: source.verifiabilityNoteEn
+    };
+  }
+}
+
+// firebase-applet-config.json
+var firebase_applet_config_default = {
+  projectId: "yttriferous-bastion-ngtt6",
+  appId: "1:621901173577:web:98e7b6fe05126414104098",
+  apiKey: "AIzaSyA1JGFW57HPUsFgeDdpKGpNQt6-ad-Ubck",
+  authDomain: "yttriferous-bastion-ngtt6.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-vyora-43c45f27-10b7-475d-a607-c73b1a69a858",
+  storageBucket: "yttriferous-bastion-ngtt6.firebasestorage.app",
+  messagingSenderId: "621901173577",
+  measurementId: "",
+  oAuthClientId: "621901173577-i90eh24hnuuuhi34q0leeavvdl1kb7ci.apps.googleusercontent.com",
+  recaptchaSiteKey: ""
+};
+
 // server/app.ts
 dotenv.config();
 var FIREBASE_CERTS_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com";
@@ -2349,7 +4298,7 @@ async function verifyFirebaseIdToken(idToken) {
   }
   const signingInput = Buffer.from(`${headerB64}.${payloadB64}`, "utf-8");
   const signatureBuf = Buffer.from(signatureB64, "base64url");
-  if (!crypto3.verify("RSA-SHA256", signingInput, certPem, signatureBuf)) {
+  if (!crypto4.verify("RSA-SHA256", signingInput, certPem, signatureBuf)) {
     return null;
   }
   const payload = decodeBase64UrlJson(payloadB64);
@@ -2370,10 +4319,10 @@ var IS_PRODUCTION = process.env.NODE_ENV === "production";
 var BOOTSTRAPPED_ADMIN_EMAIL = "parjojuminet@gmail.com";
 var PREVIEW_MAX_SEGMENT_INDEX = 29;
 var FULL_MAX_SEGMENT_INDEX = 35;
-var PLAYBACK_SECRET = process.env.PLAYBACK_TOKEN_SECRET && process.env.PLAYBACK_TOKEN_SECRET.length >= 16 ? process.env.PLAYBACK_TOKEN_SECRET : crypto3.randomBytes(32).toString("hex");
-var PRIVATE_MEDIA_DIR = process.env.VERCEL === "1" ? path3.resolve(os2.tmpdir(), "deloken_private_media") : path3.resolve(process.cwd(), "private_media");
-var UPLOADS_DIR = path3.resolve(PRIVATE_MEDIA_DIR, "uploads");
-var THUMBNAILS_DIR = path3.resolve(PRIVATE_MEDIA_DIR, "thumbnails");
+var PLAYBACK_SECRET = process.env.PLAYBACK_TOKEN_SECRET && process.env.PLAYBACK_TOKEN_SECRET.length >= 16 ? process.env.PLAYBACK_TOKEN_SECRET : crypto4.randomBytes(32).toString("hex");
+var PRIVATE_MEDIA_DIR = process.env.VERCEL === "1" ? path4.resolve(os2.tmpdir(), "deloken_private_media") : path4.resolve(process.cwd(), "private_media");
+var UPLOADS_DIR = path4.resolve(PRIVATE_MEDIA_DIR, "uploads");
+var THUMBNAILS_DIR = path4.resolve(PRIVATE_MEDIA_DIR, "thumbnails");
 var ALLOWED_STREAMS = /* @__PURE__ */ new Set(["stream-cinema", "stream-doc", "uploaded-file"]);
 var ALLOWED_QUALITIES = /* @__PURE__ */ new Set(["720p", "480p"]);
 var ALLOWED_VIDEO_MIME = {
@@ -2387,6 +4336,92 @@ var ALLOWED_IMAGE_MIME = {
   "image/png": ".png",
   "image/webp": ".webp"
 };
+var blockedVideoStatuses = /* @__PURE__ */ new Map();
+async function saveDeletionJob(job) {
+  if (isSqlConfigured()) {
+    return createVideoDeletionJobSql(job);
+  }
+  return withLedgerLock(async () => {
+    const ledger = loadLedger();
+    const jobs = ledger.videoDeletionJobs ?? [];
+    ledger.videoDeletionJobs = [job, ...jobs].slice(0, 200);
+    saveLedger(ledger);
+    return job;
+  });
+}
+async function patchDeletionJob(operationId, patch) {
+  if (isSqlConfigured()) {
+    await updateVideoDeletionJobSql(operationId, patch);
+    return;
+  }
+  await withLedgerLock(async () => {
+    const ledger = loadLedger();
+    const jobs = ledger.videoDeletionJobs ?? [];
+    ledger.videoDeletionJobs = jobs.map(
+      (j) => j.operationId === operationId ? { ...j, ...patch } : j
+    );
+    saveLedger(ledger);
+  });
+}
+async function fetchLatestDeletionJob(videoId) {
+  if (isSqlConfigured()) {
+    return getLatestVideoDeletionJobSql(videoId);
+  }
+  const ledger = loadLedger();
+  return (ledger.videoDeletionJobs ?? []).filter((j) => j.videoId === videoId).sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt))[0] ?? null;
+}
+async function fetchDeletionJobs(limitCount = 40) {
+  if (isSqlConfigured()) {
+    return listVideoDeletionJobsSql(limitCount);
+  }
+  const ledger = loadLedger();
+  return (ledger.videoDeletionJobs ?? []).slice().sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt)).slice(0, limitCount);
+}
+async function fetchStoredMediaBinding(videoId) {
+  if (isSqlConfigured()) {
+    return getCreatorMediaByVideoIdSql(videoId);
+  }
+  const ledger = loadLedger();
+  return ledger.creatorMedia?.[videoId] ?? null;
+}
+async function removeStoredMediaBinding(videoId) {
+  if (isSqlConfigured()) {
+    return deleteCreatorMediaByVideoIdSql(videoId);
+  }
+  return withLedgerLock(async () => {
+    const ledger = loadLedger();
+    if (ledger.creatorMedia && ledger.creatorMedia[videoId]) {
+      delete ledger.creatorMedia[videoId];
+      saveLedger(ledger);
+      return { deletedCount: 1 };
+    }
+    return { deletedCount: 0 };
+  });
+}
+async function isPlaybackBlockedForToken(payload) {
+  if (blockedVideoStatuses.has(payload.videoId)) {
+    return true;
+  }
+  try {
+    const latestJob = await fetchLatestDeletionJob(payload.videoId);
+    if (latestJob && (latestJob.status === "pending" || latestJob.status === "asset_deleted" || latestJob.status === "metadata_deleted" || latestJob.status === "completed")) {
+      blockedVideoStatuses.set(payload.videoId, "deleted");
+      return true;
+    }
+  } catch {
+  }
+  if (!payload.creatorPreview) {
+    const resolved = await resolveServerVideoState(
+      payload.videoId,
+      firebase_applet_config_default.projectId,
+      firebase_applet_config_default.firestoreDatabaseId
+    );
+    if (resolved.state !== "published") {
+      return true;
+    }
+  }
+  return false;
+}
 function isValidSafeId(value) {
   return typeof value === "string" && value.length >= 1 && value.length <= 128 && /^[a-zA-Z0-9_-]+$/.test(value);
 }
@@ -2409,7 +4444,7 @@ function pickStreamKey(videoId, category) {
 }
 function signPlaybackToken(payload) {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const sig = crypto3.createHmac("sha256", PLAYBACK_SECRET).update(encoded).digest("base64url");
+  const sig = crypto4.createHmac("sha256", PLAYBACK_SECRET).update(encoded).digest("base64url");
   return `${encoded}.${sig}`;
 }
 function verifyPlaybackToken(token) {
@@ -2417,10 +4452,10 @@ function verifyPlaybackToken(token) {
   const parts = token.split(".");
   if (parts.length !== 2) return null;
   const [encoded, sig] = parts;
-  const expectedSig = crypto3.createHmac("sha256", PLAYBACK_SECRET).update(encoded).digest("base64url");
+  const expectedSig = crypto4.createHmac("sha256", PLAYBACK_SECRET).update(encoded).digest("base64url");
   const sigBuf = Buffer.from(sig);
   const expBuf = Buffer.from(expectedSig);
-  if (sigBuf.length !== expBuf.length || !crypto3.timingSafeEqual(sigBuf, expBuf)) {
+  if (sigBuf.length !== expBuf.length || !crypto4.timingSafeEqual(sigBuf, expBuf)) {
     return null;
   }
   try {
@@ -2436,7 +4471,7 @@ function verifyPlaybackToken(token) {
   }
 }
 function signSandboxOrderToken(paymentId, userId, amount) {
-  return crypto3.createHmac("sha256", PLAYBACK_SECRET).update(`sandbox:${paymentId}:${userId}:${amount}`).digest("hex");
+  return crypto4.createHmac("sha256", PLAYBACK_SECRET).update(`sandbox:${paymentId}:${userId}:${amount}`).digest("hex");
 }
 var rateBucket = /* @__PURE__ */ new Map();
 function rateLimitApi(req, res, next) {
@@ -2541,17 +4576,9 @@ async function resolveFirestoreVideoAssetForUser(videoId, userIdToken) {
     if (!f?.assetRef?.stringValue || !f?.creatorId?.stringValue) return null;
     const rawProvider = f.provider?.stringValue || "private_storage";
     const rawRef = f.assetRef.stringValue;
-    let provider = "private_storage";
-    let assetRef = rawRef;
-    if (rawProvider === "cloudflare_stream") {
-      provider = "cloudflare_stream";
-    } else if (rawRef.startsWith("youtube:")) {
-      provider = "youtube";
-      assetRef = rawRef.slice("youtube:".length);
-    } else if (rawRef.startsWith("facebook:")) {
-      provider = "facebook";
-      assetRef = rawRef.slice("facebook:".length);
-    }
+    const normalized = normalizeMediaSource(rawProvider, rawRef);
+    const provider = normalized.provider === "unknown" ? "private_storage" : normalized.provider;
+    const assetRef = normalized.assetRef;
     return {
       videoId,
       creatorId: f.creatorId.stringValue,
@@ -2567,9 +4594,9 @@ function safeResolveMediaFile(streamKey, quality, fileName) {
   if (!ALLOWED_STREAMS.has(streamKey) || !ALLOWED_QUALITIES.has(quality)) {
     return null;
   }
-  const baseDir = path3.resolve(PRIVATE_MEDIA_DIR, streamKey, quality);
-  const target = path3.resolve(baseDir, fileName);
-  if (!target.startsWith(baseDir + path3.sep)) {
+  const baseDir = path4.resolve(PRIVATE_MEDIA_DIR, streamKey, quality);
+  const target = path4.resolve(baseDir, fileName);
+  if (!target.startsWith(baseDir + path4.sep)) {
     return null;
   }
   return target;
@@ -2578,9 +4605,9 @@ function safeResolveUploadedAsset(baseRoot, uid, fileName) {
   if (!isValidSafeId(uid) || !/^[a-zA-Z0-9._-]+$/.test(fileName)) {
     return null;
   }
-  const userDir = path3.resolve(baseRoot, uid);
-  const target = path3.resolve(userDir, fileName);
-  if (!target.startsWith(userDir + path3.sep)) {
+  const userDir = path4.resolve(baseRoot, uid);
+  const target = path4.resolve(userDir, fileName);
+  if (!target.startsWith(userDir + path4.sep)) {
     return null;
   }
   return target;
@@ -2638,7 +4665,7 @@ function createApiApp() {
         req.headers["x-deloken-filename"] || req.headers["x-vyora-filename"] || "media"
       ).replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
       const baseSlug = rawOriginal.length >= 2 ? rawOriginal.toLowerCase() : "deloken-media";
-      const uniqueName = `${baseSlug}-${Date.now().toString(36)}-${crypto3.randomBytes(3).toString("hex")}${videoExt || imageExt}`;
+      const uniqueName = `${baseSlug}-${Date.now().toString(36)}-${crypto4.randomBytes(3).toString("hex")}${videoExt || imageExt}`;
       if (videoExt) {
         const target2 = safeResolveUploadedAsset(UPLOADS_DIR, uid, uniqueName);
         if (!target2) {
@@ -2646,8 +4673,8 @@ function createApiApp() {
           return;
         }
         try {
-          fs2.mkdirSync(path3.dirname(target2), { recursive: true });
-          fs2.writeFileSync(target2, bodyBuffer);
+          fs4.mkdirSync(path4.dirname(target2), { recursive: true });
+          fs4.writeFileSync(target2, bodyBuffer);
         } catch (err) {
           res.status(503).json({
             error: err instanceof Error ? `Video upload storage unavailable: ${err.message}. Use YouTube, Facebook, or Cloudflare Stream.` : "Video file storage unavailable in serverless mode."
@@ -2669,8 +4696,8 @@ function createApiApp() {
         return;
       }
       try {
-        fs2.mkdirSync(path3.dirname(target), { recursive: true });
-        fs2.writeFileSync(target, bodyBuffer);
+        fs4.mkdirSync(path4.dirname(target), { recursive: true });
+        fs4.writeFileSync(target, bodyBuffer);
       } catch {
       }
       if (!isSqlConfigured()) {
@@ -2704,12 +4731,12 @@ function createApiApp() {
       return;
     }
     try {
-      if (fs2.existsSync(target)) {
-        const ext = path3.extname(fileName).toLowerCase();
+      if (fs4.existsSync(target)) {
+        const ext = path4.extname(fileName).toLowerCase();
         const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
         res.setHeader("Content-Type", mime);
         res.setHeader("Cache-Control", "public, max-age=86400");
-        const stream = fs2.createReadStream(target);
+        const stream = fs4.createReadStream(target);
         stream.on("error", () => {
           if (!res.headersSent) {
             res.status(500).json({ error: "Failed to read thumbnail file." });
@@ -2729,8 +4756,8 @@ function createApiApp() {
       }
       const buf = Buffer.from(sqlThumb.base64Data, "base64");
       try {
-        fs2.mkdirSync(path3.dirname(target), { recursive: true });
-        fs2.writeFileSync(target, buf);
+        fs4.mkdirSync(path4.dirname(target), { recursive: true });
+        fs4.writeFileSync(target, buf);
       } catch {
       }
       res.setHeader("Content-Type", sqlThumb.mimeType);
@@ -2823,18 +4850,68 @@ function createApiApp() {
       }
     }
   );
+  const inspectRateMap = /* @__PURE__ */ new Map();
+  app2.post(
+    "/api/creator/inspect-video-link",
+    requireAuth,
+    async (req, res) => {
+      const uid = req.user.uid;
+      const now = Date.now();
+      const bucket = inspectRateMap.get(uid);
+      if (!bucket || now > bucket.resetAt) {
+        inspectRateMap.set(uid, { count: 1, resetAt: now + 6e4 });
+      } else {
+        bucket.count += 1;
+        if (bucket.count > 25) {
+          res.status(429).json({
+            error: "Terlalu banyak pemeriksaan tautan dalam 1 menit. Tunggu sebentar lalu coba lagi."
+          });
+          return;
+        }
+      }
+      const { url } = req.body;
+      if (typeof url !== "string" || url.trim().length === 0 || url.trim().length > 980) {
+        res.status(400).json({
+          error: "Masukkan tautan HTTPS video yang valid (maksimal 980 karakter)."
+        });
+        return;
+      }
+      try {
+        const result = await inspectUniversalVideoLink(url.trim());
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({
+          error: err instanceof Error ? err.message : "Gagal memeriksa tautan video di server."
+        });
+      }
+    }
+  );
+  const ALLOWED_REGISTER_PROVIDERS = /* @__PURE__ */ new Set([
+    "cloudflare_stream",
+    "private_storage",
+    "youtube",
+    "vimeo",
+    "dailymotion",
+    "tiktok",
+    "facebook",
+    "x",
+    "instagram",
+    "streamable",
+    "direct_video"
+  ]);
   app2.post(
     "/api/creator/register-video-media",
     requireAuth,
     async (req, res) => {
       const uid = req.user.uid;
       const { videoId, provider, assetRef, mimeType } = req.body;
-      if (!isValidSafeId(videoId) || provider !== "cloudflare_stream" && provider !== "private_storage" && provider !== "youtube" && provider !== "facebook" || typeof assetRef !== "string" || assetRef.trim().length < 3 || assetRef.trim().length > 300) {
+      if (!isValidSafeId(videoId) || typeof provider !== "string" || !ALLOWED_REGISTER_PROVIDERS.has(provider) || typeof assetRef !== "string" || assetRef.trim().length < 3 || assetRef.trim().length > 1e3) {
         res.status(400).json({ error: "Invalid video media registration payload." });
         return;
       }
+      const typedProvider = provider;
       let trimmedRef = assetRef.trim();
-      if (provider === "youtube") {
+      if (typedProvider === "youtube") {
         const ytId = extractYouTubeVideoId(trimmedRef);
         if (!ytId) {
           res.status(400).json({
@@ -2843,7 +4920,7 @@ function createApiApp() {
           return;
         }
         trimmedRef = ytId;
-      } else if (provider === "facebook") {
+      } else if (typedProvider === "facebook") {
         const fbUrl = extractFacebookVideoUrl(trimmedRef);
         if (!fbUrl) {
           res.status(400).json({
@@ -2852,6 +4929,55 @@ function createApiApp() {
           return;
         }
         trimmedRef = fbUrl;
+      } else if (typedProvider === "vimeo") {
+        const vimeo = extractVimeoVideoRef(trimmedRef);
+        if (!vimeo) {
+          res.status(400).json({ error: "Invalid Vimeo video URL or ID." });
+          return;
+        }
+        trimmedRef = vimeo.canonicalRef;
+      } else if (typedProvider === "dailymotion") {
+        const dmId = extractDailymotionVideoId(trimmedRef);
+        if (!dmId) {
+          res.status(400).json({ error: "Invalid Dailymotion video URL or ID." });
+          return;
+        }
+        trimmedRef = dmId;
+      } else if (typedProvider === "streamable") {
+        const stId = extractStreamableId(trimmedRef);
+        if (!stId) {
+          res.status(400).json({ error: "Invalid Streamable video URL or ID." });
+          return;
+        }
+        trimmedRef = stId;
+      } else if (typedProvider === "tiktok") {
+        const tt = extractTikTokVideoInfo(trimmedRef);
+        if (!tt) {
+          res.status(400).json({ error: "Invalid TikTok video URL." });
+          return;
+        }
+        trimmedRef = tt.canonicalRef;
+      } else if (typedProvider === "x") {
+        const xInfo = extractXPostInfo(trimmedRef);
+        if (!xInfo) {
+          res.status(400).json({ error: "Invalid X (Twitter) status URL." });
+          return;
+        }
+        trimmedRef = xInfo.canonicalUrl;
+      } else if (typedProvider === "instagram") {
+        const ig = extractInstagramPostInfo(trimmedRef);
+        if (!ig) {
+          res.status(400).json({ error: "Invalid Instagram post or reel URL." });
+          return;
+        }
+        trimmedRef = ig.canonicalUrl;
+      } else if (typedProvider === "direct_video") {
+        const guard = parseStrictHttpsUrl(trimmedRef, { allowBareHostname: false });
+        if (!guard.ok) {
+          res.status(400).json({ error: guard.messageEn });
+          return;
+        }
+        trimmedRef = guard.url.toString();
       } else if (trimmedRef.startsWith("private/uploads/")) {
         const expectedPrefix = `private/uploads/${uid}/`;
         if (!trimmedRef.startsWith(expectedPrefix)) {
@@ -2863,7 +4989,7 @@ function createApiApp() {
         await upsertCreatorMediaSql({
           videoId,
           creatorId: uid,
-          provider,
+          provider: typedProvider,
           assetRef: trimmedRef,
           mimeType: typeof mimeType === "string" ? mimeType.slice(0, 60) : void 0,
           updatedAtIso: (/* @__PURE__ */ new Date()).toISOString()
@@ -2888,18 +5014,27 @@ function createApiApp() {
     let record = null;
     let mediaBinding = null;
     let resolvedVideo = null;
+    let videoLifecycleState = "unavailable";
+    let latestDeletionJob = null;
     try {
-      const [ctx, videoMeta] = await Promise.all([
-        sqlReady ? getStreamAuthContextSql(req.user?.uid, videoId) : Promise.resolve({ entitlement: null, mediaBinding: null }),
-        resolveServerVideoEntry(
+      const [ctx, videoState, priorJob] = await Promise.all([
+        sqlReady ? getStreamAuthContextSql(req.user?.uid, videoId) : Promise.resolve({
+          entitlement: null,
+          mediaBinding: loadLedger().creatorMedia?.[videoId] ?? null
+        }),
+        resolveServerVideoState(
           videoId,
           firebase_applet_config_default.projectId,
-          firebase_applet_config_default.firestoreDatabaseId
-        )
+          firebase_applet_config_default.firestoreDatabaseId,
+          req.user?.rawIdToken
+        ),
+        fetchLatestDeletionJob(videoId).catch(() => null)
       ]);
       record = ctx.entitlement;
       mediaBinding = ctx.mediaBinding;
-      resolvedVideo = videoMeta;
+      resolvedVideo = videoState.entry;
+      videoLifecycleState = videoState.state;
+      latestDeletionJob = priorJob;
       if (!mediaBinding && req.user?.rawIdToken) {
         const firestoreBinding = await resolveFirestoreVideoAssetForUser(
           videoId,
@@ -2925,14 +5060,59 @@ function createApiApp() {
       });
       return;
     }
+    const activeDeletionBlock = blockedVideoStatuses.get(videoId) === "deletion_pending" || blockedVideoStatuses.get(videoId) === "deleted" || Boolean(
+      latestDeletionJob && (latestDeletionJob.status === "pending" || latestDeletionJob.status === "asset_deleted" || latestDeletionJob.status === "metadata_deleted" || latestDeletionJob.status === "completed")
+    );
+    if (videoLifecycleState === "deletion_pending" || activeDeletionBlock) {
+      res.status(410).json({
+        error: "Video ini telah dihapus atau sedang dalam proses penghapusan permanen.",
+        code: "VIDEO_DELETED_OR_PENDING"
+      });
+      return;
+    }
+    if (videoLifecycleState === "archived" || blockedVideoStatuses.get(videoId) === "archived") {
+      res.status(403).json({
+        error: "Video ini telah diarsipkan dan tidak lagi tersedia untuk pemutaran.",
+        code: "VIDEO_ARCHIVED"
+      });
+      return;
+    }
+    if (videoLifecycleState === "not_found") {
+      res.status(404).json({
+        error: "Video tidak ditemukan atau telah dihapus dari katalog.",
+        code: "VIDEO_NOT_FOUND"
+      });
+      return;
+    }
+    if (videoLifecycleState === "unavailable") {
+      res.status(403).json({
+        error: "Video ini belum dipublikasikan, telah diarsipkan, atau tidak tersedia.",
+        code: "VIDEO_UNAVAILABLE"
+      });
+      return;
+    }
+    if (videoLifecycleState === "error") {
+      res.status(503).json({
+        error: "Gagal memverifikasi status ketersediaan video dari server.",
+        code: "VIDEO_STATUS_CHECK_FAILED"
+      });
+      return;
+    }
+    const isCreatorPreview = Boolean(
+      req.user?.uid && (resolvedVideo && resolvedVideo.creatorId === req.user.uid || mediaBinding && mediaBinding.creatorId === req.user.uid)
+    );
+    if (videoLifecycleState !== "published" && !isCreatorPreview) {
+      res.status(403).json({
+        error: "Video ini belum tersedia untuk publik.",
+        code: "VIDEO_NOT_PUBLISHED"
+      });
+      return;
+    }
     const isFreeRelease = Boolean(
       resolvedVideo && resolvedVideo.priceUsd === 0 && resolvedVideo.priceIdr === 0 && resolvedVideo.creditCost === 0
     );
     const hasPaidEntitlement = Boolean(
       record && record.status !== "revoked" && now < record.expiresAtMs
-    );
-    const isCreatorPreview = Boolean(
-      req.user?.uid && mediaBinding && mediaBinding.creatorId === req.user.uid
     );
     const isActive = Boolean(hasPaidEntitlement || isCreatorPreview || isFreeRelease);
     const mode = isActive ? "full" : "preview";
@@ -2954,7 +5134,7 @@ function createApiApp() {
       if (relParts.length === 2) {
         const [ownerUid, fileName] = relParts;
         const resolved = safeResolveUploadedAsset(UPLOADS_DIR, ownerUid, fileName);
-        if (resolved && fs2.existsSync(resolved)) {
+        if (resolved && fs4.existsSync(resolved)) {
           const token2 = signPlaybackToken({
             v: 1,
             uid,
@@ -2963,9 +5143,10 @@ function createApiApp() {
             mode,
             maxSeg,
             exp: now + (isActive ? 18e5 : 6e5),
-            jti: crypto3.randomUUID(),
+            jti: crypto4.randomUUID(),
             fileRef: `${ownerUid}/${fileName}`,
-            mimeType: mediaBinding.mimeType || "video/mp4"
+            mimeType: mediaBinding.mimeType || "video/mp4",
+            creatorPreview: isCreatorPreview && videoLifecycleState !== "published"
           });
           res.json({
             mode,
@@ -3044,6 +5225,104 @@ function createApiApp() {
         return;
       }
     }
+    if (mediaBinding && (mediaBinding.provider === "vimeo" || mediaBinding.provider === "private_storage" && mediaBinding.assetRef.startsWith("vimeo:"))) {
+      const vimeo = extractVimeoVideoRef(mediaBinding.assetRef);
+      if (vimeo) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: "vimeo",
+          provider: "vimeo",
+          vimeoVideoId: vimeo.id,
+          vimeoHash: vimeo.hash,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: vimeo.embedUrl,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString()
+        });
+        return;
+      }
+    }
+    if (mediaBinding && (mediaBinding.provider === "dailymotion" || mediaBinding.provider === "private_storage" && mediaBinding.assetRef.startsWith("dailymotion:"))) {
+      const dmId = extractDailymotionVideoId(mediaBinding.assetRef);
+      if (dmId) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: "dailymotion",
+          provider: "dailymotion",
+          dailymotionVideoId: dmId,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: `https://www.dailymotion.com/embed/video/${dmId}?api=postMessage&autoplay=1`,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString()
+        });
+        return;
+      }
+    }
+    if (mediaBinding && mediaBinding.provider === "streamable") {
+      const stId = extractStreamableId(mediaBinding.assetRef);
+      if (stId) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: "streamable",
+          provider: "streamable",
+          streamableId: stId,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: `https://streamable.com/e/${stId}?autoplay=1`,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString()
+        });
+        return;
+      }
+    }
+    if (mediaBinding && mediaBinding.provider === "tiktok") {
+      const tt = extractTikTokVideoInfo(mediaBinding.assetRef);
+      if (tt?.videoId) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: "tiktok",
+          provider: "tiktok",
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: `https://www.tiktok.com/player/v1/${tt.videoId}?autoplay=1&controls=1`,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString()
+        });
+        return;
+      }
+    }
+    if (mediaBinding && (mediaBinding.provider === "direct_video" || mediaBinding.provider === "private_storage" && mediaBinding.assetRef.startsWith("direct:"))) {
+      const cleanDirect = mediaBinding.assetRef.startsWith("direct:") ? mediaBinding.assetRef.slice("direct:".length).trim() : mediaBinding.assetRef.trim();
+      const guard = parseStrictHttpsUrl(cleanDirect, { allowBareHostname: false });
+      if (guard.ok) {
+        const mimeLower = (mediaBinding.mimeType || "").toLowerCase();
+        const inferredFormat = mimeLower.includes("mpegurl") || mimeLower.includes("hls") ? "hls" : mimeLower.includes("dash") ? "dash" : inferDirectFormatFromUrl(guard.url) ?? "mp4";
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: "direct_video",
+          provider: "direct_video",
+          directFormat: inferredFormat,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: guard.url.toString(),
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString()
+        });
+        return;
+      }
+    }
     const mappedPreset = mediaBinding?.assetRef === "stream-doc" ? "stream-doc" : mediaBinding?.assetRef === "stream-cinema" ? "stream-cinema" : null;
     const streamKey = mappedPreset ?? pickStreamKey(videoId, typeof category === "string" ? category : void 0);
     const token = signPlaybackToken({
@@ -3054,7 +5333,8 @@ function createApiApp() {
       mode,
       maxSeg,
       exp: now + (isActive ? 18e5 : 6e5),
-      jti: crypto3.randomUUID()
+      jti: crypto4.randomUUID(),
+      creatorPreview: isCreatorPreview && videoLifecycleState !== "published"
     });
     res.json({
       mode,
@@ -3068,11 +5348,15 @@ function createApiApp() {
       serverTimeIso: new Date(now).toISOString()
     });
   });
-  app2.get("/api/stream/file", (req, res) => {
+  app2.get("/api/stream/file", async (req, res) => {
     const token = typeof req.query.token === "string" ? req.query.token : "";
     const payload = verifyPlaybackToken(token);
     if (!payload || payload.streamKey !== "uploaded-file" || !payload.fileRef) {
       res.status(403).json({ error: "Invalid or expired file playback token." });
+      return;
+    }
+    if (await isPlaybackBlockedForToken(payload)) {
+      res.status(403).json({ error: "This release is archived or no longer available." });
       return;
     }
     const parts = payload.fileRef.split("/");
@@ -3081,13 +5365,13 @@ function createApiApp() {
       return;
     }
     const targetFile = safeResolveUploadedAsset(UPLOADS_DIR, parts[0], parts[1]);
-    if (!targetFile || !fs2.existsSync(targetFile)) {
+    if (!targetFile || !fs4.existsSync(targetFile)) {
       res.status(404).json({ error: "Uploaded media file not found." });
       return;
     }
-    const stat = fs2.statSync(targetFile);
+    const stat = fs4.statSync(targetFile);
     const total = stat.size;
-    const ext = path3.extname(parts[1]).toLowerCase();
+    const ext = path4.extname(parts[1]).toLowerCase();
     const contentType = ext === ".webm" ? "video/webm" : ext === ".mov" ? "video/quicktime" : payload.mimeType || "video/mp4";
     const range = req.headers.range;
     res.setHeader("Accept-Ranges", "bytes");
@@ -3108,22 +5392,26 @@ function createApiApp() {
       res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
       res.setHeader("Content-Length", String(end - start + 1));
       res.setHeader("Content-Type", contentType);
-      const stream2 = fs2.createReadStream(targetFile, { start, end });
+      const stream2 = fs4.createReadStream(targetFile, { start, end });
       stream2.pipe(res);
       res.on("close", () => stream2.destroy());
       return;
     }
     res.setHeader("Content-Length", String(total));
     res.setHeader("Content-Type", contentType);
-    const stream = fs2.createReadStream(targetFile);
+    const stream = fs4.createReadStream(targetFile);
     stream.pipe(res);
     res.on("close", () => stream.destroy());
   });
-  app2.get("/api/stream/master.m3u8", (req, res) => {
+  app2.get("/api/stream/master.m3u8", async (req, res) => {
     const token = typeof req.query.token === "string" ? req.query.token : "";
     const payload = verifyPlaybackToken(token);
     if (!payload) {
       res.status(403).json({ error: "Invalid or expired playback token." });
+      return;
+    }
+    if (await isPlaybackBlockedForToken(payload)) {
+      res.status(403).json({ error: "This release is archived or no longer available." });
       return;
     }
     const encodedToken = encodeURIComponent(token);
@@ -3148,12 +5436,16 @@ function createApiApp() {
       res.status(403).json({ error: "Invalid or expired playback token." });
       return;
     }
+    if (blockedVideoStatuses.has(payload.videoId)) {
+      res.status(403).json({ error: "This release is archived or no longer available." });
+      return;
+    }
     const playlistFile = safeResolveMediaFile(payload.streamKey, quality, "index.m3u8");
-    if (!playlistFile || !fs2.existsSync(playlistFile)) {
+    if (!playlistFile || !fs4.existsSync(playlistFile)) {
       res.status(404).json({ error: "Stream playlist unavailable." });
       return;
     }
-    const rawLines = fs2.readFileSync(playlistFile, "utf-8").split("\n");
+    const rawLines = fs4.readFileSync(playlistFile, "utf-8").split("\n");
     const outputLines = [];
     const encodedToken = encodeURIComponent(token);
     let pendingExtInf = null;
@@ -3196,6 +5488,10 @@ function createApiApp() {
       res.status(403).json({ error: "Invalid or expired playback token." });
       return;
     }
+    if (blockedVideoStatuses.has(payload.videoId)) {
+      res.status(403).json({ error: "This release is archived or no longer available." });
+      return;
+    }
     const rawIndex = req.params.index;
     if (!/^\d{1,4}$/.test(rawIndex)) {
       res.status(400).json({ error: "Invalid segment index." });
@@ -3211,13 +5507,13 @@ function createApiApp() {
     }
     const padded = String(segIndex).padStart(3, "0");
     const segFile = safeResolveMediaFile(payload.streamKey, quality, `seg_${padded}.ts`);
-    if (!segFile || !fs2.existsSync(segFile)) {
+    if (!segFile || !fs4.existsSync(segFile)) {
       res.status(404).json({ error: "Segment not found." });
       return;
     }
     res.setHeader("Content-Type", "video/mp2t");
     res.setHeader("Cache-Control", "private, no-store");
-    const stream = fs2.createReadStream(segFile);
+    const stream = fs4.createReadStream(segFile);
     stream.on("error", () => {
       if (!res.headersSent) {
         res.status(500).json({ error: "Failed to stream media segment." });
@@ -3269,6 +5565,16 @@ function createApiApp() {
       return;
     }
     try {
+      const videoState = await resolveServerVideoState(
+        videoId,
+        firebase_applet_config_default.projectId,
+        firebase_applet_config_default.firestoreDatabaseId,
+        req.user?.rawIdToken
+      );
+      if (blockedVideoStatuses.has(videoId) || videoState.state === "archived" || videoState.state === "deletion_pending" || videoState.state === "not_found" || videoState.state === "unavailable") {
+        res.status(403).json({ error: "Release is archived or unavailable." });
+        return;
+      }
       const result = await updatePlaybackProgressSql(
         req.user.uid,
         videoId,
@@ -3369,7 +5675,7 @@ function createApiApp() {
       return;
     }
     try {
-      const paymentId = `pay_cr_${crypto3.randomUUID().slice(0, 12)}`;
+      const paymentId = `pay_cr_${crypto4.randomUUID().slice(0, 12)}`;
       const result = await spendCreditsAtomicSql({
         uid,
         userEmail: req.user.email,
@@ -3448,7 +5754,7 @@ function createApiApp() {
       });
       return;
     }
-    const paymentId = `pay_pp_${crypto3.randomUUID().slice(0, 12)}`;
+    const paymentId = `pay_pp_${crypto4.randomUUID().slice(0, 12)}`;
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     let gatewayOrderId = `SBX-PP-${paymentId}`;
@@ -3588,7 +5894,7 @@ function createApiApp() {
       const tokStr = typeof sandboxCaptureToken === "string" ? sandboxCaptureToken : "";
       const a = Buffer.from(expectedToken, "utf8");
       const b = Buffer.from(tokStr, "utf8");
-      if (a.length !== b.length || !crypto3.timingSafeEqual(a, b)) {
+      if (a.length !== b.length || !crypto4.timingSafeEqual(a, b)) {
         res.status(403).json({ error: "Invalid server sandbox capture signature." });
         return;
       }
@@ -3691,7 +5997,7 @@ function createApiApp() {
       });
       return;
     }
-    const paymentId = `pay_qr_${crypto3.randomUUID().slice(0, 12)}`;
+    const paymentId = `pay_qr_${crypto4.randomUUID().slice(0, 12)}`;
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     let qrString = "";
@@ -3868,10 +6174,10 @@ function createApiApp() {
         res.status(401).json({ error: "Missing PayPal webhook authentication." });
         return;
       }
-      const expected = crypto3.createHmac("sha256", secret).update(JSON.stringify(body)).digest("hex");
+      const expected = crypto4.createHmac("sha256", secret).update(JSON.stringify(body)).digest("hex");
       const a = Buffer.from(expected, "utf8");
       const b = Buffer.from(sigHeader, "utf8");
-      if (a.length !== b.length || !crypto3.timingSafeEqual(a, b)) {
+      if (a.length !== b.length || !crypto4.timingSafeEqual(a, b)) {
         res.status(401).json({ error: "Invalid PayPal webhook HMAC signature." });
         return;
       }
@@ -3937,10 +6243,10 @@ function createApiApp() {
         res.status(401).json({ error: "Missing QRIS webhook authentication." });
         return;
       }
-      const expected = crypto3.createHmac("sha256", secret).update(JSON.stringify(body)).digest("hex");
+      const expected = crypto4.createHmac("sha256", secret).update(JSON.stringify(body)).digest("hex");
       const a = Buffer.from(expected, "utf8");
       const b = Buffer.from(sigHeader, "utf8");
-      if (a.length !== b.length || !crypto3.timingSafeEqual(a, b)) {
+      if (a.length !== b.length || !crypto4.timingSafeEqual(a, b)) {
         res.status(401).json({ error: "Invalid QRIS webhook signature." });
         return;
       }
@@ -4024,7 +6330,7 @@ function createApiApp() {
         amount,
         method: validMethod,
         destination: destination.trim().slice(0, 160),
-        payoutId: `payo_${crypto3.randomUUID().slice(0, 10)}`,
+        payoutId: `payo_${crypto4.randomUUID().slice(0, 10)}`,
         idemKey
       });
       res.status(result.status).json(result.body);
@@ -4160,6 +6466,550 @@ function createApiApp() {
         error: err instanceof Error ? err.message : "Failed to update settings."
       });
     }
+  });
+  app2.get("/api/admin/video-deletion-jobs", requireAdmin, async (_req, res) => {
+    try {
+      const jobs = await fetchDeletionJobs(40);
+      res.json({ jobs });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Failed to load video deletion audit logs."
+      });
+    }
+  });
+  app2.get("/api/admin/videos/:videoId/asset-info", requireAdmin, async (req, res) => {
+    const videoId = req.params.videoId;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: "Invalid videoId." });
+      return;
+    }
+    try {
+      const bearerToken = req.user.rawIdToken;
+      const [videoDoc, assetDoc, sqlMedia, latestJob] = await Promise.all([
+        firestoreGetDocument(
+          firebase_applet_config_default.projectId,
+          firebase_applet_config_default.firestoreDatabaseId,
+          "videos",
+          videoId,
+          bearerToken
+        ),
+        firestoreGetDocument(
+          firebase_applet_config_default.projectId,
+          firebase_applet_config_default.firestoreDatabaseId,
+          "video_assets",
+          videoId,
+          bearerToken
+        ),
+        fetchStoredMediaBinding(videoId).catch(() => null),
+        fetchLatestDeletionJob(videoId).catch(() => null)
+      ]);
+      if (!videoDoc.exists && !latestJob) {
+        res.status(404).json({ error: "Video not found." });
+        return;
+      }
+      const rawProvider = assetDoc.fields.provider?.stringValue || sqlMedia?.provider || "";
+      const rawRef = assetDoc.fields.assetRef?.stringValue || sqlMedia?.assetRef || "";
+      const normalized = rawProvider || rawRef ? normalizeMediaSource(rawProvider, rawRef) : {
+        provider: latestJob?.provider || "unknown",
+        assetRef: ""
+      };
+      const title = videoDoc.fields.title?.stringValue || latestJob?.videoTitleSnapshot || videoId;
+      const status = videoDoc.fields.status?.stringValue || (latestJob?.status === "completed" ? "deletion_pending" : "draft");
+      const previousStatus = videoDoc.fields.previousStatus?.stringValue || "";
+      const thumbnailUrl = videoDoc.fields.thumbnailUrl?.stringValue || "";
+      const creatorId = videoDoc.fields.creatorId?.stringValue || assetDoc.fields.creatorId?.stringValue || sqlMedia?.creatorId || "";
+      const assetRefFingerprint = rawRef ? buildAssetRefFingerprint(normalized.provider, normalized.assetRef) : latestJob?.assetRefFingerprint || "unknown:unavailable";
+      const assetInfo = {
+        videoId,
+        title,
+        status,
+        previousStatus,
+        provider: normalized.provider,
+        assetRefFingerprint,
+        isExternalPlatform: isExternalLinkProvider(normalized.provider),
+        externalMediaWarning: getExternalPlatformWarning(normalized.provider),
+        thumbnailUrl,
+        creatorId
+      };
+      res.json({ assetInfo, latestJob });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Unable to inspect video asset metadata."
+      });
+    }
+  });
+  app2.post("/api/admin/videos/:videoId/archive", requireAdmin, async (req, res) => {
+    const videoId = req.params.videoId;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: "Invalid videoId." });
+      return;
+    }
+    const body = req.body || {};
+    const rawNote = typeof body.moderationNote === "string" ? body.moderationNote.trim().slice(0, 500) : "";
+    try {
+      const bearerToken = req.user.rawIdToken;
+      const videoDoc = await firestoreGetDocument(
+        firebase_applet_config_default.projectId,
+        firebase_applet_config_default.firestoreDatabaseId,
+        "videos",
+        videoId,
+        bearerToken
+      );
+      if (!videoDoc.exists) {
+        res.status(404).json({ error: "Video not found." });
+        return;
+      }
+      const currentStatus = videoDoc.fields.status?.stringValue || "draft";
+      if (currentStatus === "deletion_pending") {
+        res.status(409).json({
+          error: "Video sedang dalam proses penghapusan permanen dan tidak dapat diarsipkan."
+        });
+        return;
+      }
+      const existingPrevious = videoDoc.fields.previousStatus?.stringValue || "";
+      const previousStatus = currentStatus === "archived" ? VALID_RESTORABLE_STATUSES.has(existingPrevious) ? existingPrevious : "" : VALID_RESTORABLE_STATUSES.has(currentStatus) ? currentStatus : "";
+      const nextNote = rawNote || videoDoc.fields.moderationNote?.stringValue || "Archived by Admin";
+      await firestoreCommitVideoFields(
+        firebase_applet_config_default.projectId,
+        firebase_applet_config_default.firestoreDatabaseId,
+        videoId,
+        {
+          status: { stringValue: "archived" },
+          previousStatus: { stringValue: previousStatus },
+          moderationNote: { stringValue: nextNote }
+        },
+        bearerToken
+      );
+      blockedVideoStatuses.set(videoId, "archived");
+      res.json({
+        ok: true,
+        videoId,
+        status: "archived",
+        previousStatus
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Failed to archive video."
+      });
+    }
+  });
+  app2.post("/api/admin/videos/:videoId/restore", requireAdmin, async (req, res) => {
+    const videoId = req.params.videoId;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: "Invalid videoId." });
+      return;
+    }
+    const body = req.body || {};
+    const requestedTarget = typeof body.targetStatus === "string" && VALID_RESTORABLE_STATUSES.has(body.targetStatus) ? body.targetStatus : null;
+    const rawNote = typeof body.moderationNote === "string" ? body.moderationNote.trim().slice(0, 500) : "";
+    try {
+      const bearerToken = req.user.rawIdToken;
+      const videoDoc = await firestoreGetDocument(
+        firebase_applet_config_default.projectId,
+        firebase_applet_config_default.firestoreDatabaseId,
+        "videos",
+        videoId,
+        bearerToken
+      );
+      if (!videoDoc.exists) {
+        res.status(404).json({ error: "Video not found." });
+        return;
+      }
+      const currentStatus = videoDoc.fields.status?.stringValue || "draft";
+      if (currentStatus === "deletion_pending") {
+        res.status(409).json({
+          error: "Video sedang dalam proses penghapusan permanen."
+        });
+        return;
+      }
+      if (currentStatus !== "archived") {
+        res.status(409).json({
+          error: `Video tidak berada dalam status arsip (status saat ini: ${currentStatus}).`
+        });
+        return;
+      }
+      const storedPrevious = videoDoc.fields.previousStatus?.stringValue || "";
+      const hasValidPrevious = VALID_RESTORABLE_STATUSES.has(
+        storedPrevious
+      );
+      let restoredStatus;
+      if (hasValidPrevious) {
+        restoredStatus = storedPrevious;
+      } else if (requestedTarget) {
+        restoredStatus = requestedTarget;
+      } else {
+        res.status(400).json({
+          error: "Status asal video tidak tersedia. Pilih status tujuan pemulihan secara eksplisit (tidak dipublikasikan otomatis).",
+          code: "TARGET_STATUS_REQUIRED"
+        });
+        return;
+      }
+      const existingPublishedAt = videoDoc.fields.publishedAt?.stringValue || "";
+      const nextPublishedAt = restoredStatus === "published" && !existingPublishedAt ? (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) : existingPublishedAt;
+      const nextNote = rawNote || `Restored by Admin to ${restoredStatus.replace("_", " ")}`;
+      await firestoreCommitVideoFields(
+        firebase_applet_config_default.projectId,
+        firebase_applet_config_default.firestoreDatabaseId,
+        videoId,
+        {
+          status: { stringValue: restoredStatus },
+          previousStatus: { stringValue: "" },
+          publishedAt: { stringValue: nextPublishedAt },
+          moderationNote: { stringValue: nextNote }
+        },
+        bearerToken
+      );
+      blockedVideoStatuses.delete(videoId);
+      res.json({
+        ok: true,
+        videoId,
+        status: restoredStatus,
+        restoredFromPreviousStatus: hasValidPrevious
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Failed to restore archived video."
+      });
+    }
+  });
+  app2.delete("/api/admin/videos/:videoId", requireAdmin, async (req, res) => {
+    const videoId = req.params.videoId;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: "Invalid videoId." });
+      return;
+    }
+    const body = req.body || {};
+    const headerConf = req.headers["x-delete-confirmation"];
+    const rawConfirmation = typeof body.confirmationText === "string" ? body.confirmationText.trim() : typeof headerConf === "string" ? headerConf.trim() : "";
+    const bearerToken = req.user.rawIdToken;
+    const adminUid = req.user.uid;
+    let videoDoc;
+    let assetDoc;
+    let sqlMedia = null;
+    let priorJob = null;
+    try {
+      [videoDoc, assetDoc, sqlMedia, priorJob] = await Promise.all([
+        firestoreGetDocument(
+          firebase_applet_config_default.projectId,
+          firebase_applet_config_default.firestoreDatabaseId,
+          "videos",
+          videoId,
+          bearerToken
+        ),
+        firestoreGetDocument(
+          firebase_applet_config_default.projectId,
+          firebase_applet_config_default.firestoreDatabaseId,
+          "video_assets",
+          videoId,
+          bearerToken
+        ),
+        fetchStoredMediaBinding(videoId).catch(() => null),
+        fetchLatestDeletionJob(videoId).catch(() => null)
+      ]);
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Failed to read authoritative video records."
+      });
+      return;
+    }
+    if (priorJob?.status === "completed" && !videoDoc.exists && !assetDoc.exists && !sqlMedia) {
+      blockedVideoStatuses.set(videoId, "deleted");
+      res.json({
+        ok: true,
+        idempotent: true,
+        job: priorJob,
+        preservedFinancialRecords: true
+      });
+      return;
+    }
+    const titleSnapshot = (videoDoc.fields.title?.stringValue || priorJob?.videoTitleSnapshot || "").trim();
+    if (!titleSnapshot) {
+      res.status(404).json({ error: "Video record not found." });
+      return;
+    }
+    if (!rawConfirmation || rawConfirmation.toLowerCase() !== titleSnapshot.toLowerCase()) {
+      res.status(400).json({
+        error: `Konfirmasi penghapusan gagal. Ketik judul video secara persis: "${titleSnapshot}".`,
+        code: "CONFIRMATION_MISMATCH"
+      });
+      return;
+    }
+    const rawProvider = assetDoc.fields.provider?.stringValue || sqlMedia?.provider || "";
+    const rawRef = assetDoc.fields.assetRef?.stringValue || sqlMedia?.assetRef || "";
+    const normalized = rawProvider || rawRef ? normalizeMediaSource(rawProvider, rawRef) : priorJob && (priorJob.providerResult === "deleted" || priorJob.providerResult === "already_missing" || priorJob.providerResult === "external_retained" || priorJob.providerResult === "shared_preset_retained") ? {
+      provider: priorJob.provider,
+      assetRef: ""
+    } : { provider: "unknown", assetRef: "" };
+    const providerAlreadyResolved = Boolean(
+      priorJob && (priorJob.providerResult === "deleted" || priorJob.providerResult === "already_missing" || priorJob.providerResult === "external_retained" || priorJob.providerResult === "shared_preset_retained")
+    );
+    const fingerprint = normalized.assetRef ? buildAssetRefFingerprint(normalized.provider, normalized.assetRef) : priorJob?.assetRefFingerprint || "unknown:unavailable";
+    const externalWarning = getExternalPlatformWarning(normalized.provider);
+    let validatedPrivateFile = null;
+    if (!providerAlreadyResolved) {
+      if (normalized.provider === "unknown" || !normalized.assetRef) {
+        res.status(422).json({
+          error: "Provider media tidak dikenal atau metadata aset video tidak ditemukan. Penghapusan dihentikan aman tanpa menghapus metadata.",
+          code: "UNKNOWN_OR_MISSING_ASSET_PROVIDER"
+        });
+        return;
+      }
+      if (normalized.provider === "cloudflare_stream") {
+        if (!/^[a-zA-Z0-9_-]{8,128}$/.test(normalized.assetRef)) {
+          res.status(422).json({
+            error: "ID aset Cloudflare Stream tidak valid. Penghapusan dihentikan aman tanpa menghapus metadata.",
+            code: "INVALID_CLOUDFLARE_UID"
+          });
+          return;
+        }
+        if (!isCloudflareStreamConfigured()) {
+          res.status(503).json({
+            error: "Kredensial Cloudflare Stream server belum aktif sehingga penghapusan file Cloudflare tidak dapat dilakukan.",
+            code: "CLOUDFLARE_NOT_CONFIGURED"
+          });
+          return;
+        }
+      } else if (normalized.provider === "private_storage") {
+        validatedPrivateFile = validatePrivateStorageAssetRef(
+          UPLOADS_DIR,
+          normalized.assetRef
+        );
+        if (validatedPrivateFile.kind === "invalid") {
+          res.status(422).json({
+            error: "Referensi file penyimpanan lokal tidak valid atau keluar dari direktori upload. Penghapusan dihentikan aman.",
+            code: "INVALID_ASSET_REF"
+          });
+          return;
+        }
+      } else if (isExternalLinkProvider(normalized.provider)) {
+        if (!validateExternalProviderAssetRef(normalized.provider, normalized.assetRef)) {
+          res.status(422).json({
+            error: `Referensi tautan eksternal (${normalized.provider}) tidak valid.`,
+            code: "INVALID_EXTERNAL_REF"
+          });
+          return;
+        }
+      }
+    }
+    const operationId = `del_${crypto4.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    let job = {
+      operationId,
+      videoId,
+      videoTitleSnapshot: titleSnapshot.slice(0, 140),
+      provider: normalized.provider,
+      assetRefFingerprint: fingerprint,
+      requestedBy: adminUid,
+      requestedAt: nowIso,
+      status: "pending",
+      providerResult: providerAlreadyResolved ? priorJob.providerResult : "pending",
+      firestoreResult: !videoDoc.exists && !assetDoc.exists ? "already_missing" : "pending",
+      sqlResult: !sqlMedia ? "already_missing" : "pending",
+      thumbnailResult: "skipped",
+      externalMediaWarning: externalWarning,
+      errorCode: null,
+      errorMessage: null,
+      completedAt: null
+    };
+    try {
+      job = await saveDeletionJob(job);
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Unable to create deletion audit record."
+      });
+      return;
+    }
+    blockedVideoStatuses.set(videoId, "deletion_pending");
+    if (videoDoc.exists) {
+      const currentStatus = videoDoc.fields.status?.stringValue || "draft";
+      if (currentStatus !== "deletion_pending") {
+        try {
+          await firestoreCommitVideoFields(
+            firebase_applet_config_default.projectId,
+            firebase_applet_config_default.firestoreDatabaseId,
+            videoId,
+            {
+              status: { stringValue: "deletion_pending" },
+              moderationNote: {
+                stringValue: `Permanent deletion in progress (${operationId})`
+              }
+            },
+            bearerToken
+          );
+        } catch (err) {
+          const safeMsg = err instanceof Error ? err.message : "Failed to set deletion_pending tombstone.";
+          await patchDeletionJob(operationId, {
+            status: "failed",
+            errorCode: "TOMBSTONE_FAILED",
+            errorMessage: safeMsg.slice(0, 280)
+          }).catch(() => {
+          });
+          res.status(502).json({
+            error: safeMsg,
+            code: "TOMBSTONE_FAILED",
+            operationId
+          });
+          return;
+        }
+      }
+    }
+    if (!providerAlreadyResolved) {
+      try {
+        if (normalized.provider === "cloudflare_stream") {
+          const cfRes = await deleteCloudflareVideo(normalized.assetRef);
+          job.providerResult = cfRes.alreadyMissing ? "already_missing" : "deleted";
+        } else if (normalized.provider === "private_storage" && validatedPrivateFile) {
+          if (validatedPrivateFile.kind === "shared_preset") {
+            job.providerResult = "shared_preset_retained";
+          } else if (validatedPrivateFile.kind === "uploaded_file") {
+            job.providerResult = deleteFileIfExists(validatedPrivateFile.resolvedPath);
+          }
+        } else if (isExternalLinkProvider(normalized.provider)) {
+          job.providerResult = "external_retained";
+        }
+        job.status = "asset_deleted";
+        await patchDeletionJob(operationId, {
+          status: job.status,
+          providerResult: job.providerResult
+        });
+      } catch (err) {
+        const safeMsg = err instanceof Error ? err.message : "Provider asset deletion failed.";
+        job.status = "failed";
+        job.errorCode = "PROVIDER_DELETE_FAILED";
+        job.errorMessage = safeMsg.slice(0, 280);
+        await patchDeletionJob(operationId, {
+          status: "failed",
+          providerResult: "failed",
+          errorCode: job.errorCode,
+          errorMessage: job.errorMessage
+        }).catch(() => {
+        });
+        res.status(502).json({
+          error: safeMsg,
+          code: "PROVIDER_DELETE_FAILED",
+          job
+        });
+        return;
+      }
+    } else {
+      job.status = "asset_deleted";
+      await patchDeletionJob(operationId, {
+        status: "asset_deleted",
+        providerResult: job.providerResult
+      }).catch(() => {
+      });
+    }
+    const thumbUrl = videoDoc.fields.thumbnailUrl?.stringValue || "";
+    const creatorId = videoDoc.fields.creatorId?.stringValue || assetDoc.fields.creatorId?.stringValue || sqlMedia?.creatorId || "";
+    if (thumbUrl) {
+      const thumbCheck = await verifyExclusiveLocalThumbnail({
+        thumbnailsDir: THUMBNAILS_DIR,
+        thumbUrl,
+        excludeVideoId: videoId,
+        expectedCreatorId: creatorId,
+        projectId: firebase_applet_config_default.projectId,
+        databaseId: firebase_applet_config_default.firestoreDatabaseId,
+        bearerToken
+      });
+      if (thumbCheck.safeToDelete) {
+        try {
+          const fileStatus = deleteFileIfExists(thumbCheck.resolvedPath);
+          let sqlThumbDeleted = 0;
+          if (isSqlConfigured()) {
+            const sqlRes = await deleteThumbnailAssetSql(thumbCheck.sqlThumbKey);
+            sqlThumbDeleted = sqlRes.deletedCount;
+          }
+          job.thumbnailResult = fileStatus === "deleted" || sqlThumbDeleted > 0 ? "deleted" : "already_missing";
+        } catch {
+          job.thumbnailResult = "retained_cleanup_error";
+        }
+      } else {
+        job.thumbnailResult = thumbCheck.reason;
+      }
+    }
+    try {
+      const [assetDel, videoDel] = await Promise.all([
+        firestoreDeleteDocument(
+          firebase_applet_config_default.projectId,
+          firebase_applet_config_default.firestoreDatabaseId,
+          "video_assets",
+          videoId,
+          bearerToken
+        ),
+        firestoreDeleteDocument(
+          firebase_applet_config_default.projectId,
+          firebase_applet_config_default.firestoreDatabaseId,
+          "videos",
+          videoId,
+          bearerToken
+        )
+      ]);
+      blockedVideoStatuses.set(videoId, "deleted");
+      job.firestoreResult = assetDel.alreadyMissing && videoDel.alreadyMissing ? "already_missing" : "deleted";
+      job.status = "metadata_deleted";
+      await patchDeletionJob(operationId, {
+        status: job.status,
+        firestoreResult: job.firestoreResult,
+        thumbnailResult: job.thumbnailResult
+      });
+    } catch (err) {
+      const safeMsg = err instanceof Error ? err.message : "Failed to delete Firestore video metadata.";
+      job.status = "asset_deleted";
+      job.errorCode = "FIRESTORE_DELETE_FAILED";
+      job.errorMessage = safeMsg.slice(0, 280);
+      await patchDeletionJob(operationId, {
+        status: "asset_deleted",
+        firestoreResult: "failed",
+        thumbnailResult: job.thumbnailResult,
+        errorCode: job.errorCode,
+        errorMessage: job.errorMessage
+      }).catch(() => {
+      });
+      res.status(502).json({
+        error: safeMsg,
+        code: "FIRESTORE_DELETE_FAILED",
+        job
+      });
+      return;
+    }
+    try {
+      const sqlCleanup = await removeStoredMediaBinding(videoId);
+      job.sqlResult = sqlCleanup.deletedCount > 0 ? "deleted" : "already_missing";
+      job.status = "completed";
+      job.completedAt = (/* @__PURE__ */ new Date()).toISOString();
+      job.errorCode = null;
+      job.errorMessage = null;
+      await patchDeletionJob(operationId, {
+        status: "completed",
+        sqlResult: job.sqlResult,
+        completedAt: job.completedAt,
+        errorCode: null,
+        errorMessage: null
+      });
+    } catch (err) {
+      const safeMsg = err instanceof Error ? err.message : "Failed to remove creator_media mapping.";
+      job.status = "metadata_deleted";
+      job.errorCode = "SQL_CLEANUP_FAILED";
+      job.errorMessage = safeMsg.slice(0, 280);
+      await patchDeletionJob(operationId, {
+        status: "metadata_deleted",
+        sqlResult: "failed",
+        errorCode: job.errorCode,
+        errorMessage: job.errorMessage
+      }).catch(() => {
+      });
+      res.status(502).json({
+        error: safeMsg,
+        code: "SQL_CLEANUP_FAILED",
+        job
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      job,
+      preservedFinancialRecords: true
+    });
   });
   return app2;
 }

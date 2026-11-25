@@ -17,18 +17,27 @@ import {
   getPayPalPaymentLink,
   isMidtransConfigured,
   isPayPalConfigured,
+  loadLedger,
   resolveServerVideoEntry,
+  resolveServerVideoState,
+  saveLedger,
   verifyMidtransWebhookSignature,
+  withLedgerLock,
   type CreatorMediaBinding,
   type ServerEntitlement,
 } from './paymentService.ts';
 import { isSqlConfigured } from '../src/db/index.ts';
 import {
   checkIdempotencySql,
+  createVideoDeletionJobSql,
+  deleteCreatorMediaByVideoIdSql,
+  deleteThumbnailAssetSql,
   findPaymentForWebhookSql,
   fulfillPaymentAtomicSql,
   getAdminFinanceOverviewSql,
   getCreatorEarningsSummarySql,
+  getCreatorMediaByVideoIdSql,
+  getLatestVideoDeletionJobSql,
   getPaymentByIdSql,
   getPaymentStatusSnapshotSql,
   getStreamAuthContextSql,
@@ -36,6 +45,7 @@ import {
   getUserEntitlementsSql,
   getWalletSnapshotSql,
   isWebhookProcessedSql,
+  listVideoDeletionJobsSql,
   precheckCreateOrderSql,
   recordWebhookOnlyOrFailureSql,
   refundPaymentAtomicSql,
@@ -46,6 +56,7 @@ import {
   updatePayoutStatusSql,
   updatePlatformSettingsSql,
   updatePlaybackProgressSql,
+  updateVideoDeletionJobSql,
   upsertCreatorMediaSql,
   upsertTrialEntitlementSql,
 } from '../src/db/ledgerRepository.ts';
@@ -53,18 +64,54 @@ import { getOrCreateSqlUser } from '../src/db/users.ts';
 import {
   buildCloudflareHlsUrl,
   createCloudflareTusDirectUpload,
+  deleteCloudflareVideo,
   getCloudflareVideoStatus,
   isCloudflareSigningConfigured,
   isCloudflareStreamConfigured,
   signCloudflareStreamToken,
 } from './cloudflareStream.ts';
+import {
+  VALID_RESTORABLE_STATUSES,
+  buildAssetRefFingerprint,
+  deleteFileIfExists,
+  firestoreCommitVideoFields,
+  firestoreDeleteDocument,
+  firestoreGetDocument,
+  getExternalPlatformWarning,
+  isExternalLinkProvider,
+  normalizeMediaSource,
+  validateExternalProviderAssetRef,
+  validatePrivateStorageAssetRef,
+  verifyExclusiveLocalThumbnail,
+  type NormalizedMediaProvider,
+} from './mediaLifecycle.ts';
+import { inspectUniversalVideoLink } from './videoInspector.ts';
 import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
 import { extractYouTubeVideoId } from '../src/utils/youtube.ts';
 import {
   extractFacebookVideoUrl,
   getFacebookEmbedUrl,
 } from '../src/utils/facebook.ts';
-import type { PaymentGatewayMode, PaymentOrderRecord, PaymentPurpose } from '../src/types/vyora';
+import {
+  extractDailymotionVideoId,
+  extractInstagramPostInfo,
+  extractStreamableId,
+  extractTikTokVideoInfo,
+  extractVimeoVideoRef,
+  extractXPostInfo,
+  inferDirectFormatFromUrl,
+} from '../src/services/videoImport/adapters.ts';
+import { parseStrictHttpsUrl } from '../src/services/videoImport/urlGuards.ts';
+import type {
+  AdminVideoAssetInfo,
+  ContentStatus,
+  DirectStreamFormat,
+  PaymentGatewayMode,
+  PaymentOrderRecord,
+  PaymentPurpose,
+  VideoAssetProvider,
+  VideoDeletionJobRecord,
+} from '../src/types/vyora';
 
 dotenv.config();
 
@@ -219,6 +266,127 @@ interface PlaybackTokenPayload {
   jti: string;
   fileRef?: string;
   mimeType?: string;
+  creatorPreview?: boolean;
+}
+
+const blockedVideoStatuses = new Map<
+  string,
+  'archived' | 'deletion_pending' | 'deleted'
+>();
+
+async function saveDeletionJob(job: VideoDeletionJobRecord): Promise<VideoDeletionJobRecord> {
+  if (isSqlConfigured()) {
+    return createVideoDeletionJobSql(job);
+  }
+  return withLedgerLock(async () => {
+    const ledger = loadLedger();
+    const jobs = ledger.videoDeletionJobs ?? [];
+    ledger.videoDeletionJobs = [job, ...jobs].slice(0, 200);
+    saveLedger(ledger);
+    return job;
+  });
+}
+
+async function patchDeletionJob(
+  operationId: string,
+  patch: Partial<Omit<VideoDeletionJobRecord, 'operationId' | 'videoId'>>
+): Promise<void> {
+  if (isSqlConfigured()) {
+    await updateVideoDeletionJobSql(operationId, patch);
+    return;
+  }
+  await withLedgerLock(async () => {
+    const ledger = loadLedger();
+    const jobs = ledger.videoDeletionJobs ?? [];
+    ledger.videoDeletionJobs = jobs.map((j) =>
+      j.operationId === operationId ? { ...j, ...patch } : j
+    );
+    saveLedger(ledger);
+  });
+}
+
+async function fetchLatestDeletionJob(
+  videoId: string
+): Promise<VideoDeletionJobRecord | null> {
+  if (isSqlConfigured()) {
+    return getLatestVideoDeletionJobSql(videoId);
+  }
+  const ledger = loadLedger();
+  return (
+    (ledger.videoDeletionJobs ?? [])
+      .filter((j) => j.videoId === videoId)
+      .sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt))[0] ?? null
+  );
+}
+
+async function fetchDeletionJobs(limitCount = 40): Promise<VideoDeletionJobRecord[]> {
+  if (isSqlConfigured()) {
+    return listVideoDeletionJobsSql(limitCount);
+  }
+  const ledger = loadLedger();
+  return (ledger.videoDeletionJobs ?? [])
+    .slice()
+    .sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt))
+    .slice(0, limitCount);
+}
+
+async function fetchStoredMediaBinding(
+  videoId: string
+): Promise<CreatorMediaBinding | null> {
+  if (isSqlConfigured()) {
+    return getCreatorMediaByVideoIdSql(videoId);
+  }
+  const ledger = loadLedger();
+  return ledger.creatorMedia?.[videoId] ?? null;
+}
+
+async function removeStoredMediaBinding(
+  videoId: string
+): Promise<{ deletedCount: number }> {
+  if (isSqlConfigured()) {
+    return deleteCreatorMediaByVideoIdSql(videoId);
+  }
+  return withLedgerLock(async () => {
+    const ledger = loadLedger();
+    if (ledger.creatorMedia && ledger.creatorMedia[videoId]) {
+      delete ledger.creatorMedia[videoId];
+      saveLedger(ledger);
+      return { deletedCount: 1 };
+    }
+    return { deletedCount: 0 };
+  });
+}
+
+async function isPlaybackBlockedForToken(payload: PlaybackTokenPayload): Promise<boolean> {
+  if (blockedVideoStatuses.has(payload.videoId)) {
+    return true;
+  }
+  try {
+    const latestJob = await fetchLatestDeletionJob(payload.videoId);
+    if (
+      latestJob &&
+      (latestJob.status === 'pending' ||
+        latestJob.status === 'asset_deleted' ||
+        latestJob.status === 'metadata_deleted' ||
+        latestJob.status === 'completed')
+    ) {
+      blockedVideoStatuses.set(payload.videoId, 'deleted');
+      return true;
+    }
+  } catch {
+    // Fall through to Firestore check
+  }
+  if (!payload.creatorPreview) {
+    const resolved = await resolveServerVideoState(
+      payload.videoId,
+      firebaseConfig.projectId,
+      firebaseConfig.firestoreDatabaseId
+    );
+    if (resolved.state !== 'published') {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isValidSafeId(value: unknown): value is string {
@@ -434,18 +602,10 @@ async function resolveFirestoreVideoAssetForUser(
 
     const rawProvider = f.provider?.stringValue || 'private_storage';
     const rawRef = f.assetRef.stringValue;
-    let provider: CreatorMediaBinding['provider'] = 'private_storage';
-    let assetRef = rawRef;
-
-    if (rawProvider === 'cloudflare_stream') {
-      provider = 'cloudflare_stream';
-    } else if (rawRef.startsWith('youtube:')) {
-      provider = 'youtube';
-      assetRef = rawRef.slice('youtube:'.length);
-    } else if (rawRef.startsWith('facebook:')) {
-      provider = 'facebook';
-      assetRef = rawRef.slice('facebook:'.length);
-    }
+    const normalized = normalizeMediaSource(rawProvider, rawRef);
+    const provider: CreatorMediaBinding['provider'] =
+      normalized.provider === 'unknown' ? 'private_storage' : normalized.provider;
+    const assetRef = normalized.assetRef;
 
     return {
       videoId,
@@ -801,6 +961,63 @@ export function createApiApp(): Express {
   // PHASE 3: STREAMING AUTHORIZATION & SIGNED HLS DELIVERY
   // =========================================================================
 
+  const inspectRateMap = new Map<string, { count: number; resetAt: number }>();
+
+  app.post(
+    '/api/creator/inspect-video-link',
+    requireAuth,
+    async (req: AuthedRequest, res) => {
+      const uid = req.user!.uid;
+      const now = Date.now();
+      const bucket = inspectRateMap.get(uid);
+      if (!bucket || now > bucket.resetAt) {
+        inspectRateMap.set(uid, { count: 1, resetAt: now + 60_000 });
+      } else {
+        bucket.count += 1;
+        if (bucket.count > 25) {
+          res.status(429).json({
+            error: 'Terlalu banyak pemeriksaan tautan dalam 1 menit. Tunggu sebentar lalu coba lagi.',
+          });
+          return;
+        }
+      }
+
+      const { url } = req.body as { url?: unknown };
+      if (typeof url !== 'string' || url.trim().length === 0 || url.trim().length > 980) {
+        res.status(400).json({
+          error: 'Masukkan tautan HTTPS video yang valid (maksimal 980 karakter).',
+        });
+        return;
+      }
+
+      try {
+        const result = await inspectUniversalVideoLink(url.trim());
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({
+          error:
+            err instanceof Error
+              ? err.message
+              : 'Gagal memeriksa tautan video di server.',
+        });
+      }
+    }
+  );
+
+  const ALLOWED_REGISTER_PROVIDERS = new Set<VideoAssetProvider>([
+    'cloudflare_stream',
+    'private_storage',
+    'youtube',
+    'vimeo',
+    'dailymotion',
+    'tiktok',
+    'facebook',
+    'x',
+    'instagram',
+    'streamable',
+    'direct_video',
+  ]);
+
   app.post(
     '/api/creator/register-video-media',
     requireAuth,
@@ -815,20 +1032,20 @@ export function createApiApp(): Express {
 
       if (
         !isValidSafeId(videoId) ||
-        (provider !== 'cloudflare_stream' &&
-          provider !== 'private_storage' &&
-          provider !== 'youtube' &&
-          provider !== 'facebook') ||
+        typeof provider !== 'string' ||
+        !ALLOWED_REGISTER_PROVIDERS.has(provider as VideoAssetProvider) ||
         typeof assetRef !== 'string' ||
         assetRef.trim().length < 3 ||
-        assetRef.trim().length > 300
+        assetRef.trim().length > 1000
       ) {
         res.status(400).json({ error: 'Invalid video media registration payload.' });
         return;
       }
 
+      const typedProvider = provider as VideoAssetProvider;
       let trimmedRef = assetRef.trim();
-      if (provider === 'youtube') {
+
+      if (typedProvider === 'youtube') {
         const ytId = extractYouTubeVideoId(trimmedRef);
         if (!ytId) {
           res.status(400).json({
@@ -838,7 +1055,7 @@ export function createApiApp(): Express {
           return;
         }
         trimmedRef = ytId;
-      } else if (provider === 'facebook') {
+      } else if (typedProvider === 'facebook') {
         const fbUrl = extractFacebookVideoUrl(trimmedRef);
         if (!fbUrl) {
           res.status(400).json({
@@ -848,6 +1065,55 @@ export function createApiApp(): Express {
           return;
         }
         trimmedRef = fbUrl;
+      } else if (typedProvider === 'vimeo') {
+        const vimeo = extractVimeoVideoRef(trimmedRef);
+        if (!vimeo) {
+          res.status(400).json({ error: 'Invalid Vimeo video URL or ID.' });
+          return;
+        }
+        trimmedRef = vimeo.canonicalRef;
+      } else if (typedProvider === 'dailymotion') {
+        const dmId = extractDailymotionVideoId(trimmedRef);
+        if (!dmId) {
+          res.status(400).json({ error: 'Invalid Dailymotion video URL or ID.' });
+          return;
+        }
+        trimmedRef = dmId;
+      } else if (typedProvider === 'streamable') {
+        const stId = extractStreamableId(trimmedRef);
+        if (!stId) {
+          res.status(400).json({ error: 'Invalid Streamable video URL or ID.' });
+          return;
+        }
+        trimmedRef = stId;
+      } else if (typedProvider === 'tiktok') {
+        const tt = extractTikTokVideoInfo(trimmedRef);
+        if (!tt) {
+          res.status(400).json({ error: 'Invalid TikTok video URL.' });
+          return;
+        }
+        trimmedRef = tt.canonicalRef;
+      } else if (typedProvider === 'x') {
+        const xInfo = extractXPostInfo(trimmedRef);
+        if (!xInfo) {
+          res.status(400).json({ error: 'Invalid X (Twitter) status URL.' });
+          return;
+        }
+        trimmedRef = xInfo.canonicalUrl;
+      } else if (typedProvider === 'instagram') {
+        const ig = extractInstagramPostInfo(trimmedRef);
+        if (!ig) {
+          res.status(400).json({ error: 'Invalid Instagram post or reel URL.' });
+          return;
+        }
+        trimmedRef = ig.canonicalUrl;
+      } else if (typedProvider === 'direct_video') {
+        const guard = parseStrictHttpsUrl(trimmedRef, { allowBareHostname: false });
+        if (!guard.ok) {
+          res.status(400).json({ error: guard.messageEn });
+          return;
+        }
+        trimmedRef = guard.url.toString();
       } else if (trimmedRef.startsWith('private/uploads/')) {
         const expectedPrefix = `private/uploads/${uid}/`;
         if (!trimmedRef.startsWith(expectedPrefix)) {
@@ -860,7 +1126,7 @@ export function createApiApp(): Express {
         await upsertCreatorMediaSql({
           videoId,
           creatorId: uid,
-          provider,
+          provider: typedProvider,
           assetRef: trimmedRef,
           mimeType: typeof mimeType === 'string' ? mimeType.slice(0, 60) : undefined,
           updatedAtIso: new Date().toISOString(),
@@ -893,20 +1159,31 @@ export function createApiApp(): Express {
     let record: ServerEntitlement | null = null;
     let mediaBinding: CreatorMediaBinding | null = null;
     let resolvedVideo = null;
+    let videoLifecycleState: Awaited<ReturnType<typeof resolveServerVideoState>>['state'] =
+      'unavailable';
+    let latestDeletionJob: VideoDeletionJobRecord | null = null;
+
     try {
-      const [ctx, videoMeta] = await Promise.all([
+      const [ctx, videoState, priorJob] = await Promise.all([
         sqlReady
           ? getStreamAuthContextSql(req.user?.uid, videoId)
-          : Promise.resolve({ entitlement: null, mediaBinding: null }),
-        resolveServerVideoEntry(
+          : Promise.resolve({
+              entitlement: null,
+              mediaBinding: loadLedger().creatorMedia?.[videoId] ?? null,
+            }),
+        resolveServerVideoState(
           videoId,
           firebaseConfig.projectId,
-          firebaseConfig.firestoreDatabaseId
+          firebaseConfig.firestoreDatabaseId,
+          req.user?.rawIdToken
         ),
+        fetchLatestDeletionJob(videoId).catch(() => null),
       ]);
       record = ctx.entitlement;
       mediaBinding = ctx.mediaBinding;
-      resolvedVideo = videoMeta;
+      resolvedVideo = videoState.entry;
+      videoLifecycleState = videoState.state;
+      latestDeletionJob = priorJob;
 
       // Auto-resolve from Firestore video_assets for creator/admin & backfill SQL when available
       if (!mediaBinding && req.user?.rawIdToken) {
@@ -934,6 +1211,74 @@ export function createApiApp(): Express {
       return;
     }
 
+    const activeDeletionBlock =
+      blockedVideoStatuses.get(videoId) === 'deletion_pending' ||
+      blockedVideoStatuses.get(videoId) === 'deleted' ||
+      Boolean(
+        latestDeletionJob &&
+          (latestDeletionJob.status === 'pending' ||
+            latestDeletionJob.status === 'asset_deleted' ||
+            latestDeletionJob.status === 'metadata_deleted' ||
+            latestDeletionJob.status === 'completed')
+      );
+
+    if (videoLifecycleState === 'deletion_pending' || activeDeletionBlock) {
+      res.status(410).json({
+        error: 'Video ini telah dihapus atau sedang dalam proses penghapusan permanen.',
+        code: 'VIDEO_DELETED_OR_PENDING',
+      });
+      return;
+    }
+
+    if (
+      videoLifecycleState === 'archived' ||
+      blockedVideoStatuses.get(videoId) === 'archived'
+    ) {
+      res.status(403).json({
+        error: 'Video ini telah diarsipkan dan tidak lagi tersedia untuk pemutaran.',
+        code: 'VIDEO_ARCHIVED',
+      });
+      return;
+    }
+
+    if (videoLifecycleState === 'not_found') {
+      res.status(404).json({
+        error: 'Video tidak ditemukan atau telah dihapus dari katalog.',
+        code: 'VIDEO_NOT_FOUND',
+      });
+      return;
+    }
+
+    if (videoLifecycleState === 'unavailable') {
+      res.status(403).json({
+        error: 'Video ini belum dipublikasikan, telah diarsipkan, atau tidak tersedia.',
+        code: 'VIDEO_UNAVAILABLE',
+      });
+      return;
+    }
+
+    if (videoLifecycleState === 'error') {
+      res.status(503).json({
+        error: 'Gagal memverifikasi status ketersediaan video dari server.',
+        code: 'VIDEO_STATUS_CHECK_FAILED',
+      });
+      return;
+    }
+
+    const isCreatorPreview = Boolean(
+      req.user?.uid &&
+        ((resolvedVideo && resolvedVideo.creatorId === req.user.uid) ||
+          (mediaBinding && mediaBinding.creatorId === req.user.uid))
+    );
+
+    if (videoLifecycleState !== 'published' && !isCreatorPreview) {
+      res.status(403).json({
+        error: 'Video ini belum tersedia untuk publik.',
+        code: 'VIDEO_NOT_PUBLISHED',
+      });
+      return;
+    }
+
     const isFreeRelease = Boolean(
       resolvedVideo &&
         resolvedVideo.priceUsd === 0 &&
@@ -942,9 +1287,6 @@ export function createApiApp(): Express {
     );
     const hasPaidEntitlement = Boolean(
       record && record.status !== 'revoked' && now < record.expiresAtMs
-    );
-    const isCreatorPreview = Boolean(
-      req.user?.uid && mediaBinding && mediaBinding.creatorId === req.user.uid
     );
     const isActive = Boolean(hasPaidEntitlement || isCreatorPreview || isFreeRelease);
     const mode: 'preview' | 'full' = isActive ? 'full' : 'preview';
@@ -990,6 +1332,7 @@ export function createApiApp(): Express {
             jti: crypto.randomUUID(),
             fileRef: `${ownerUid}/${fileName}`,
             mimeType: mediaBinding.mimeType || 'video/mp4',
+            creatorPreview: isCreatorPreview && videoLifecycleState !== 'published',
           });
           res.json({
             mode,
@@ -1093,6 +1436,136 @@ export function createApiApp(): Express {
       }
     }
 
+    // Check Vimeo (Official Vimeo Player Embed + postMessage API)
+    if (
+      mediaBinding &&
+      (mediaBinding.provider === 'vimeo' ||
+        (mediaBinding.provider === 'private_storage' &&
+          mediaBinding.assetRef.startsWith('vimeo:')))
+    ) {
+      const vimeo = extractVimeoVideoRef(mediaBinding.assetRef);
+      if (vimeo) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'vimeo',
+          provider: 'vimeo',
+          vimeoVideoId: vimeo.id,
+          vimeoHash: vimeo.hash,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: vimeo.embedUrl,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    // Check Dailymotion (Official Embed Player API)
+    if (
+      mediaBinding &&
+      (mediaBinding.provider === 'dailymotion' ||
+        (mediaBinding.provider === 'private_storage' &&
+          mediaBinding.assetRef.startsWith('dailymotion:')))
+    ) {
+      const dmId = extractDailymotionVideoId(mediaBinding.assetRef);
+      if (dmId) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'dailymotion',
+          provider: 'dailymotion',
+          dailymotionVideoId: dmId,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: `https://www.dailymotion.com/embed/video/${dmId}?api=postMessage&autoplay=1`,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    // Check Streamable / TikTok
+    if (mediaBinding && mediaBinding.provider === 'streamable') {
+      const stId = extractStreamableId(mediaBinding.assetRef);
+      if (stId) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'streamable',
+          provider: 'streamable',
+          streamableId: stId,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: `https://streamable.com/e/${stId}?autoplay=1`,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    if (mediaBinding && mediaBinding.provider === 'tiktok') {
+      const tt = extractTikTokVideoInfo(mediaBinding.assetRef);
+      if (tt?.videoId) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'tiktok',
+          provider: 'tiktok',
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: `https://www.tiktok.com/player/v1/${tt.videoId}?autoplay=1&controls=1`,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    // Check Direct HTTPS Video / HLS (.m3u8) / MPEG-DASH (.mpd)
+    if (
+      mediaBinding &&
+      (mediaBinding.provider === 'direct_video' ||
+        (mediaBinding.provider === 'private_storage' &&
+          mediaBinding.assetRef.startsWith('direct:')))
+    ) {
+      const cleanDirect = mediaBinding.assetRef.startsWith('direct:')
+        ? mediaBinding.assetRef.slice('direct:'.length).trim()
+        : mediaBinding.assetRef.trim();
+      const guard = parseStrictHttpsUrl(cleanDirect, { allowBareHostname: false });
+      if (guard.ok) {
+        const mimeLower = (mediaBinding.mimeType || '').toLowerCase();
+        const inferredFormat: DirectStreamFormat =
+          mimeLower.includes('mpegurl') || mimeLower.includes('hls')
+            ? 'hls'
+            : mimeLower.includes('dash')
+            ? 'dash'
+            : inferDirectFormatFromUrl(guard.url) ?? 'mp4';
+
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'direct_video',
+          provider: 'direct_video',
+          directFormat: inferredFormat,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: guard.url.toString(),
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
     const mappedPreset =
       mediaBinding?.assetRef === 'stream-doc'
         ? 'stream-doc'
@@ -1112,6 +1585,7 @@ export function createApiApp(): Express {
       maxSeg,
       exp: now + (isActive ? 1800_000 : 600_000),
       jti: crypto.randomUUID(),
+      creatorPreview: isCreatorPreview && videoLifecycleState !== 'published',
     });
 
     res.json({
@@ -1127,11 +1601,16 @@ export function createApiApp(): Express {
     });
   });
 
-  app.get('/api/stream/file', (req, res) => {
+  app.get('/api/stream/file', async (req, res) => {
     const token = typeof req.query.token === 'string' ? req.query.token : '';
     const payload = verifyPlaybackToken(token);
     if (!payload || payload.streamKey !== 'uploaded-file' || !payload.fileRef) {
       res.status(403).json({ error: 'Invalid or expired file playback token.' });
+      return;
+    }
+
+    if (await isPlaybackBlockedForToken(payload)) {
+      res.status(403).json({ error: 'This release is archived or no longer available.' });
       return;
     }
 
@@ -1189,11 +1668,16 @@ export function createApiApp(): Express {
     res.on('close', () => stream.destroy());
   });
 
-  app.get('/api/stream/master.m3u8', (req, res) => {
+  app.get('/api/stream/master.m3u8', async (req, res) => {
     const token = typeof req.query.token === 'string' ? req.query.token : '';
     const payload = verifyPlaybackToken(token);
     if (!payload) {
       res.status(403).json({ error: 'Invalid or expired playback token.' });
+      return;
+    }
+
+    if (await isPlaybackBlockedForToken(payload)) {
+      res.status(403).json({ error: 'This release is archived or no longer available.' });
       return;
     }
 
@@ -1219,6 +1703,10 @@ export function createApiApp(): Express {
     const payload = verifyPlaybackToken(token);
     if (!payload) {
       res.status(403).json({ error: 'Invalid or expired playback token.' });
+      return;
+    }
+    if (blockedVideoStatuses.has(payload.videoId)) {
+      res.status(403).json({ error: 'This release is archived or no longer available.' });
       return;
     }
 
@@ -1276,6 +1764,10 @@ export function createApiApp(): Express {
     const payload = verifyPlaybackToken(token);
     if (!payload) {
       res.status(403).json({ error: 'Invalid or expired playback token.' });
+      return;
+    }
+    if (blockedVideoStatuses.has(payload.videoId)) {
+      res.status(403).json({ error: 'This release is archived or no longer available.' });
       return;
     }
 
@@ -1365,6 +1857,23 @@ export function createApiApp(): Express {
     }
 
     try {
+      const videoState = await resolveServerVideoState(
+        videoId,
+        firebaseConfig.projectId,
+        firebaseConfig.firestoreDatabaseId,
+        req.user?.rawIdToken
+      );
+      if (
+        blockedVideoStatuses.has(videoId) ||
+        videoState.state === 'archived' ||
+        videoState.state === 'deletion_pending' ||
+        videoState.state === 'not_found' ||
+        videoState.state === 'unavailable'
+      ) {
+        res.status(403).json({ error: 'Release is archived or unavailable.' });
+        return;
+      }
+
       const result = await updatePlaybackProgressSql(
         req.user!.uid,
         videoId,
@@ -2517,6 +3026,720 @@ export function createApiApp(): Express {
         error: err instanceof Error ? err.message : 'Failed to update settings.',
       });
     }
+  });
+
+  // =========================================================================
+  // ADMIN VIDEO LIFECYCLE: ARCHIVE, RESTORE & PERMANENT DELETE
+  // =========================================================================
+
+  app.get('/api/admin/video-deletion-jobs', requireAdmin, async (_req, res) => {
+    try {
+      const jobs = await fetchDeletionJobs(40);
+      res.json({ jobs });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to load video deletion audit logs.',
+      });
+    }
+  });
+
+  app.get('/api/admin/videos/:videoId/asset-info', requireAdmin, async (req: AuthedRequest, res) => {
+    const videoId = req.params.videoId;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: 'Invalid videoId.' });
+      return;
+    }
+
+    try {
+      const bearerToken = req.user!.rawIdToken;
+      const [videoDoc, assetDoc, sqlMedia, latestJob] = await Promise.all([
+        firestoreGetDocument(
+          firebaseConfig.projectId,
+          firebaseConfig.firestoreDatabaseId,
+          'videos',
+          videoId,
+          bearerToken
+        ),
+        firestoreGetDocument(
+          firebaseConfig.projectId,
+          firebaseConfig.firestoreDatabaseId,
+          'video_assets',
+          videoId,
+          bearerToken
+        ),
+        fetchStoredMediaBinding(videoId).catch(() => null),
+        fetchLatestDeletionJob(videoId).catch(() => null),
+      ]);
+
+      if (!videoDoc.exists && !latestJob) {
+        res.status(404).json({ error: 'Video not found.' });
+        return;
+      }
+
+      const rawProvider =
+        assetDoc.fields.provider?.stringValue || sqlMedia?.provider || '';
+      const rawRef =
+        assetDoc.fields.assetRef?.stringValue || sqlMedia?.assetRef || '';
+      const normalized =
+        rawProvider || rawRef
+          ? normalizeMediaSource(rawProvider, rawRef)
+          : {
+              provider: (latestJob?.provider || 'unknown') as NormalizedMediaProvider,
+              assetRef: '',
+            };
+
+      const title =
+        videoDoc.fields.title?.stringValue ||
+        latestJob?.videoTitleSnapshot ||
+        videoId;
+      const status = (videoDoc.fields.status?.stringValue ||
+        (latestJob?.status === 'completed' ? 'deletion_pending' : 'draft')) as ContentStatus;
+      const previousStatus = (videoDoc.fields.previousStatus?.stringValue ||
+        '') as ContentStatus | '';
+      const thumbnailUrl = videoDoc.fields.thumbnailUrl?.stringValue || '';
+      const creatorId =
+        videoDoc.fields.creatorId?.stringValue ||
+        assetDoc.fields.creatorId?.stringValue ||
+        sqlMedia?.creatorId ||
+        '';
+
+      const assetRefFingerprint =
+        rawRef
+          ? buildAssetRefFingerprint(normalized.provider, normalized.assetRef)
+          : latestJob?.assetRefFingerprint || 'unknown:unavailable';
+
+      const assetInfo: AdminVideoAssetInfo = {
+        videoId,
+        title,
+        status,
+        previousStatus,
+        provider: normalized.provider,
+        assetRefFingerprint,
+        isExternalPlatform: isExternalLinkProvider(normalized.provider),
+        externalMediaWarning: getExternalPlatformWarning(normalized.provider),
+        thumbnailUrl,
+        creatorId,
+      };
+
+      res.json({ assetInfo, latestJob });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Unable to inspect video asset metadata.',
+      });
+    }
+  });
+
+  app.post('/api/admin/videos/:videoId/archive', requireAdmin, async (req: AuthedRequest, res) => {
+    const videoId = req.params.videoId;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: 'Invalid videoId.' });
+      return;
+    }
+
+    const body = (req.body || {}) as { moderationNote?: unknown };
+    const rawNote = typeof body.moderationNote === 'string' ? body.moderationNote.trim().slice(0, 500) : '';
+
+    try {
+      const bearerToken = req.user!.rawIdToken;
+      const videoDoc = await firestoreGetDocument(
+        firebaseConfig.projectId,
+        firebaseConfig.firestoreDatabaseId,
+        'videos',
+        videoId,
+        bearerToken
+      );
+
+      if (!videoDoc.exists) {
+        res.status(404).json({ error: 'Video not found.' });
+        return;
+      }
+
+      const currentStatus = (videoDoc.fields.status?.stringValue || 'draft') as ContentStatus;
+      if (currentStatus === 'deletion_pending') {
+        res.status(409).json({
+          error: 'Video sedang dalam proses penghapusan permanen dan tidak dapat diarsipkan.',
+        });
+        return;
+      }
+
+      const existingPrevious = (videoDoc.fields.previousStatus?.stringValue || '') as ContentStatus | '';
+      const previousStatus =
+        currentStatus === 'archived'
+          ? VALID_RESTORABLE_STATUSES.has(existingPrevious as ContentStatus)
+            ? existingPrevious
+            : ''
+          : VALID_RESTORABLE_STATUSES.has(currentStatus)
+          ? currentStatus
+          : '';
+
+      const nextNote =
+        rawNote || videoDoc.fields.moderationNote?.stringValue || 'Archived by Admin';
+
+      await firestoreCommitVideoFields(
+        firebaseConfig.projectId,
+        firebaseConfig.firestoreDatabaseId,
+        videoId,
+        {
+          status: { stringValue: 'archived' },
+          previousStatus: { stringValue: previousStatus },
+          moderationNote: { stringValue: nextNote },
+        },
+        bearerToken
+      );
+
+      blockedVideoStatuses.set(videoId, 'archived');
+
+      res.json({
+        ok: true,
+        videoId,
+        status: 'archived' as const,
+        previousStatus,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to archive video.',
+      });
+    }
+  });
+
+  app.post('/api/admin/videos/:videoId/restore', requireAdmin, async (req: AuthedRequest, res) => {
+    const videoId = req.params.videoId;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: 'Invalid videoId.' });
+      return;
+    }
+
+    const body = (req.body || {}) as {
+      targetStatus?: unknown;
+      moderationNote?: unknown;
+    };
+    const requestedTarget =
+      typeof body.targetStatus === 'string' &&
+      VALID_RESTORABLE_STATUSES.has(body.targetStatus as ContentStatus)
+        ? (body.targetStatus as ContentStatus)
+        : null;
+    const rawNote =
+      typeof body.moderationNote === 'string' ? body.moderationNote.trim().slice(0, 500) : '';
+
+    try {
+      const bearerToken = req.user!.rawIdToken;
+      const videoDoc = await firestoreGetDocument(
+        firebaseConfig.projectId,
+        firebaseConfig.firestoreDatabaseId,
+        'videos',
+        videoId,
+        bearerToken
+      );
+
+      if (!videoDoc.exists) {
+        res.status(404).json({ error: 'Video not found.' });
+        return;
+      }
+
+      const currentStatus = (videoDoc.fields.status?.stringValue || 'draft') as ContentStatus;
+      if (currentStatus === 'deletion_pending') {
+        res.status(409).json({
+          error: 'Video sedang dalam proses penghapusan permanen.',
+        });
+        return;
+      }
+      if (currentStatus !== 'archived') {
+        res.status(409).json({
+          error: `Video tidak berada dalam status arsip (status saat ini: ${currentStatus}).`,
+        });
+        return;
+      }
+
+      const storedPrevious = (videoDoc.fields.previousStatus?.stringValue || '') as ContentStatus | '';
+      const hasValidPrevious = VALID_RESTORABLE_STATUSES.has(
+        storedPrevious as ContentStatus
+      );
+
+      let restoredStatus: ContentStatus;
+      if (hasValidPrevious) {
+        restoredStatus = storedPrevious as ContentStatus;
+      } else if (requestedTarget) {
+        restoredStatus = requestedTarget;
+      } else {
+        res.status(400).json({
+          error:
+            'Status asal video tidak tersedia. Pilih status tujuan pemulihan secara eksplisit (tidak dipublikasikan otomatis).',
+          code: 'TARGET_STATUS_REQUIRED',
+        });
+        return;
+      }
+
+      const existingPublishedAt = videoDoc.fields.publishedAt?.stringValue || '';
+      const nextPublishedAt =
+        restoredStatus === 'published' && !existingPublishedAt
+          ? new Date().toISOString().slice(0, 10)
+          : existingPublishedAt;
+      const nextNote =
+        rawNote || `Restored by Admin to ${restoredStatus.replace('_', ' ')}`;
+
+      await firestoreCommitVideoFields(
+        firebaseConfig.projectId,
+        firebaseConfig.firestoreDatabaseId,
+        videoId,
+        {
+          status: { stringValue: restoredStatus },
+          previousStatus: { stringValue: '' },
+          publishedAt: { stringValue: nextPublishedAt },
+          moderationNote: { stringValue: nextNote },
+        },
+        bearerToken
+      );
+
+      blockedVideoStatuses.delete(videoId);
+
+      res.json({
+        ok: true,
+        videoId,
+        status: restoredStatus,
+        restoredFromPreviousStatus: hasValidPrevious,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to restore archived video.',
+      });
+    }
+  });
+
+  app.delete('/api/admin/videos/:videoId', requireAdmin, async (req: AuthedRequest, res) => {
+    const videoId = req.params.videoId;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: 'Invalid videoId.' });
+      return;
+    }
+
+    const body = (req.body || {}) as { confirmationText?: unknown };
+    const headerConf = req.headers['x-delete-confirmation'];
+    const rawConfirmation =
+      typeof body.confirmationText === 'string'
+        ? body.confirmationText.trim()
+        : typeof headerConf === 'string'
+        ? headerConf.trim()
+        : '';
+
+    const bearerToken = req.user!.rawIdToken;
+    const adminUid = req.user!.uid;
+
+    let videoDoc;
+    let assetDoc;
+    let sqlMedia: CreatorMediaBinding | null = null;
+    let priorJob: VideoDeletionJobRecord | null = null;
+
+    try {
+      [videoDoc, assetDoc, sqlMedia, priorJob] = await Promise.all([
+        firestoreGetDocument(
+          firebaseConfig.projectId,
+          firebaseConfig.firestoreDatabaseId,
+          'videos',
+          videoId,
+          bearerToken
+        ),
+        firestoreGetDocument(
+          firebaseConfig.projectId,
+          firebaseConfig.firestoreDatabaseId,
+          'video_assets',
+          videoId,
+          bearerToken
+        ),
+        fetchStoredMediaBinding(videoId).catch(() => null),
+        fetchLatestDeletionJob(videoId).catch(() => null),
+      ]);
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to read authoritative video records.',
+      });
+      return;
+    }
+
+    if (
+      priorJob?.status === 'completed' &&
+      !videoDoc.exists &&
+      !assetDoc.exists &&
+      !sqlMedia
+    ) {
+      blockedVideoStatuses.set(videoId, 'deleted');
+      res.json({
+        ok: true,
+        idempotent: true,
+        job: priorJob,
+        preservedFinancialRecords: true,
+      });
+      return;
+    }
+
+    const titleSnapshot = (
+      videoDoc.fields.title?.stringValue ||
+      priorJob?.videoTitleSnapshot ||
+      ''
+    ).trim();
+
+    if (!titleSnapshot) {
+      res.status(404).json({ error: 'Video record not found.' });
+      return;
+    }
+
+    if (
+      !rawConfirmation ||
+      rawConfirmation.toLowerCase() !== titleSnapshot.toLowerCase()
+    ) {
+      res.status(400).json({
+        error: `Konfirmasi penghapusan gagal. Ketik judul video secara persis: "${titleSnapshot}".`,
+        code: 'CONFIRMATION_MISMATCH',
+      });
+      return;
+    }
+
+    // Never trust client-supplied provider or assetRef: read strictly from server records
+    const rawProvider =
+      assetDoc.fields.provider?.stringValue || sqlMedia?.provider || '';
+    const rawRef =
+      assetDoc.fields.assetRef?.stringValue || sqlMedia?.assetRef || '';
+
+    const normalized =
+      rawProvider || rawRef
+        ? normalizeMediaSource(rawProvider, rawRef)
+        : priorJob &&
+          (priorJob.providerResult === 'deleted' ||
+            priorJob.providerResult === 'already_missing' ||
+            priorJob.providerResult === 'external_retained' ||
+            priorJob.providerResult === 'shared_preset_retained')
+        ? {
+            provider: priorJob.provider as NormalizedMediaProvider,
+            assetRef: '',
+          }
+        : { provider: 'unknown' as const, assetRef: '' };
+
+    const providerAlreadyResolved = Boolean(
+      priorJob &&
+        (priorJob.providerResult === 'deleted' ||
+          priorJob.providerResult === 'already_missing' ||
+          priorJob.providerResult === 'external_retained' ||
+          priorJob.providerResult === 'shared_preset_retained')
+    );
+
+    const fingerprint =
+      normalized.assetRef
+        ? buildAssetRefFingerprint(normalized.provider, normalized.assetRef)
+        : priorJob?.assetRefFingerprint || 'unknown:unavailable';
+    const externalWarning = getExternalPlatformWarning(normalized.provider);
+
+    // Pre-validate provider & assetRef BEFORE changing status or deleting metadata
+    let validatedPrivateFile:
+      | ReturnType<typeof validatePrivateStorageAssetRef>
+      | null = null;
+
+    if (!providerAlreadyResolved) {
+      if (normalized.provider === 'unknown' || !normalized.assetRef) {
+        res.status(422).json({
+          error:
+            'Provider media tidak dikenal atau metadata aset video tidak ditemukan. Penghapusan dihentikan aman tanpa menghapus metadata.',
+          code: 'UNKNOWN_OR_MISSING_ASSET_PROVIDER',
+        });
+        return;
+      }
+
+      if (normalized.provider === 'cloudflare_stream') {
+        if (!/^[a-zA-Z0-9_-]{8,128}$/.test(normalized.assetRef)) {
+          res.status(422).json({
+            error:
+              'ID aset Cloudflare Stream tidak valid. Penghapusan dihentikan aman tanpa menghapus metadata.',
+            code: 'INVALID_CLOUDFLARE_UID',
+          });
+          return;
+        }
+        if (!isCloudflareStreamConfigured()) {
+          res.status(503).json({
+            error:
+              'Kredensial Cloudflare Stream server belum aktif sehingga penghapusan file Cloudflare tidak dapat dilakukan.',
+            code: 'CLOUDFLARE_NOT_CONFIGURED',
+          });
+          return;
+        }
+      } else if (normalized.provider === 'private_storage') {
+        validatedPrivateFile = validatePrivateStorageAssetRef(
+          UPLOADS_DIR,
+          normalized.assetRef
+        );
+        if (validatedPrivateFile.kind === 'invalid') {
+          res.status(422).json({
+            error:
+              'Referensi file penyimpanan lokal tidak valid atau keluar dari direktori upload. Penghapusan dihentikan aman.',
+            code: 'INVALID_ASSET_REF',
+          });
+          return;
+        }
+      } else if (isExternalLinkProvider(normalized.provider)) {
+        if (!validateExternalProviderAssetRef(normalized.provider, normalized.assetRef)) {
+          res.status(422).json({
+            error: `Referensi tautan eksternal (${normalized.provider}) tidak valid.`,
+            code: 'INVALID_EXTERNAL_REF',
+          });
+          return;
+        }
+      }
+    }
+
+    // 1. Create audit job record BEFORE destructive steps
+    const operationId = `del_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+    const nowIso = new Date().toISOString();
+    let job: VideoDeletionJobRecord = {
+      operationId,
+      videoId,
+      videoTitleSnapshot: titleSnapshot.slice(0, 140),
+      provider: normalized.provider,
+      assetRefFingerprint: fingerprint,
+      requestedBy: adminUid,
+      requestedAt: nowIso,
+      status: 'pending',
+      providerResult: providerAlreadyResolved
+        ? priorJob!.providerResult
+        : 'pending',
+      firestoreResult:
+        !videoDoc.exists && !assetDoc.exists ? 'already_missing' : 'pending',
+      sqlResult: !sqlMedia ? 'already_missing' : 'pending',
+      thumbnailResult: 'skipped',
+      externalMediaWarning: externalWarning,
+      errorCode: null,
+      errorMessage: null,
+      completedAt: null,
+    };
+
+    try {
+      job = await saveDeletionJob(job);
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Unable to create deletion audit record.',
+      });
+      return;
+    }
+
+    // 2. Mark Firestore document as deletion_pending tombstone & block playback immediately
+    blockedVideoStatuses.set(videoId, 'deletion_pending');
+    if (videoDoc.exists) {
+      const currentStatus = (videoDoc.fields.status?.stringValue || 'draft') as ContentStatus;
+      if (currentStatus !== 'deletion_pending') {
+        try {
+          await firestoreCommitVideoFields(
+            firebaseConfig.projectId,
+            firebaseConfig.firestoreDatabaseId,
+            videoId,
+            {
+              status: { stringValue: 'deletion_pending' },
+              moderationNote: {
+                stringValue: `Permanent deletion in progress (${operationId})`,
+              },
+            },
+            bearerToken
+          );
+        } catch (err) {
+          const safeMsg =
+            err instanceof Error
+              ? err.message
+              : 'Failed to set deletion_pending tombstone.';
+          await patchDeletionJob(operationId, {
+            status: 'failed',
+            errorCode: 'TOMBSTONE_FAILED',
+            errorMessage: safeMsg.slice(0, 280),
+          }).catch(() => {});
+          res.status(502).json({
+            error: safeMsg,
+            code: 'TOMBSTONE_FAILED',
+            operationId,
+          });
+          return;
+        }
+      }
+    }
+
+    // 3. Execute Provider Media Deletion
+    if (!providerAlreadyResolved) {
+      try {
+        if (normalized.provider === 'cloudflare_stream') {
+          const cfRes = await deleteCloudflareVideo(normalized.assetRef);
+          job.providerResult = cfRes.alreadyMissing ? 'already_missing' : 'deleted';
+        } else if (
+          normalized.provider === 'private_storage' &&
+          validatedPrivateFile
+        ) {
+          if (validatedPrivateFile.kind === 'shared_preset') {
+            job.providerResult = 'shared_preset_retained';
+          } else if (validatedPrivateFile.kind === 'uploaded_file') {
+            job.providerResult = deleteFileIfExists(validatedPrivateFile.resolvedPath);
+          }
+        } else if (isExternalLinkProvider(normalized.provider)) {
+          job.providerResult = 'external_retained';
+        }
+        job.status = 'asset_deleted';
+        await patchDeletionJob(operationId, {
+          status: job.status,
+          providerResult: job.providerResult,
+        });
+      } catch (err) {
+        const safeMsg =
+          err instanceof Error
+            ? err.message
+            : 'Provider asset deletion failed.';
+        job.status = 'failed';
+        job.errorCode = 'PROVIDER_DELETE_FAILED';
+        job.errorMessage = safeMsg.slice(0, 280);
+        await patchDeletionJob(operationId, {
+          status: 'failed',
+          providerResult: 'failed',
+          errorCode: job.errorCode,
+          errorMessage: job.errorMessage,
+        }).catch(() => {});
+        res.status(502).json({
+          error: safeMsg,
+          code: 'PROVIDER_DELETE_FAILED',
+          job,
+        });
+        return;
+      }
+    } else {
+      job.status = 'asset_deleted';
+      await patchDeletionJob(operationId, {
+        status: 'asset_deleted',
+        providerResult: job.providerResult,
+      }).catch(() => {});
+    }
+
+    // 4. Exclusive Thumbnail Cleanup (retain if shared or ownership unclear)
+    const thumbUrl = videoDoc.fields.thumbnailUrl?.stringValue || '';
+    const creatorId =
+      videoDoc.fields.creatorId?.stringValue ||
+      assetDoc.fields.creatorId?.stringValue ||
+      sqlMedia?.creatorId ||
+      '';
+    if (thumbUrl) {
+      const thumbCheck = await verifyExclusiveLocalThumbnail({
+        thumbnailsDir: THUMBNAILS_DIR,
+        thumbUrl,
+        excludeVideoId: videoId,
+        expectedCreatorId: creatorId,
+        projectId: firebaseConfig.projectId,
+        databaseId: firebaseConfig.firestoreDatabaseId,
+        bearerToken,
+      });
+
+      if (thumbCheck.safeToDelete) {
+        try {
+          const fileStatus = deleteFileIfExists(thumbCheck.resolvedPath);
+          let sqlThumbDeleted = 0;
+          if (isSqlConfigured()) {
+            const sqlRes = await deleteThumbnailAssetSql(thumbCheck.sqlThumbKey);
+            sqlThumbDeleted = sqlRes.deletedCount;
+          }
+          job.thumbnailResult =
+            fileStatus === 'deleted' || sqlThumbDeleted > 0
+              ? 'deleted'
+              : 'already_missing';
+        } catch {
+          job.thumbnailResult = 'retained_cleanup_error';
+        }
+      } else {
+        job.thumbnailResult = thumbCheck.reason;
+      }
+    }
+
+    // 5. Delete Firestore video_assets/{videoId} & videos/{videoId} (404-safe for retry)
+    try {
+      const [assetDel, videoDel] = await Promise.all([
+        firestoreDeleteDocument(
+          firebaseConfig.projectId,
+          firebaseConfig.firestoreDatabaseId,
+          'video_assets',
+          videoId,
+          bearerToken
+        ),
+        firestoreDeleteDocument(
+          firebaseConfig.projectId,
+          firebaseConfig.firestoreDatabaseId,
+          'videos',
+          videoId,
+          bearerToken
+        ),
+      ]);
+      blockedVideoStatuses.set(videoId, 'deleted');
+      job.firestoreResult =
+        assetDel.alreadyMissing && videoDel.alreadyMissing
+          ? 'already_missing'
+          : 'deleted';
+      job.status = 'metadata_deleted';
+      await patchDeletionJob(operationId, {
+        status: job.status,
+        firestoreResult: job.firestoreResult,
+        thumbnailResult: job.thumbnailResult,
+      });
+    } catch (err) {
+      const safeMsg =
+        err instanceof Error
+          ? err.message
+          : 'Failed to delete Firestore video metadata.';
+      job.status = 'asset_deleted';
+      job.errorCode = 'FIRESTORE_DELETE_FAILED';
+      job.errorMessage = safeMsg.slice(0, 280);
+      await patchDeletionJob(operationId, {
+        status: 'asset_deleted',
+        firestoreResult: 'failed',
+        thumbnailResult: job.thumbnailResult,
+        errorCode: job.errorCode,
+        errorMessage: job.errorMessage,
+      }).catch(() => {});
+      res.status(502).json({
+        error: safeMsg,
+        code: 'FIRESTORE_DELETE_FAILED',
+        job,
+      });
+      return;
+    }
+
+    // 6. Delete PostgreSQL / Ledger creator_media mapping ONLY (financial tables preserved)
+    try {
+      const sqlCleanup = await removeStoredMediaBinding(videoId);
+      job.sqlResult =
+        sqlCleanup.deletedCount > 0 ? 'deleted' : 'already_missing';
+      job.status = 'completed';
+      job.completedAt = new Date().toISOString();
+      job.errorCode = null;
+      job.errorMessage = null;
+      await patchDeletionJob(operationId, {
+        status: 'completed',
+        sqlResult: job.sqlResult,
+        completedAt: job.completedAt,
+        errorCode: null,
+        errorMessage: null,
+      });
+    } catch (err) {
+      const safeMsg =
+        err instanceof Error
+          ? err.message
+          : 'Failed to remove creator_media mapping.';
+      job.status = 'metadata_deleted';
+      job.errorCode = 'SQL_CLEANUP_FAILED';
+      job.errorMessage = safeMsg.slice(0, 280);
+      await patchDeletionJob(operationId, {
+        status: 'metadata_deleted',
+        sqlResult: 'failed',
+        errorCode: job.errorCode,
+        errorMessage: job.errorMessage,
+      }).catch(() => {});
+      res.status(502).json({
+        error: safeMsg,
+        code: 'SQL_CLEANUP_FAILED',
+        job,
+      });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      job,
+      preservedFinancialRecords: true,
+    });
   });
 
   return app;

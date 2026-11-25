@@ -106,7 +106,7 @@ service cloud.firestore {
           'category', 'creatorId', 'creatorName', 'thumbnailUrl', 'backdropUrl',
           'durationMinutes', 'previewSeconds', 'priceUsd', 'priceIdr', 'creditCost',
           'releaseYear', 'publishedAt', 'resolution', 'audioFormat', 'languages',
-          'status', 'moderationNote', 'viewCount', 'rating', 'reviewCount',
+          'status', 'previousStatus', 'moderationNote', 'viewCount', 'rating', 'reviewCount',
           'createdAt', 'updatedAt'
         ])
         && data.id is string && data.id == videoId && data.id.size() <= 128
@@ -138,7 +138,8 @@ service cloud.firestore {
         && data.resolution in ['4K HDR', '4K UHD', '1080p HD']
         && data.audioFormat is string && data.audioFormat.size() >= 2 && data.audioFormat.size() <= 60
         && data.languages is list && data.languages.size() >= 1 && data.languages.size() <= 8 && data.languages[0] is string
-        && data.status in ['draft', 'pending_review', 'approved', 'rejected', 'published', 'archived']
+        && data.status in ['draft', 'pending_review', 'approved', 'rejected', 'published', 'archived', 'deletion_pending']
+        && (!('previousStatus' in data) || (data.previousStatus is string && data.previousStatus.size() <= 32 && data.previousStatus in ['', 'draft', 'pending_review', 'approved', 'rejected', 'published']))
         && data.moderationNote is string && data.moderationNote.size() <= 500
         && data.viewCount is int && data.viewCount >= 0
         && (data.rating is float || data.rating is int) && data.rating >= 0 && data.rating <= 5
@@ -152,8 +153,21 @@ service cloud.firestore {
         && data.keys().hasOnly(['videoId', 'creatorId', 'provider', 'assetRef', 'createdAt', 'updatedAt'])
         && data.videoId is string && data.videoId == videoId && data.videoId.size() <= 128
         && data.creatorId is string && isValidId(data.creatorId)
-        && data.provider in ['cloudflare_stream', 'private_storage']
-        && data.assetRef is string && data.assetRef.size() >= 3 && data.assetRef.size() <= 300
+        && data.provider in [
+          'cloudflare_stream',
+          'private_storage',
+          'youtube',
+          'vimeo',
+          'dailymotion',
+          'tiktok',
+          'facebook',
+          'x',
+          'instagram',
+          'streamable',
+          'direct_video'
+        ]
+        && data.assetRef is string && data.assetRef.size() >= 3 && data.assetRef.size() <= 1000
+        && (data.provider != 'direct_video' || data.assetRef.matches('^https://.*'))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -325,12 +339,18 @@ service cloud.firestore {
         && (
           (
             isAdmin()
-            && !(existing().status == 'archived' && incoming().status != 'archived')
-            && (incoming().status != 'published' || existing().status in ['approved', 'published'])
+            && (
+              (existing().status == 'archived' && incoming().status in ['draft', 'pending_review', 'approved', 'rejected', 'published', 'deletion_pending']) ||
+              (existing().status == 'deletion_pending' && incoming().status in ['deletion_pending', 'archived', 'draft', 'rejected']) ||
+              (existing().status in ['draft', 'pending_review', 'approved', 'rejected', 'published'] && (
+                incoming().status != 'published' || existing().status in ['approved', 'published']
+              ))
+            )
           ) ||
           (
             existing().creatorId == request.auth.uid
             && existing().status != 'archived'
+            && existing().status != 'deletion_pending'
             && incoming().viewCount == existing().viewCount
             && incoming().rating == existing().rating
             && incoming().reviewCount == existing().reviewCount

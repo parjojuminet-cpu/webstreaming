@@ -139,3 +139,23 @@ export const platformSettings = pgTable('platform_settings', {
   minPriceUsd: doublePrecision('min_price_usd').notNull().default(1.99),
   minPriceIdr: integer('min_price_idr').notNull().default(29000),
 });
+
+export const videoDeletionJobs = pgTable('video_deletion_jobs', {
+  operationId: text('operation_id').primaryKey(),
+  videoId: text('video_id').notNull(),
+  videoTitleSnapshot: text('video_title_snapshot').notNull(),
+  provider: text('provider').notNull(),
+  assetRefFingerprint: text('asset_ref_fingerprint').notNull(),
+  requestedBy: text('requested_by').notNull(),
+  requestedAt: text('requested_at').notNull(),
+  status: text('status').notNull(),
+  providerResult: text('provider_result').notNull().default('pending'),
+  firestoreResult: text('firestore_result').notNull().default('pending'),
+  sqlResult: text('sql_result').notNull().default('pending'),
+  thumbnailResult: text('thumbnail_result').notNull().default('skipped'),
+  externalMediaWarning: text('external_media_warning'),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  completedAt: text('completed_at'),
+});
+

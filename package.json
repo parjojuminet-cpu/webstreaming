@@ -18,6 +18,7 @@
     "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-react": "^6.1.1",
+    "dashjs": "^5.3.0",
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.11",
     "drizzle-orm": "^0.45.4",

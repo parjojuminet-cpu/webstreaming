@@ -10,6 +10,8 @@ import type {
   PaymentOrderRecord,
   PayoutRecord,
   PurchaseRecord,
+  VideoAssetProvider,
+  VideoDeletionJobRecord,
   WalletTransactionRecord,
 } from '../src/types/vyora';
 
@@ -62,7 +64,7 @@ interface IdempotencyEntry {
 export interface CreatorMediaBinding {
   videoId: string;
   creatorId: string;
-  provider: 'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook';
+  provider: VideoAssetProvider;
   assetRef: string;
   mimeType?: string;
   updatedAtIso: string;
@@ -79,6 +81,7 @@ interface LedgerState {
   idempotency: Record<string, IdempotencyEntry>;
   processedWebhooks: Record<string, number>;
   creatorMedia?: Record<string, CreatorMediaBinding>;
+  videoDeletionJobs?: VideoDeletionJobRecord[];
   platformSettings: {
     commissionPercent: number;
     minPriceUsd: number;
@@ -164,6 +167,7 @@ export function loadLedger(): LedgerState {
         idempotency: parsed.idempotency ?? {},
         processedWebhooks: parsed.processedWebhooks ?? {},
         creatorMedia: parsed.creatorMedia ?? {},
+        videoDeletionJobs: parsed.videoDeletionJobs ?? [],
         platformSettings: parsed.platformSettings ?? {
           commissionPercent: 20,
           minPriceUsd: 1.99,
@@ -197,6 +201,7 @@ export function loadLedger(): LedgerState {
     idempotency: {},
     processedWebhooks: {},
     creatorMedia: {},
+    videoDeletionJobs: [],
     platformSettings: {
       commissionPercent: 20,
       minPriceUsd: 1.99,
@@ -272,14 +277,32 @@ export function storeIdempotency(
   };
 }
 
-// Resolve published video pricing from server catalog or Firestore public REST endpoint
-export async function resolveServerVideoEntry(
+export type ServerVideoLifecycleState =
+  | 'published'
+  | 'archived'
+  | 'deletion_pending'
+  | 'draft'
+  | 'pending_review'
+  | 'approved'
+  | 'rejected'
+  | 'not_found'
+  | 'unavailable'
+  | 'error';
+
+export interface ServerVideoResolution {
+  state: ServerVideoLifecycleState;
+  entry: ServerCatalogEntry | null;
+}
+
+// Resolve authoritative video status & pricing from server catalog or Firestore REST endpoint
+export async function resolveServerVideoState(
   videoId: string,
   projectId: string,
-  databaseId: string
-): Promise<ServerCatalogEntry | null> {
+  databaseId: string,
+  callerIdToken?: string
+): Promise<ServerVideoResolution> {
   if (SERVER_CATALOG[videoId]) {
-    return SERVER_CATALOG[videoId];
+    return { state: 'published', entry: SERVER_CATALOG[videoId] };
   }
 
   try {
@@ -288,8 +311,24 @@ export async function resolveServerVideoEntry(
     )}/databases/${encodeURIComponent(databaseId)}/documents/videos/${encodeURIComponent(
       videoId
     )}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    const res = await fetch(
+      url,
+      callerIdToken
+        ? { headers: { Authorization: `Bearer ${callerIdToken}` } }
+        : undefined
+    );
+
+    if (res.status === 404) {
+      return { state: 'not_found', entry: null };
+    }
+    if (res.status === 403 || res.status === 401) {
+      // Non-published, archived, deletion_pending, or deleted document denied by Firestore Rules
+      return { state: 'unavailable', entry: null };
+    }
+    if (!res.ok) {
+      return { state: 'error', entry: null };
+    }
+
     const doc = (await res.json()) as {
       fields?: Record<
         string,
@@ -297,7 +336,21 @@ export async function resolveServerVideoEntry(
       >;
     };
     const f = doc.fields;
-    if (!f || f.status?.stringValue !== 'published') return null;
+    if (!f) return { state: 'not_found', entry: null };
+
+    const rawStatus = f.status?.stringValue || 'draft';
+    const validStates: Set<string> = new Set([
+      'published',
+      'archived',
+      'deletion_pending',
+      'draft',
+      'pending_review',
+      'approved',
+      'rejected',
+    ]);
+    const state = (validStates.has(rawStatus)
+      ? rawStatus
+      : 'unavailable') as ServerVideoLifecycleState;
 
     const parseFirestoreNumber = (
       field: { integerValue?: string; doubleValue?: number } | undefined,
@@ -319,18 +372,32 @@ export async function resolveServerVideoEntry(
     const creditCost = Math.round(parseFirestoreNumber(f.creditCost, 5));
 
     return {
-      id: videoId,
-      title: f.title?.stringValue || videoId,
-      category: f.category?.stringValue || 'Movies',
-      creatorId: f.creatorId?.stringValue || 'creator-unknown',
-      thumbnailUrl: f.thumbnailUrl?.stringValue || '',
-      priceUsd,
-      priceIdr,
-      creditCost,
+      state,
+      entry: {
+        id: videoId,
+        title: f.title?.stringValue || videoId,
+        category: f.category?.stringValue || 'Movies',
+        creatorId: f.creatorId?.stringValue || 'creator-unknown',
+        thumbnailUrl: f.thumbnailUrl?.stringValue || '',
+        priceUsd,
+        priceIdr,
+        creditCost,
+      },
     };
   } catch {
-    return null;
+    return { state: 'error', entry: null };
   }
+}
+
+// Resolve published video pricing from server catalog or Firestore public REST endpoint
+export async function resolveServerVideoEntry(
+  videoId: string,
+  projectId: string,
+  databaseId: string
+): Promise<ServerCatalogEntry | null> {
+  const resolved = await resolveServerVideoState(videoId, projectId, databaseId);
+  if (resolved.state !== 'published') return null;
+  return resolved.entry;
 }
 
 export function hasActiveEntitlement(

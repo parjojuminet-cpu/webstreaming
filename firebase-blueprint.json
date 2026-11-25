@@ -244,7 +244,11 @@
         },
         "status": {
           "type": "string",
-          "enum": ["draft", "pending_review", "approved", "rejected", "published", "archived"]
+          "enum": ["draft", "pending_review", "approved", "rejected", "published", "archived", "deletion_pending"]
+        },
+        "previousStatus": {
+          "type": "string",
+          "enum": ["", "draft", "pending_review", "approved", "rejected", "published"]
         },
         "moderationNote": {
           "type": "string",
@@ -312,12 +316,24 @@
         },
         "provider": {
           "type": "string",
-          "enum": ["cloudflare_stream", "private_storage"]
+          "enum": [
+            "cloudflare_stream",
+            "private_storage",
+            "youtube",
+            "vimeo",
+            "dailymotion",
+            "tiktok",
+            "facebook",
+            "x",
+            "instagram",
+            "streamable",
+            "direct_video"
+          ]
         },
         "assetRef": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 300
+          "maxLength": 1000
         },
         "createdAt": {
           "type": "string",

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
+import * as dashjs from 'dashjs';
 import {
   CheckCircle2,
   Lock,
@@ -29,94 +30,8 @@ import type {
 } from '../../types/vyora';
 import { formatPrice, isFreeContent } from '../../i18n/translations';
 import { getFacebookEmbedUrl } from '../../utils/facebook';
+import { loadYouTubeIframeApi, type YTPlayerInstance } from '../../utils/youtubeApi';
 import { Button } from '../ui/Button';
-
-interface YTPlayerInstance {
-  playVideo: () => void;
-  pauseVideo: () => void;
-  seekTo: (seconds: number, allowSeekAhead?: boolean) => void;
-  getCurrentTime: () => number;
-  getDuration: () => number;
-  mute: () => void;
-  unMute: () => void;
-  isMuted: () => boolean;
-  destroy: () => void;
-}
-
-interface YTNamespace {
-  Player: new (
-    element: HTMLElement | string,
-    options: {
-      videoId: string;
-      host?: string;
-      width?: string | number;
-      height?: string | number;
-      playerVars?: Record<string, string | number>;
-      events?: {
-        onReady?: (event: { target: YTPlayerInstance }) => void;
-        onStateChange?: (event: { data: number; target: YTPlayerInstance }) => void;
-        onError?: (event: { data: number }) => void;
-      };
-    }
-  ) => YTPlayerInstance;
-  PlayerState?: {
-    ENDED: number;
-    PLAYING: number;
-    PAUSED: number;
-  };
-}
-
-declare global {
-  interface Window {
-    YT?: YTNamespace;
-    onYouTubeIframeAPIReady?: () => void;
-  }
-}
-
-let ytApiPromise: Promise<YTNamespace> | null = null;
-
-function loadYouTubeIframeApi(): Promise<YTNamespace> {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('YouTube player requires a browser environment.'));
-  }
-  if (window.YT && typeof window.YT.Player === 'function') {
-    return Promise.resolve(window.YT);
-  }
-  if (ytApiPromise) {
-    return ytApiPromise;
-  }
-
-  ytApiPromise = new Promise<YTNamespace>((resolve, reject) => {
-    const previousCallback = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      if (typeof previousCallback === 'function') {
-        previousCallback();
-      }
-      if (window.YT && typeof window.YT.Player === 'function') {
-        resolve(window.YT);
-      } else {
-        ytApiPromise = null;
-        reject(new Error('YouTube IFrame API loaded without YT.Player.'));
-      }
-    };
-
-    const existingScript = document.querySelector<HTMLScriptElement>(
-      'script[src="https://www.youtube.com/iframe_api"]'
-    );
-    if (!existingScript) {
-      const script = document.createElement('script');
-      script.src = 'https://www.youtube.com/iframe_api';
-      script.async = true;
-      script.onerror = () => {
-        ytApiPromise = null;
-        reject(new Error('Failed to load YouTube IFrame Player API.'));
-      };
-      document.head.appendChild(script);
-    }
-  });
-
-  return ytApiPromise;
-}
 
 interface StreamingPlayerModalProps {
   item: ContentItem | null;
@@ -154,6 +69,8 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   const playerStageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const dashRef = useRef<dashjs.MediaPlayerClass | null>(null);
+  const embedIframeRef = useRef<HTMLIFrameElement>(null);
   const ytContainerRef = useRef<HTMLDivElement>(null);
   const ytPlayerRef = useRef<YTPlayerInstance | null>(null);
   const startSeekRef = useRef<number>(0);
@@ -180,9 +97,17 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
 
   const isYoutubeStream =
     authData?.streamType === 'youtube' && Boolean(authData?.youtubeVideoId);
-  const isFacebookStream =
-    authData?.streamType === 'facebook' &&
-    Boolean(authData?.facebookVideoUrl || authData?.manifestUrl);
+  const isVimeoStream =
+    authData?.streamType === 'vimeo' && Boolean(authData?.manifestUrl);
+  const isDailymotionStream =
+    authData?.streamType === 'dailymotion' && Boolean(authData?.manifestUrl);
+  const isControllableEmbedStream = isVimeoStream || isDailymotionStream;
+  const isPassiveIframeStream =
+    (authData?.streamType === 'facebook' &&
+      Boolean(authData?.facebookVideoUrl || authData?.manifestUrl)) ||
+    ((authData?.streamType === 'streamable' || authData?.streamType === 'tiktok') &&
+      Boolean(authData?.manifestUrl));
+  const isGenericEmbedStream = isControllableEmbedStream || isPassiveIframeStream;
   const isFreeRelease = Boolean(
     authData?.isFree || (item ? isFreeContent(item) : false)
   );
@@ -245,6 +170,21 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
     [firebaseUser]
   );
 
+  const destroyAdaptiveEngines = useCallback(() => {
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    if (dashRef.current) {
+      try {
+        dashRef.current.reset();
+      } catch {
+        // Ignore dashjs cleanup failure
+      }
+      dashRef.current = null;
+    }
+  }, []);
+
   const loadAuthorizedStream = useCallback(
     async (targetItem: ContentItem, overrideSeekSeconds?: number) => {
       setLoadingStream(true);
@@ -265,11 +205,15 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
         startSeekRef.current = startSeek;
         setCurrentTime(startSeek);
 
-        if (authResp.streamType === 'youtube' || authResp.streamType === 'facebook') {
-          if (hlsRef.current) {
-            hlsRef.current.destroy();
-            hlsRef.current = null;
-          }
+        if (
+          authResp.streamType === 'youtube' ||
+          authResp.streamType === 'facebook' ||
+          authResp.streamType === 'vimeo' ||
+          authResp.streamType === 'dailymotion' ||
+          authResp.streamType === 'streamable' ||
+          authResp.streamType === 'tiktok'
+        ) {
+          destroyAdaptiveEngines();
           setQualityLevels([]);
           return;
         }
@@ -277,12 +221,17 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
         const videoEl = videoRef.current;
         if (!videoEl) return;
 
-        if (hlsRef.current) {
-          hlsRef.current.destroy();
-          hlsRef.current = null;
-        }
+        destroyAdaptiveEngines();
 
-        if (authResp.streamType === 'file') {
+        const isDirectMp4 =
+          authResp.streamType === 'file' ||
+          (authResp.streamType === 'direct_video' &&
+            (!authResp.directFormat || authResp.directFormat === 'mp4'));
+
+        const isDashStream =
+          authResp.streamType === 'direct_video' && authResp.directFormat === 'dash';
+
+        if (isDirectMp4) {
           setQualityLevels([]);
           videoEl.src = authResp.manifestUrl;
           videoEl.addEventListener(
@@ -293,6 +242,35 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
             },
             { once: true }
           );
+        } else if (isDashStream) {
+          setQualityLevels([]);
+          try {
+            const dashPlayer = dashjs.MediaPlayer().create();
+            dashRef.current = dashPlayer;
+            dashPlayer.on(dashjs.MediaPlayer.events.ERROR, () => {
+              setStreamError(
+                locale === 'id'
+                  ? 'Gagal memuat stream MPEG-DASH (.mpd). Periksa ketersediaan URL dan header CORS.'
+                  : 'Unable to play MPEG-DASH (.mpd) stream. Check URL availability and CORS headers.'
+              );
+            });
+            dashPlayer.initialize(videoEl, authResp.manifestUrl, true);
+            if (startSeek > 0) {
+              videoEl.addEventListener(
+                'loadedmetadata',
+                () => {
+                  videoEl.currentTime = startSeek;
+                },
+                { once: true }
+              );
+            }
+          } catch (err) {
+            setStreamError(
+              err instanceof Error
+                ? err.message
+                : 'Unable to initialize MPEG-DASH player.'
+            );
+          }
         } else if (Hls.isSupported()) {
           const hls = new Hls({
             startPosition: startSeek > 0 ? startSeek : -1,
@@ -363,7 +341,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
         setLoadingStream(false);
       }
     },
-    [locale]
+    [locale, destroyAdaptiveEngines]
   );
 
   // Initialize YouTube IFrame Player API when streamType === 'youtube'
@@ -527,10 +505,97 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
     return () => window.clearInterval(pollId);
   }, [item, isYoutubeStream, paywallReached, streamError]);
 
-  // Enforce 5-minute preview timer & playback clock for Facebook Embedded Video Player
+  // Vimeo / Dailymotion / Streamable / TikTok postMessage event bridge + 5-min preview cap
   useEffect(() => {
-    if (!item || !isFacebookStream || !fbIframeLoaded || paywallReached || streamError) {
-      if (isFacebookStream && (paywallReached || streamError)) {
+    if (!item || !isGenericEmbedStream || paywallReached || streamError) return;
+
+    const onMessage = (event: MessageEvent) => {
+      const origin = event.origin.toLowerCase();
+      let payload: Record<string, unknown> | null = null;
+      if (typeof event.data === 'string') {
+        try {
+          payload = JSON.parse(event.data) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+      } else if (event.data && typeof event.data === 'object') {
+        payload = event.data as Record<string, unknown>;
+      }
+      if (!payload) return;
+
+      if (authData?.streamType === 'vimeo' && origin === 'https://player.vimeo.com') {
+        const evName = payload.event;
+        if (evName === 'ready') {
+          const target = embedIframeRef.current?.contentWindow;
+          target?.postMessage(JSON.stringify({ method: 'addEventListener', value: 'play' }), 'https://player.vimeo.com');
+          target?.postMessage(JSON.stringify({ method: 'addEventListener', value: 'pause' }), 'https://player.vimeo.com');
+          target?.postMessage(JSON.stringify({ method: 'addEventListener', value: 'ended' }), 'https://player.vimeo.com');
+          target?.postMessage(JSON.stringify({ method: 'addEventListener', value: 'timeupdate' }), 'https://player.vimeo.com');
+          if (startSeekRef.current > 0) {
+            target?.postMessage(JSON.stringify({ method: 'setCurrentTime', value: startSeekRef.current }), 'https://player.vimeo.com');
+          }
+        } else if (evName === 'play') {
+          setIsPlaying(true);
+        } else if (evName === 'pause') {
+          setIsPlaying(false);
+        } else if (evName === 'ended') {
+          setIsPlaying(false);
+          if (!isFullUnlockedRef.current) setPaywallReached(true);
+        } else if (evName === 'timeupdate') {
+          const dataObj = payload.data as { seconds?: number; duration?: number } | undefined;
+          const sec = Number(dataObj?.seconds ?? 0);
+          const dur = Number(dataObj?.duration ?? 0);
+          if (Number.isFinite(dur) && dur > 0) setDuration(dur);
+          if (Number.isFinite(sec)) {
+            setCurrentTime(sec);
+            if (!isFullUnlockedRef.current && sec >= 299.5) {
+              embedIframeRef.current?.contentWindow?.postMessage(
+                JSON.stringify({ method: 'pause' }),
+                'https://player.vimeo.com'
+              );
+              setIsPlaying(false);
+              setPaywallReached(true);
+            }
+          }
+        }
+      }
+
+      if (authData?.streamType === 'dailymotion' && origin.endsWith('dailymotion.com')) {
+        const evName = String(payload.event || '');
+        if (evName === 'play' || evName === 'playing' || evName === 'video_start') {
+          setIsPlaying(true);
+        } else if (evName === 'pause') {
+          setIsPlaying(false);
+        } else if (evName === 'end') {
+          setIsPlaying(false);
+          if (!isFullUnlockedRef.current) setPaywallReached(true);
+        } else if (evName === 'timeupdate' || evName === 'video_timeupdate') {
+          const sec = Number(payload.time ?? 0);
+          const dur = Number(payload.duration ?? 0);
+          if (Number.isFinite(dur) && dur > 0) setDuration(dur);
+          if (Number.isFinite(sec)) {
+            setCurrentTime(sec);
+            if (!isFullUnlockedRef.current && sec >= 299.5) {
+              embedIframeRef.current?.contentWindow?.postMessage(
+                JSON.stringify({ command: 'pause', parameters: [] }),
+                '*'
+              );
+              setIsPlaying(false);
+              setPaywallReached(true);
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [item, isGenericEmbedStream, authData?.streamType, paywallReached, streamError]);
+
+  // Enforce 5-minute preview timer & playback clock for Passive Embed Players (Facebook / Streamable / TikTok)
+  useEffect(() => {
+    if (!item || !isPassiveIframeStream || !fbIframeLoaded || paywallReached || streamError) {
+      if (isPassiveIframeStream && (paywallReached || streamError)) {
         setIsPlaying(false);
       }
       return;
@@ -552,7 +617,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
     return () => {
       window.clearInterval(tickId);
     };
-  }, [item, isFacebookStream, fbIframeLoaded, paywallReached, streamError]);
+  }, [item, isPassiveIframeStream, fbIframeLoaded, paywallReached, streamError]);
 
   useEffect(() => {
     if (!item) return;
@@ -564,10 +629,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
     void loadAuthorizedStream(item);
 
     return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+      destroyAdaptiveEngines();
       if (ytPlayerRef.current) {
         try {
           ytPlayerRef.current.destroy();
@@ -577,7 +639,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
         ytPlayerRef.current = null;
       }
     };
-  }, [item, loadAuthorizedStream]);
+  }, [item, loadAuthorizedStream, destroyAdaptiveEngines]);
 
   useEffect(() => {
     if (!item || authRefreshKey === 0) return;
@@ -635,6 +697,28 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
       return;
     }
 
+    if (isVimeoStream && embedIframeRef.current?.contentWindow) {
+      embedIframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ method: isPlaying ? 'pause' : 'play' }),
+        'https://player.vimeo.com'
+      );
+      if (isPlaying) {
+        persistCurrentProgress(item, currentTime, authData);
+      }
+      return;
+    }
+
+    if (isDailymotionStream && embedIframeRef.current?.contentWindow) {
+      embedIframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ command: isPlaying ? 'pause' : 'play', parameters: [] }),
+        '*'
+      );
+      if (isPlaying) {
+        persistCurrentProgress(item, currentTime, authData);
+      }
+      return;
+    }
+
     const videoEl = videoRef.current;
     if (!videoEl) return;
     if (videoEl.paused) {
@@ -660,6 +744,24 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
       }
       return;
     }
+    if (isVimeoStream && embedIframeRef.current?.contentWindow) {
+      const nextMuted = !isMuted;
+      embedIframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ method: 'setVolume', value: nextMuted ? 0 : 1 }),
+        'https://player.vimeo.com'
+      );
+      setIsMuted(nextMuted);
+      return;
+    }
+    if (isDailymotionStream && embedIframeRef.current?.contentWindow) {
+      const nextMuted = !isMuted;
+      embedIframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ command: 'muted', parameters: [nextMuted] }),
+        '*'
+      );
+      setIsMuted(nextMuted);
+      return;
+    }
     setIsMuted((prev) => !prev);
   };
 
@@ -676,10 +778,44 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   };
 
   const handleSeek = (nextSec: number) => {
-    if (isFacebookStream) {
+    if (isPassiveIframeStream) {
       setFbIframeLoaded(false);
       setFbReplayNonce((n) => n + 1);
       setCurrentTime(0);
+      return;
+    }
+
+    if (isVimeoStream && embedIframeRef.current?.contentWindow) {
+      if (!isFullUnlocked && nextSec >= 299) {
+        embedIframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ method: 'pause' }),
+          'https://player.vimeo.com'
+        );
+        setPaywallReached(true);
+        return;
+      }
+      embedIframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ method: 'setCurrentTime', value: nextSec }),
+        'https://player.vimeo.com'
+      );
+      setCurrentTime(nextSec);
+      return;
+    }
+
+    if (isDailymotionStream && embedIframeRef.current?.contentWindow) {
+      if (!isFullUnlocked && nextSec >= 299) {
+        embedIframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ command: 'pause', parameters: [] }),
+          '*'
+        );
+        setPaywallReached(true);
+        return;
+      }
+      embedIframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ command: 'seek', parameters: [nextSec] }),
+        '*'
+      );
+      setCurrentTime(nextSec);
       return;
     }
 
@@ -753,10 +889,14 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                 ? locale === 'id'
                   ? 'Pratinjau YouTube Terverifikasi · Maksimal 5 Menit'
                   : 'Verified YouTube Stream · 5-Minute Free Preview'
-                : isFacebookStream
+                : isGenericEmbedStream
                 ? locale === 'id'
-                  ? 'Pratinjau Facebook Publik · Maksimal 5 Menit'
-                  : 'Embedded Facebook Video · 5-Minute Free Preview'
+                  ? `Pratinjau ${authData?.provider || 'Embed'} Terproteksi · Maksimal 5 Menit`
+                  : `Protected ${authData?.provider || 'Embed'} Preview · 5-Minute Cap`
+                : authData?.streamType === 'direct_video'
+                ? locale === 'id'
+                  ? `Pratinjau Stream (${(authData.directFormat || 'video').toUpperCase()}) · Maksimal 5 Menit`
+                  : `Direct Stream (${(authData.directFormat || 'video').toUpperCase()}) · 5-Minute Preview`
                 : locale === 'id'
                 ? 'Pratinjau HLS Terenkripsi 5 Menit'
                 : 'Signed 5-Minute Adaptive HLS Preview'}
@@ -796,24 +936,22 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                 }`}
                 aria-label={`${item.title} YouTube video player`}
               />
-            ) : isFacebookStream ? (
+            ) : isGenericEmbedStream ? (
               (() => {
-                const rawFbSrc = authData?.facebookVideoUrl
-                  ? getFacebookEmbedUrl(authData.facebookVideoUrl, {
-                      autoplay: true,
-                      startSeconds:
-                        fbReplayNonce > 0 && !isFullUnlocked
-                          ? 0
-                          : startSeekRef.current,
-                    })
-                  : authData?.manifestUrl &&
-                    authData.manifestUrl.startsWith(
-                      'https://www.facebook.com/plugins/video.php'
-                    )
-                  ? authData.manifestUrl
-                  : '';
+                const embedSrc =
+                  authData?.streamType === 'facebook'
+                    ? authData?.facebookVideoUrl
+                      ? getFacebookEmbedUrl(authData.facebookVideoUrl, {
+                          autoplay: true,
+                          startSeconds:
+                            fbReplayNonce > 0 && !isFullUnlocked
+                              ? 0
+                              : startSeekRef.current,
+                        })
+                      : authData?.manifestUrl || ''
+                    : authData?.manifestUrl || '';
 
-                if (paywallReached || !rawFbSrc) {
+                if (paywallReached || !embedSrc) {
                   return <div className="w-full h-full bg-slate-950" />;
                 }
 
@@ -824,19 +962,20 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                     }`}
                   >
                     <iframe
-                      key={`${authData?.videoId}-${authData?.mode}-${fbReplayNonce}`}
-                      src={rawFbSrc}
-                      title={`${item.title} Facebook video player`}
+                      ref={embedIframeRef}
+                      key={`${authData?.videoId}-${authData?.streamType}-${authData?.mode}-${fbReplayNonce}`}
+                      src={embedSrc}
+                      title={`${item.title} ${authData?.provider || 'Embed'} video player`}
                       className="w-full h-full border-0 bg-black"
-                      allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                      allow="autoplay; fullscreen; clipboard-write; encrypted-media; picture-in-picture; web-share"
                       allowFullScreen
                       referrerPolicy="strict-origin-when-cross-origin"
                       onLoad={() => setFbIframeLoaded(true)}
                       onError={() =>
                         setStreamError(
                           locale === 'id'
-                            ? 'Gagal memuat embed video Facebook. Pastikan video disetel Publik dan tidak diblokir browser.'
-                            : 'Unable to load Facebook video embed. Ensure the post is Public and not blocked by browser privacy extensions.'
+                            ? 'Gagal memuat pemutar video embed. Pastikan tautan video publik dan tidak diblokir ekstensi browser.'
+                            : 'Unable to load embedded video player. Ensure the video is public and not blocked by privacy extensions.'
                         )
                       }
                     />
@@ -931,7 +1070,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
             )}
 
             {/* Centered Play CTA when paused */}
-            {!paywallReached && !loadingStream && !streamError && !isFacebookStream && !isPlaying && (
+            {!paywallReached && !loadingStream && !streamError && !isPassiveIframeStream && !isPlaying && (
               <div className="absolute inset-0 z-[15] pointer-events-none flex items-center justify-center">
                 <button
                   type="button"
@@ -948,7 +1087,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
             {!paywallReached && !loadingStream && !streamError && (
               <div
                 className={`absolute inset-x-0 bottom-0 z-20 flex flex-col justify-end p-3 sm:p-4 bg-gradient-to-t from-slate-950/95 via-slate-950/75 to-transparent transition-opacity ${
-                  isFacebookStream && !isSurfaceLocked
+                  isPassiveIframeStream && !isSurfaceLocked
                     ? 'pointer-events-none'
                     : 'pointer-events-auto'
                 }`}
@@ -957,10 +1096,10 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
 
                 <div
                   className={`space-y-1.5 sm:space-y-2 ${
-                    isFacebookStream && !isSurfaceLocked ? 'pointer-events-auto' : ''
+                    isPassiveIframeStream && !isSurfaceLocked ? 'pointer-events-auto' : ''
                   }`}
                 >
-                  {!isFacebookStream && (
+                  {!isPassiveIframeStream && (
                     <input
                       type="range"
                       min={0}
@@ -974,7 +1113,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
 
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono tabular-nums text-white">
                     <div className="flex items-center gap-1.5 sm:gap-2.5">
-                      {!isFacebookStream ? (
+                      {!isPassiveIframeStream ? (
                         <>
                           <button
                             type="button"
@@ -1031,13 +1170,13 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                             ? 'Area Terkunci'
                             : 'Surface Locked'
                           : locale === 'id'
-                          ? 'Kontrol FB Terbuka'
-                          : 'FB Controls Open'}
+                          ? 'Kontrol Embed Terbuka'
+                          : 'Embed Controls Open'}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5 sm:gap-2.5">
-                      {!isYoutubeStream && !isFacebookStream && qualityLevels.length > 0 && (
+                      {!isYoutubeStream && !isGenericEmbedStream && qualityLevels.length > 0 && (
                         <select
                           aria-label="Stream quality"
                           value={selectedLevel}
@@ -1053,7 +1192,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                         </select>
                       )}
 
-                      {isFacebookStream && (
+                      {isPassiveIframeStream && (
                         <button
                           type="button"
                           onClick={() => setIsSurfaceLocked((prev) => !prev)}
@@ -1062,7 +1201,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                           {isSurfaceLocked ? (
                             <>
                               <Unlock className="w-3.5 h-3.5" />
-                              <span>{locale === 'id' ? 'Buka Kontrol FB' : 'FB Controls'}</span>
+                              <span>{locale === 'id' ? 'Buka Kontrol' : 'Embed Controls'}</span>
                             </>
                           ) : (
                             <>
@@ -1083,6 +1222,16 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                               } catch {
                                 // Ignore
                               }
+                            } else if (isVimeoStream) {
+                              embedIframeRef.current?.contentWindow?.postMessage(
+                                JSON.stringify({ method: 'pause' }),
+                                'https://player.vimeo.com'
+                              );
+                            } else if (isDailymotionStream) {
+                              embedIframeRef.current?.contentWindow?.postMessage(
+                                JSON.stringify({ command: 'pause', parameters: [] }),
+                                '*'
+                              );
                             } else {
                               videoRef.current?.pause();
                             }
@@ -1197,6 +1346,8 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                     className="w-full sm:w-auto"
                     leftIcon={<RotateCcw className="w-4 h-4" />}
                     onClick={() => {
+                      startSeekRef.current = 0;
+                      setCurrentTime(0);
                       setPaywallReached(false);
                       handleSeek(0);
                       if (isYoutubeStream) {
@@ -1205,6 +1356,16 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                         } catch {
                           // Ignore
                         }
+                      } else if (isVimeoStream) {
+                        embedIframeRef.current?.contentWindow?.postMessage(
+                          JSON.stringify({ method: 'play' }),
+                          'https://player.vimeo.com'
+                        );
+                      } else if (isDailymotionStream) {
+                        embedIframeRef.current?.contentWindow?.postMessage(
+                          JSON.stringify({ command: 'play', parameters: [] }),
+                          '*'
+                        );
                       } else {
                         void videoRef.current?.play().catch(() => {});
                       }
@@ -1241,10 +1402,14 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                 ? locale === 'id'
                   ? `Pratinjau YouTube (${formatClock(currentTime)} / 05:00) · Area video dikunci agar klik tidak membuka YouTube.`
                   : `YouTube preview (${formatClock(currentTime)} / 05:00) · Surface locked so clicks stay inside DELOKEN.`
-                : isFacebookStream
+                : isGenericEmbedStream
                 ? locale === 'id'
-                  ? `Pratinjau Facebook (${formatClock(currentTime)} / 05:00) · Area video dikunci agar klik tidak membuka Facebook.`
-                  : `Facebook preview (${formatClock(currentTime)} / 05:00) · Surface locked so clicks stay inside DELOKEN.`
+                  ? `Pratinjau ${authData?.provider || 'Embed'} (${formatClock(currentTime)} / 05:00) · Area video dikunci agar klik tetap di DELOKEN.`
+                  : `${authData?.provider || 'Embed'} preview (${formatClock(currentTime)} / 05:00) · Surface locked inside DELOKEN.`
+                : authData?.streamType === 'direct_video'
+                ? locale === 'id'
+                  ? `Pratinjau Stream (${formatClock(currentTime)} / 05:00) hingga pembayaran terverifikasi.`
+                  : `Direct stream preview (${formatClock(currentTime)} / 05:00) until 30-day entitlement is verified.`
                 : locale === 'id'
                 ? 'Segmen HLS dibatasi ketat di server maksimal 300 detik hingga pembayaran terverifikasi.'
                 : 'HLS segments strictly capped at 300s on the server until 30-day entitlement is verified.'}

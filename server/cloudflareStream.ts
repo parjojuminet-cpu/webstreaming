@@ -219,3 +219,35 @@ export async function getCloudflareVideoStatus(
     thumbnailUrl: result?.thumbnail,
   };
 }
+
+export async function deleteCloudflareVideo(
+  uid: string
+): Promise<{ deleted: boolean; alreadyMissing: boolean }> {
+  const cleanUid = uid.trim();
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(cleanUid)) {
+    throw new Error('Invalid Cloudflare Stream video UID.');
+  }
+
+  const { accountId, apiToken } = getAccountAndToken();
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+    accountId
+  )}/stream/${encodeURIComponent(cleanUid)}`;
+
+  const res = await fetch(endpoint, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+    },
+  });
+
+  if (res.status === 404) {
+    return { deleted: true, alreadyMissing: true };
+  }
+
+  if (!res.ok) {
+    throw new Error(`Cloudflare Stream deletion failed with HTTP ${res.status}.`);
+  }
+
+  return { deleted: true, alreadyMissing: false };
+}
+

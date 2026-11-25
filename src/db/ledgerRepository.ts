@@ -12,6 +12,7 @@ import {
   platformSettings,
   processedWebhooks,
   purchases,
+  videoDeletionJobs,
   walletTransactions,
   wallets,
 } from './schema.ts';
@@ -34,6 +35,8 @@ import type {
   PaymentStatus,
   PayoutRecord,
   PurchaseRecord,
+  VideoDeletionJobRecord,
+  VideoDeletionJobStatus,
   WalletTransactionRecord,
 } from '../types/vyora';
 
@@ -202,6 +205,26 @@ async function ensureSqlTablesExist(): Promise<void> {
       commission_percent INTEGER NOT NULL DEFAULT 20,
       min_price_usd DOUBLE PRECISION NOT NULL DEFAULT 1.99,
       min_price_idr INTEGER NOT NULL DEFAULT 29000
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS video_deletion_jobs (
+      operation_id TEXT PRIMARY KEY,
+      video_id TEXT NOT NULL,
+      video_title_snapshot TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      asset_ref_fingerprint TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      requested_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider_result TEXT NOT NULL DEFAULT 'pending',
+      firestore_result TEXT NOT NULL DEFAULT 'pending',
+      sql_result TEXT NOT NULL DEFAULT 'pending',
+      thumbnail_result TEXT NOT NULL DEFAULT 'skipped',
+      external_media_warning TEXT,
+      error_code TEXT,
+      error_message TEXT,
+      completed_at TEXT
     )
   `);
 }
@@ -2176,3 +2199,155 @@ export async function updatePlatformSettingsSql(input: {
     throw new Error('Failed to save platform settings.', { cause: error });
   }
 }
+
+function mapDeletionJobRow(
+  row: typeof videoDeletionJobs.$inferSelect
+): VideoDeletionJobRecord {
+  return {
+    operationId: row.operationId,
+    videoId: row.videoId,
+    videoTitleSnapshot: row.videoTitleSnapshot,
+    provider: row.provider,
+    assetRefFingerprint: row.assetRefFingerprint,
+    requestedBy: row.requestedBy,
+    requestedAt: row.requestedAt,
+    status: row.status as VideoDeletionJobStatus,
+    providerResult: row.providerResult,
+    firestoreResult: row.firestoreResult,
+    sqlResult: row.sqlResult,
+    thumbnailResult: row.thumbnailResult,
+    externalMediaWarning: row.externalMediaWarning ?? null,
+    errorCode: row.errorCode ?? null,
+    errorMessage: row.errorMessage ?? null,
+    completedAt: row.completedAt ?? null,
+  };
+}
+
+export async function createVideoDeletionJobSql(
+  job: VideoDeletionJobRecord
+): Promise<VideoDeletionJobRecord> {
+  await ensureLegacyLedgerMigrated();
+  await db.insert(videoDeletionJobs).values({
+    operationId: job.operationId,
+    videoId: job.videoId,
+    videoTitleSnapshot: job.videoTitleSnapshot,
+    provider: job.provider,
+    assetRefFingerprint: job.assetRefFingerprint,
+    requestedBy: job.requestedBy,
+    requestedAt: job.requestedAt,
+    status: job.status,
+    providerResult: job.providerResult,
+    firestoreResult: job.firestoreResult,
+    sqlResult: job.sqlResult,
+    thumbnailResult: job.thumbnailResult,
+    externalMediaWarning: job.externalMediaWarning ?? null,
+    errorCode: job.errorCode ?? null,
+    errorMessage: job.errorMessage ?? null,
+    completedAt: job.completedAt ?? null,
+  });
+  return job;
+}
+
+export async function updateVideoDeletionJobSql(
+  operationId: string,
+  patch: Partial<Omit<VideoDeletionJobRecord, 'operationId' | 'videoId'>>
+): Promise<void> {
+  await ensureLegacyLedgerMigrated();
+  await db
+    .update(videoDeletionJobs)
+    .set({
+      ...(patch.videoTitleSnapshot !== undefined
+        ? { videoTitleSnapshot: patch.videoTitleSnapshot }
+        : {}),
+      ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
+      ...(patch.assetRefFingerprint !== undefined
+        ? { assetRefFingerprint: patch.assetRefFingerprint }
+        : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.providerResult !== undefined
+        ? { providerResult: patch.providerResult }
+        : {}),
+      ...(patch.firestoreResult !== undefined
+        ? { firestoreResult: patch.firestoreResult }
+        : {}),
+      ...(patch.sqlResult !== undefined ? { sqlResult: patch.sqlResult } : {}),
+      ...(patch.thumbnailResult !== undefined
+        ? { thumbnailResult: patch.thumbnailResult }
+        : {}),
+      ...(patch.externalMediaWarning !== undefined
+        ? { externalMediaWarning: patch.externalMediaWarning }
+        : {}),
+      ...(patch.errorCode !== undefined ? { errorCode: patch.errorCode } : {}),
+      ...(patch.errorMessage !== undefined ? { errorMessage: patch.errorMessage } : {}),
+      ...(patch.completedAt !== undefined ? { completedAt: patch.completedAt } : {}),
+    })
+    .where(eq(videoDeletionJobs.operationId, operationId));
+}
+
+export async function getLatestVideoDeletionJobSql(
+  videoId: string
+): Promise<VideoDeletionJobRecord | null> {
+  await ensureLegacyLedgerMigrated();
+  const rows = await db
+    .select()
+    .from(videoDeletionJobs)
+    .where(eq(videoDeletionJobs.videoId, videoId))
+    .orderBy(desc(videoDeletionJobs.requestedAt));
+  return rows[0] ? mapDeletionJobRow(rows[0]) : null;
+}
+
+export async function listVideoDeletionJobsSql(
+  limitCount = 40
+): Promise<VideoDeletionJobRecord[]> {
+  await ensureLegacyLedgerMigrated();
+  const rows = await db
+    .select()
+    .from(videoDeletionJobs)
+    .orderBy(desc(videoDeletionJobs.requestedAt))
+    .limit(Math.max(1, Math.min(100, limitCount)));
+  return rows.map(mapDeletionJobRow);
+}
+
+export async function getCreatorMediaByVideoIdSql(
+  videoId: string
+): Promise<CreatorMediaBinding | null> {
+  await ensureLegacyLedgerMigrated();
+  const rows = await db
+    .select()
+    .from(creatorMedia)
+    .where(eq(creatorMedia.videoId, videoId));
+  const m = rows[0];
+  if (!m || m.provider === 'thumbnail') return null;
+  return {
+    videoId: m.videoId,
+    creatorId: m.creatorId,
+    provider: m.provider as CreatorMediaBinding['provider'],
+    assetRef: m.assetRef,
+    mimeType: m.mimeType ?? undefined,
+    updatedAtIso: m.updatedAtIso,
+  };
+}
+
+// Idempotently remove only media mapping (never financial/purchase/entitlement/payout rows)
+export async function deleteCreatorMediaByVideoIdSql(
+  videoId: string
+): Promise<{ deletedCount: number }> {
+  await ensureLegacyLedgerMigrated();
+  const deleted = await db
+    .delete(creatorMedia)
+    .where(eq(creatorMedia.videoId, videoId))
+    .returning();
+  return { deletedCount: deleted.length };
+}
+
+export async function deleteThumbnailAssetSql(
+  key: string
+): Promise<{ deletedCount: number }> {
+  await ensureLegacyLedgerMigrated();
+  const deleted = await db
+    .delete(creatorMedia)
+    .where(and(eq(creatorMedia.videoId, key), eq(creatorMedia.provider, 'thumbnail')))
+    .returning();
+  return { deletedCount: deleted.length };
+}
+

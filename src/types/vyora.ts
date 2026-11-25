@@ -11,7 +11,76 @@ export type ContentStatus =
   | 'approved'
   | 'rejected'
   | 'published'
-  | 'archived';
+  | 'archived'
+  | 'deletion_pending';
+
+export type VideoDeletionJobStatus =
+  | 'pending'
+  | 'asset_deleted'
+  | 'metadata_deleted'
+  | 'completed'
+  | 'failed';
+
+export interface VideoDeletionJobRecord {
+  operationId: string;
+  videoId: string;
+  videoTitleSnapshot: string;
+  provider: string;
+  assetRefFingerprint: string;
+  requestedBy: string;
+  requestedAt: string;
+  status: VideoDeletionJobStatus;
+  providerResult: string;
+  firestoreResult: string;
+  sqlResult: string;
+  thumbnailResult: string;
+  externalMediaWarning?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  completedAt?: string | null;
+}
+
+export type VideoAssetProvider =
+  | 'cloudflare_stream'
+  | 'private_storage'
+  | 'youtube'
+  | 'vimeo'
+  | 'dailymotion'
+  | 'tiktok'
+  | 'facebook'
+  | 'x'
+  | 'instagram'
+  | 'streamable'
+  | 'direct_video';
+
+export type LinkCheckStatus =
+  | 'waiting'
+  | 'checking'
+  | 'embeddable'
+  | 'unavailable'
+  | 'uncertain';
+
+export type PlaybackCheckStatus =
+  | 'waiting_play'
+  | 'verifying'
+  | 'verified_playing'
+  | 'play_failed'
+  | 'unverifiable';
+
+export type DirectStreamFormat = 'mp4' | 'hls' | 'dash';
+
+export interface AdminVideoAssetInfo {
+  videoId: string;
+  title: string;
+  status: ContentStatus;
+  previousStatus: ContentStatus | '';
+  provider: VideoAssetProvider | 'unknown';
+  assetRefFingerprint: string;
+  isExternalPlatform: boolean;
+  externalMediaWarning: string | null;
+  thumbnailUrl: string;
+  creatorId: string;
+}
 
 export type UserRole = 'viewer' | 'creator' | 'admin';
 export type CreatorStatus = 'pending' | 'approved' | 'suspended';
@@ -92,6 +161,7 @@ export interface ContentItem {
   audioFormat: string;
   languages: string[];
   status: ContentStatus;
+  previousStatus?: ContentStatus | '';
   moderationNote?: string;
   viewCount?: number;
   trending?: boolean;

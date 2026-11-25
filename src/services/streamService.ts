@@ -1,13 +1,33 @@
 import { auth } from '../lib/firebase';
-import type { ContentCategory, EntitlementRecord } from '../types/vyora';
+import type {
+  ContentCategory,
+  DirectStreamFormat,
+  EntitlementRecord,
+  VideoAssetProvider,
+} from '../types/vyora';
+import type { LinkInspectionDiagnostics } from './videoImport/types';
 
 export interface StreamAuthorizationResponse {
   mode: 'preview' | 'full';
   isFree?: boolean;
-  streamType?: 'hls' | 'file' | 'youtube' | 'facebook';
-  provider?: 'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook';
+  streamType?:
+    | 'hls'
+    | 'file'
+    | 'youtube'
+    | 'facebook'
+    | 'vimeo'
+    | 'dailymotion'
+    | 'streamable'
+    | 'tiktok'
+    | 'direct_video';
+  provider?: VideoAssetProvider;
   youtubeVideoId?: string;
   facebookVideoUrl?: string;
+  vimeoVideoId?: string;
+  vimeoHash?: string;
+  dailymotionVideoId?: string;
+  streamableId?: string;
+  directFormat?: DirectStreamFormat;
   signedHls?: boolean;
   videoId: string;
   previewLimitSeconds: number;
@@ -243,9 +263,31 @@ export async function uploadCreatorMedia(
     | UploadedThumbnailMediaResult;
 }
 
+export async function inspectCreatorVideoLink(
+  url: string
+): Promise<LinkInspectionDiagnostics> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Authentication required before checking a video link.');
+  }
+  const headers = await getBearerHeaders();
+  const res = await fetch('/api/creator/inspect-video-link', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ url }),
+  });
+  const body = (await res.json().catch(() => ({}))) as LinkInspectionDiagnostics & {
+    error?: string;
+  };
+  if (!res.ok) {
+    throw new Error(body.error || 'Failed to inspect video link.');
+  }
+  return body;
+}
+
 export async function registerCreatorVideoMedia(input: {
   videoId: string;
-  provider: 'cloudflare_stream' | 'private_storage' | 'youtube' | 'facebook';
+  provider: VideoAssetProvider;
   assetRef: string;
   mimeType?: string;
 }): Promise<void> {
