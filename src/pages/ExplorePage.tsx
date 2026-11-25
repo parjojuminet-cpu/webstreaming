@@ -67,7 +67,7 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
 
     return [...list].sort((a, b) => {
       if (sortBy === 'recent') {
-        return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+        return (Date.parse(b.publishedAt || '') || 0) - (Date.parse(a.publishedAt || '') || 0);
       }
       if (sortBy === 'price-asc') {
         return a.priceUsd - b.priceUsd;

@@ -347,6 +347,13 @@ service cloud.firestore {
                 ])
               ) ||
               (
+                existing().status in ['draft', 'pending_review', 'approved', 'rejected', 'published']
+                && incoming().status == existing().status
+                && incoming().diff(existing()).affectedKeys().hasOnly([
+                  'thumbnailUrl', 'backdropUrl', 'updatedAt'
+                ])
+              ) ||
+              (
                 existing().status == 'approved'
                 && incoming().status == 'published'
                 && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'publishedAt', 'updatedAt'])

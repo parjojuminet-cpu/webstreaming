@@ -146,16 +146,34 @@ export const InfoPage: React.FC<InfoPageProps> = ({
           </h1>
           <div className="space-y-4 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
             <p>
-              <strong className="text-slate-900 dark:text-white">1. Pay-Per-View & 30-Day Entitlements:</strong>{' '}
-              Purchasing a title on DELOKEN via PayPal, QRIS, or Credit Wallet grants a non-transferable 30-day streaming entitlement calculated using server timestamps.
+              <strong className="text-slate-900 dark:text-white">
+                {locale === 'id'
+                  ? '1. Pay-Per-View & Akses 30 Hari:'
+                  : '1. Pay-Per-View & 30-Day Entitlements:'}
+              </strong>{' '}
+              {locale === 'id'
+                ? 'Pembelian tayangan berbayar di DELOKEN melalui PayPal, QRIS, atau Dompet Kredit memberikan hak akses streaming 30 hari yang terhubung ke akun Anda dan dihitung berdasarkan waktu server.'
+                : 'Purchasing a title on DELOKEN via PayPal, QRIS, or Credit Wallet grants a non-transferable 30-day streaming entitlement calculated using server timestamps.'}
             </p>
             <p>
-              <strong className="text-slate-900 dark:text-white">2. Free Preview Policy:</strong>{' '}
-              Every published release includes a 5-minute free preview. Automated or client-side attempts to bypass preview gates violate platform security policies.
+              <strong className="text-slate-900 dark:text-white">
+                {locale === 'id'
+                  ? '2. Kebijakan Pratinjau Gratis:'
+                  : '2. Free Preview Policy:'}
+              </strong>{' '}
+              {locale === 'id'
+                ? 'Setiap rilis berbayar menyertakan pratinjau gratis maksimal 5 menit, sedangkan rilis gratis kreator dapat langsung ditonton penuh. Upaya memintas batasan pratinjau atau pembatasan pemutar melanggar kebijakan keamanan platform.'
+                : 'Every paid release includes a 5-minute free preview, while free creator releases stream in full. Automated or client-side attempts to bypass preview gates violate platform security policies.'}
             </p>
             <p>
-              <strong className="text-slate-900 dark:text-white">3. Credit Wallet Ledger:</strong>{' '}
-              Credit balances are recorded in immutable wallet transactions and may be redeemed for any active Pay-Per-View release on DELOKEN.
+              <strong className="text-slate-900 dark:text-white">
+                {locale === 'id'
+                  ? '3. Buku Besar Dompet Kredit:'
+                  : '3. Credit Wallet Ledger:'}
+              </strong>{' '}
+              {locale === 'id'
+                ? 'Saldo dan mutasi Dompet Kredit dicatat dalam buku besar transaksi yang diaudit di server dan dapat ditukarkan untuk membuka rilis Pay-Per-View aktif di DELOKEN.'
+                : 'Credit balances are recorded in immutable wallet transactions and may be redeemed for any active Pay-Per-View release on DELOKEN.'}
             </p>
           </div>
         </article>
@@ -168,16 +186,34 @@ export const InfoPage: React.FC<InfoPageProps> = ({
           </h1>
           <div className="space-y-4 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
             <p>
-              <strong className="text-slate-900 dark:text-white">1. Account & Playback Data:</strong>{' '}
-              DELOKEN collects only the account details required for authentication, purchase verification, and saving playback resume positions across devices.
+              <strong className="text-slate-900 dark:text-white">
+                {locale === 'id'
+                  ? '1. Data Akun & Pemutaran:'
+                  : '1. Account & Playback Data:'}
+              </strong>{' '}
+              {locale === 'id'
+                ? 'DELOKEN hanya mengumpulkan data akun yang diperlukan untuk autentikasi, verifikasi pembelian, dan penyimpanan posisi lanjut tonton lintas perangkat.'
+                : 'DELOKEN collects only the account details required for authentication, purchase verification, and saving playback resume positions across devices.'}
             </p>
             <p>
-              <strong className="text-slate-900 dark:text-white">2. Payment Security:</strong>{' '}
-              Payment credentials for PayPal and Indonesian QRIS are processed exclusively through verified server-side payment gateways and authenticated webhooks.
+              <strong className="text-slate-900 dark:text-white">
+                {locale === 'id'
+                  ? '2. Keamanan Pembayaran:'
+                  : '2. Payment Security:'}
+              </strong>{' '}
+              {locale === 'id'
+                ? 'Proses pembayaran melalui PayPal maupun QRIS Indonesia diverifikasi secara aman melalui gateway pembayaran sisi server, webhook terautentikasi, atau verifikasi Admin.'
+                : 'Payment credentials for PayPal and Indonesian QRIS are processed exclusively through verified server-side payment gateways and authenticated webhooks.'}
             </p>
             <p>
-              <strong className="text-slate-900 dark:text-white">3. Media Protection:</strong>{' '}
-              Source video assets remain private and are streamed only via short-lived, signed playback authorization tokens.
+              <strong className="text-slate-900 dark:text-white">
+                {locale === 'id'
+                  ? '3. Perlindungan Aset Media:'
+                  : '3. Media Protection:'}
+              </strong>{' '}
+              {locale === 'id'
+                ? 'Berkas video sumber disimpan secara privat dan diputar melalui token otorisasi sementara maupun pemutar terproteksi anti-pengalihan.'
+                : 'Source video assets remain private and are streamed only via short-lived, signed playback authorization tokens.'}
             </p>
           </div>
         </article>

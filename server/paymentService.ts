@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import QRCode from 'qrcode';
 import type {
@@ -89,7 +90,10 @@ export const PREVIEW_LIMIT_SECONDS = 300;
 export const ACCESS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export const PAYMENT_TTL_MS = 15 * 60 * 1000; // 15 minutes for QRIS / pending order
 
-const SERVER_DATA_DIR = path.resolve(process.cwd(), '.vyora_server_data');
+const SERVER_DATA_DIR =
+  process.env.VERCEL === '1'
+    ? path.resolve(os.tmpdir(), '.vyora_server_data')
+    : path.resolve(process.cwd(), '.vyora_server_data');
 const LEDGER_FILE = path.resolve(SERVER_DATA_DIR, 'ledger.json');
 const LEGACY_ENTITLEMENTS_FILE = path.resolve(SERVER_DATA_DIR, 'entitlements.json');
 
@@ -377,7 +381,28 @@ export function buildQrisPayloadString(orderId: string, amountIdr: number): stri
   return `${bodyWithoutCrc}${crc16Ccitt(bodyWithoutCrc)}`;
 }
 
-// PayPal Live / Sandbox REST Client helpers
+// PayPal Live / Payment Link / Sandbox REST Client helpers
+export const DEFAULT_PAYPAL_PAYMENT_LINK = 'https://www.paypal.com/ncp/payment/NNY5BAAE3XSMG';
+
+export function isAllowedPayPalUrl(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl.trim());
+    if (parsed.protocol !== 'https:') return null;
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'paypal.com' && !host.endsWith('.paypal.com')) return null;
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function getPayPalPaymentLink(): string | null {
+  const raw = process.env.PAYPAL_PAYMENT_LINK?.trim() || DEFAULT_PAYPAL_PAYMENT_LINK;
+  return isAllowedPayPalUrl(raw);
+}
+
 export function isPayPalConfigured(): boolean {
   return Boolean(
     process.env.PAYPAL_CLIENT_ID &&

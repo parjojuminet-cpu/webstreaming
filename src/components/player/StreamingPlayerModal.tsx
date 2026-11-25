@@ -158,6 +158,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   const ytPlayerRef = useRef<YTPlayerInstance | null>(null);
   const startSeekRef = useRef<number>(0);
   const lockHintTimerRef = useRef<number | null>(null);
+  const fullscreenExitAtRef = useRef<number>(0);
 
   const [authData, setAuthData] = useState<StreamAuthorizationResponse | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
@@ -201,7 +202,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
 
   useEffect(() => {
     const onFsChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
+      const fsActive = Boolean(document.fullscreenElement);
+      if (!fsActive) {
+        fullscreenExitAtRef.current = Date.now();
+      }
+      setIsFullscreen(fsActive);
     };
     document.addEventListener('fullscreenchange', onFsChange);
     return () => {
@@ -584,6 +589,9 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
     if (!item) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (document.fullscreenElement || Date.now() - fullscreenExitAtRef.current < 350) {
+          return;
+        }
         persistCurrentProgress(item, getPlaybackCurrentTime(), authData);
         onClose();
       }
@@ -612,13 +620,17 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   const handleTogglePlay = () => {
     if (paywallReached) return;
     if (isYoutubeStream && ytPlayerRef.current) {
-      if (isPlaying) {
-        ytPlayerRef.current.pauseVideo();
-        setIsPlaying(false);
-        persistCurrentProgress(item, getPlaybackCurrentTime(), authData);
-      } else {
-        ytPlayerRef.current.playVideo();
-        setIsPlaying(true);
+      try {
+        if (isPlaying) {
+          ytPlayerRef.current.pauseVideo();
+          setIsPlaying(false);
+          persistCurrentProgress(item, getPlaybackCurrentTime(), authData);
+        } else {
+          ytPlayerRef.current.playVideo();
+          setIsPlaying(true);
+        }
+      } catch {
+        // Ignore transient YouTube API readiness error
       }
       return;
     }
@@ -672,14 +684,18 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
     }
 
     if (isYoutubeStream && ytPlayerRef.current) {
-      if (!isFullUnlocked && nextSec >= 299) {
-        ytPlayerRef.current.seekTo(299, true);
-        ytPlayerRef.current.pauseVideo();
-        setPaywallReached(true);
-        return;
+      try {
+        if (!isFullUnlocked && nextSec >= 299) {
+          ytPlayerRef.current.seekTo(299, true);
+          ytPlayerRef.current.pauseVideo();
+          setPaywallReached(true);
+          return;
+        }
+        ytPlayerRef.current.seekTo(nextSec, true);
+        setCurrentTime(nextSec);
+      } catch {
+        // Ignore transient YouTube API readiness error
       }
-      ytPlayerRef.current.seekTo(nextSec, true);
-      setCurrentTime(nextSec);
       return;
     }
 
@@ -914,6 +930,20 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
               </div>
             )}
 
+            {/* Centered Play CTA when paused */}
+            {!paywallReached && !loadingStream && !streamError && !isFacebookStream && !isPlaying && (
+              <div className="absolute inset-0 z-[15] pointer-events-none flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={handleTogglePlay}
+                  aria-label="Play"
+                  className="pointer-events-auto w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-emerald-600/95 hover:bg-emerald-600 text-white flex items-center justify-center shadow-xl transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                >
+                  <Play className="w-5 h-5 ml-0.5 fill-current" />
+                </button>
+              </div>
+            )}
+
             {/* Unified DELOKEN Control Overlay (sits above z-10 shield so controls remain usable while video stage stays protected) */}
             {!paywallReached && !loadingStream && !streamError && (
               <div
@@ -924,19 +954,6 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                 }`}
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Top-level quality selector for HTML5/HLS + Play CTA when paused */}
-                {!isFacebookStream && !isPlaying && (
-                  <div className="flex items-center justify-center pb-4">
-                    <button
-                      type="button"
-                      onClick={handleTogglePlay}
-                      aria-label="Play"
-                      className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-emerald-600/95 hover:bg-emerald-600 text-white flex items-center justify-center shadow-xl transition-transform hover:scale-105 active:scale-95 cursor-pointer"
-                    >
-                      <Play className="w-5 h-5 ml-0.5 fill-current" />
-                    </button>
-                  </div>
-                )}
 
                 <div
                   className={`space-y-1.5 sm:space-y-2 ${
@@ -1061,7 +1078,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                           type="button"
                           onClick={() => {
                             if (isYoutubeStream) {
-                              ytPlayerRef.current?.pauseVideo();
+                              try {
+                                ytPlayerRef.current?.pauseVideo();
+                              } catch {
+                                // Ignore
+                              }
                             } else {
                               videoRef.current?.pause();
                             }
@@ -1179,7 +1200,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                       setPaywallReached(false);
                       handleSeek(0);
                       if (isYoutubeStream) {
-                        ytPlayerRef.current?.playVideo();
+                        try {
+                          ytPlayerRef.current?.playVideo();
+                        } catch {
+                          // Ignore
+                        }
                       } else {
                         void videoRef.current?.play().catch(() => {});
                       }

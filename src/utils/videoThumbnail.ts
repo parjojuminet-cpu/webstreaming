@@ -65,23 +65,34 @@ export async function autoCaptureCoverFromVideoFile(file: File): Promise<File> {
     });
 
     const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 2;
-    const seekSec = Math.min(2.5, Math.max(0.15, duration * 0.15));
+    if (duration > 0.15) {
+      const seekSec = Math.min(2.5, Math.max(0.05, duration * 0.15));
+      const targetTime = Math.min(seekSec, Math.max(0.01, duration - 0.05));
 
-    await new Promise<void>((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => {
-        resolve(); // Fallback to whatever frame decoded
-      }, 6000);
+      await new Promise<void>((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => {
+          resolve(); // Fallback to whatever frame decoded
+        }, 6000);
 
-      video.onseeked = () => {
-        window.clearTimeout(timeoutId);
-        resolve();
-      };
-      video.onerror = () => {
-        window.clearTimeout(timeoutId);
-        reject(new Error('Failed seeking video for cover capture.'));
-      };
-      video.currentTime = Math.min(seekSec, Math.max(0, duration - 0.1));
-    });
+        video.onseeked = () => {
+          window.clearTimeout(timeoutId);
+          resolve();
+        };
+        video.onerror = () => {
+          window.clearTimeout(timeoutId);
+          reject(new Error('Failed seeking video for cover capture.'));
+        };
+        video.currentTime = targetTime;
+      });
+    } else if (video.readyState < 2) {
+      await new Promise<void>((resolve) => {
+        const timeoutId = window.setTimeout(resolve, 1500);
+        video.onloadeddata = () => {
+          window.clearTimeout(timeoutId);
+          resolve();
+        };
+      });
+    }
 
     return await captureVideoFrameAsFile(video, file.name);
   } finally {

@@ -202,6 +202,21 @@ export async function adminRefundPayment(
   return parseJsonOrThrow(res);
 }
 
+export async function adminApprovePayment(
+  paymentId: string,
+  idempotencyKey: string
+): Promise<{ ok: boolean; payment: PaymentOrderRecord; overview: AdminFinanceOverview }> {
+  const headers = await getAuthHeaders(idempotencyKey);
+  const res = await fetch(
+    `/api/admin/payments/${encodeURIComponent(paymentId)}/approve`,
+    {
+      method: 'POST',
+      headers,
+    }
+  );
+  return parseJsonOrThrow(res);
+}
+
 export async function adminUpdatePayoutStatus(
   payoutId: string,
   status: 'processing' | 'paid' | 'rejected',

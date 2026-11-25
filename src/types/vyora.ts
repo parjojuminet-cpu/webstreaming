@@ -189,6 +189,7 @@ export interface ReviewItem {
 }
 
 export type PaymentGateway = 'paypal' | 'qris' | 'credits';
+export type PaymentGatewayMode = 'live' | 'payment_link' | 'sandbox_preview';
 export type PaymentPurpose = 'video_unlock' | 'credit_topup';
 export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'expired' | 'refunded';
 
@@ -205,7 +206,7 @@ export interface PaymentOrderRecord {
   creditsDelta: number;
   status: PaymentStatus;
   gatewayOrderId: string;
-  gatewayMode: 'live' | 'sandbox_preview';
+  gatewayMode: PaymentGatewayMode;
   approvalUrl?: string;
   qrString?: string;
   qrSvg?: string;

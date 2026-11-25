@@ -24,6 +24,7 @@ import {
   subscribePublicCreators,
 } from '../services/firestoreService';
 import {
+  adminApprovePayment,
   adminRefundPayment,
   adminUpdatePayoutStatus,
   fetchAdminFinanceOverview,
@@ -215,6 +216,25 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     }
   };
 
+  const handleApprovePendingPayment = async (paymentId: string) => {
+    setFinanceError(null);
+    setProcessingActionId(paymentId);
+    try {
+      const res = await adminApprovePayment(paymentId, crypto.randomUUID());
+      setFinanceOverview(res.overview);
+    } catch (err) {
+      setFinanceError(
+        err instanceof Error
+          ? err.message
+          : locale === 'id'
+          ? 'Gagal mengonfirmasi pembayaran tertunda.'
+          : 'Failed to approve pending payment.'
+      );
+    } finally {
+      setProcessingActionId(null);
+    }
+  };
+
   const handlePayoutDecision = async (
     payoutId: string,
     status: 'processing' | 'paid' | 'rejected'
@@ -288,31 +308,41 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Total Users</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {locale === 'id' ? 'Total Pengguna' : 'Total Users'}
+              </p>
               <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {users.length}
               </p>
             </div>
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Creators</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {locale === 'id' ? 'Kreator' : 'Creators'}
+              </p>
               <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {creators.length}
               </p>
             </div>
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Pending Moderation</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {locale === 'id' ? 'Menunggu Moderasi' : 'Pending Moderation'}
+              </p>
               <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1">
                 {pendingVideos.length}
               </p>
             </div>
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Active Entitlements</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {locale === 'id' ? 'Akses Aktif (30 Hari)' : 'Active Entitlements'}
+              </p>
               <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {financeOverview?.activeEntitlementsCount ?? 0}
               </p>
             </div>
             <div className="col-span-2 lg:col-span-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Platform Commission</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {locale === 'id' ? 'Komisi Platform' : 'Platform Commission'}
+              </p>
               <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {financeOverview?.commissionPercent ??
                   settings?.commissionPercent ??
@@ -324,25 +354,33 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Gross USD Volume</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {locale === 'id' ? 'Total Volume USD' : 'Gross USD Volume'}
+              </p>
               <p className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {formatPrice(financeOverview?.totalGrossUsd ?? 0, 0, 'USD')}
               </p>
               <p className="text-xs font-mono text-emerald-700 dark:text-emerald-400 mt-1">
-                Platform fee: {formatPrice(financeOverview?.platformCommissionUsd ?? 0, 0, 'USD')}
+                {locale === 'id' ? 'Biaya platform: ' : 'Platform fee: '}
+                {formatPrice(financeOverview?.platformCommissionUsd ?? 0, 0, 'USD')}
               </p>
             </div>
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Gross IDR Volume</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {locale === 'id' ? 'Total Volume IDR' : 'Gross IDR Volume'}
+              </p>
               <p className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {formatPrice(0, financeOverview?.totalGrossIdr ?? 0, 'IDR')}
               </p>
               <p className="text-xs font-mono text-emerald-700 dark:text-emerald-400 mt-1">
-                Platform fee: {formatPrice(0, financeOverview?.platformCommissionIdr ?? 0, 'IDR')}
+                {locale === 'id' ? 'Biaya platform: ' : 'Platform fee: '}
+                {formatPrice(0, financeOverview?.platformCommissionIdr ?? 0, 'IDR')}
               </p>
             </div>
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Open Reports & Pending Payouts</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {locale === 'id' ? 'Laporan Terbuka & Payout Tertunda' : 'Open Reports & Pending Payouts'}
+              </p>
               <p className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
                 {openReports.length} / {pendingPayouts.length}
               </p>
@@ -356,9 +394,9 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         <section className="space-y-4">
           {financeError && (
             <ErrorState
-              title="Unable to Load Payment Transactions"
+              title={locale === 'id' ? 'Gagal Memuat Transaksi Pembayaran' : 'Unable to Load Payment Transactions'}
               description={financeError}
-              retryLabel="Retry"
+              retryLabel={locale === 'id' ? 'Coba Lagi' : 'Retry'}
               onRetry={() => setFinanceRetryTick((t) => t + 1)}
             />
           )}
@@ -370,74 +408,106 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             </div>
           ) : !financeOverview || financeOverview.payments.length === 0 ? (
             <EmptyState
-              title="No payment transactions recorded yet"
-              description="PayPal, Indonesian QRIS, and Credit Wallet orders will appear here with server refund controls."
+              title={locale === 'id' ? 'Belum ada transaksi pembayaran' : 'No payment transactions recorded yet'}
+              description={
+                locale === 'id'
+                  ? 'Pesanan PayPal, QRIS Indonesia, dan Dompet Kredit akan muncul di sini beserta kontrol aktivasi dan refund server.'
+                  : 'PayPal, Indonesian QRIS, and Credit Wallet orders will appear here with server approval and refund controls.'
+              }
             />
           ) : (
             <div className="space-y-3">
-              {financeOverview.payments.map((pay) => (
-                <article
-                  key={pay.id}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
-                >
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
-                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold uppercase">
-                        {pay.method} · {pay.status}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span>{pay.purpose}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{formatLocalizedDate(pay.createdAt, locale)}</span>
+              {financeOverview.payments.map((pay) => {
+                const statusBadgeClass =
+                  pay.status === 'completed'
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : pay.status === 'pending'
+                    ? 'text-amber-700 dark:text-amber-400'
+                    : 'text-rose-700 dark:text-rose-400';
+
+                return (
+                  <article
+                    key={pay.id}
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
+                        <span className={`${statusBadgeClass} font-semibold uppercase`}>
+                          {pay.method} · {pay.status}
+                        </span>
+                        {pay.gatewayMode === 'payment_link' && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                              PAYPAL LINK
+                            </span>
+                          </>
+                        )}
+                        <span aria-hidden="true">·</span>
+                        <span>{pay.purpose}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{formatLocalizedDate(pay.createdAt, locale)}</span>
+                      </div>
+                      <h3 className="text-base font-semibold text-slate-900 dark:text-white break-words">
+                        {pay.targetTitle}
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 font-mono break-all">
+                        {locale === 'id' ? 'Pengguna' : 'User'}: {pay.userEmail || pay.userId} · Ref: {pay.id}
+                      </p>
                     </div>
-                    <h3 className="text-base font-semibold text-slate-900 dark:text-white break-words">
-                      {pay.targetTitle}
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono break-all">
-                      User: {pay.userEmail || pay.userId} · Ref: {pay.id}
-                    </p>
-                  </div>
 
-                  <div className="flex flex-wrap items-center gap-3 shrink-0">
-                    <span className="text-sm font-bold font-mono tabular-nums text-slate-900 dark:text-white">
-                      {pay.currency === 'CREDITS'
-                        ? `${pay.amount} Credits`
-                        : formatPrice(pay.amount, pay.amount, pay.currency)}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-3 shrink-0">
+                      <span className="text-sm font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                        {pay.currency === 'CREDITS'
+                          ? `${pay.amount} Credits`
+                          : formatPrice(pay.amount, pay.amount, pay.currency)}
+                      </span>
 
-                    {pay.status === 'completed' && (
-                      confirmRefundId === pay.id ? (
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            className="bg-rose-600 hover:bg-rose-700 text-white"
-                            isLoading={processingActionId === pay.id}
-                            onClick={() => void handleIssueRefund(pay.id)}
-                          >
-                            Confirm Refund
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmRefundId(null)}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
+                      {pay.status === 'pending' && (
                         <Button
-                          variant="outline"
+                          variant="primary"
                           size="sm"
-                          onClick={() => setConfirmRefundId(pay.id)}
+                          isLoading={processingActionId === pay.id}
+                          onClick={() => void handleApprovePendingPayment(pay.id)}
                         >
-                          Refund & Revoke
+                          {locale === 'id' ? 'Konfirmasi & Aktifkan' : 'Approve & Activate'}
                         </Button>
-                      )
-                    )}
-                  </div>
-                </article>
-              ))}
+                      )}
+
+                      {pay.status === 'completed' && (
+                        confirmRefundId === pay.id ? (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              className="bg-rose-600 hover:bg-rose-700 text-white"
+                              isLoading={processingActionId === pay.id}
+                              onClick={() => void handleIssueRefund(pay.id)}
+                            >
+                              {locale === 'id' ? 'Konfirmasi Refund' : 'Confirm Refund'}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setConfirmRefundId(null)}
+                            >
+                              {locale === 'id' ? 'Batal' : 'Cancel'}
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setConfirmRefundId(pay.id)}
+                          >
+                            {locale === 'id' ? 'Refund & Cabut Akses' : 'Refund & Revoke'}
+                          </Button>
+                        )
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>

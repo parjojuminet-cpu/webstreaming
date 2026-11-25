@@ -51,7 +51,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       if (Boolean(b.trending) !== Boolean(a.trending)) {
         return b.trending ? 1 : -1;
       }
-      return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+      return (Date.parse(b.publishedAt || '') || 0) - (Date.parse(a.publishedAt || '') || 0);
     });
 
     if (selectedCategory === 'All') {

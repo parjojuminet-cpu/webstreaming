@@ -1037,9 +1037,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-200 dark:border-slate-800 md:border-t-0 md:pt-0 shrink-0">
-                    {(vid.status === 'draft' ||
-                      vid.status === 'rejected' ||
-                      (isAdmin && vid.status !== 'archived')) && (
+                    {vid.status !== 'archived' && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -1318,6 +1316,9 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                             setVProvider('youtube');
                             const id = extractYouTubeVideoId(val);
                             setVAssetRef(id || '');
+                            if (id && !vHasExplicitCover) {
+                              setVThumbnail(getYouTubeThumbnailUrl(id));
+                            }
                           }}
                           placeholder="https://www.youtube.com/watch?v=... atau https://youtu.be/..."
                           className={`${inputClass} pl-10 font-mono text-xs`}
@@ -1353,7 +1354,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                               type="button"
                               variant="outline"
                               size="sm"
-                              onClick={() => setVThumbnail(ytThumb)}
+                              onClick={() => {
+                                setVThumbnail(ytThumb);
+                                setVHasExplicitCover(true);
+                              }}
                             >
                               {locale === 'id'
                                 ? 'Gunakan Thumbnail YouTube Ini'

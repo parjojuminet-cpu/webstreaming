@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { and, desc, eq, gte, ne, sql } from 'drizzle-orm';
-import { db } from './index.ts';
+import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { db, isSqlConfigured } from './index.ts';
 import {
   creatorEarnings,
   creatorMedia,
@@ -28,6 +28,7 @@ import type {
   AdminFinanceOverview,
   CreatorEarningRecord,
   PaymentGateway,
+  PaymentGatewayMode,
   PaymentOrderRecord,
   PaymentPurpose,
   PaymentStatus,
@@ -59,10 +60,160 @@ interface LegacyLedgerJson {
 
 let migrationPromise: Promise<void> | null = null;
 
+async function ensureSqlTablesExist(): Promise<void> {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      uid TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS wallets (
+      user_id TEXT PRIMARY KEY,
+      balance_credits INTEGER NOT NULL DEFAULT 0,
+      total_spent_credits INTEGER NOT NULL DEFAULT 0,
+      updated_at_ms BIGINT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS wallet_transactions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      credits_delta INTEGER NOT NULL,
+      description TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS payments (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_email TEXT,
+      purpose TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      target_title TEXT NOT NULL,
+      method TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      currency TEXT NOT NULL,
+      credits_delta INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,
+      gateway_order_id TEXT NOT NULL,
+      gateway_mode TEXT NOT NULL,
+      approval_url TEXT,
+      qr_string TEXT,
+      expires_at TEXT,
+      refunded_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS purchases (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      video_id TEXT NOT NULL,
+      video_title TEXT NOT NULL,
+      method TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      currency TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS entitlements (
+      composite_key TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      video_id TEXT NOT NULL,
+      video_title TEXT NOT NULL,
+      thumbnail_url TEXT NOT NULL DEFAULT '',
+      granted_at_ms BIGINT NOT NULL,
+      expires_at_ms BIGINT NOT NULL,
+      resume_seconds INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      source TEXT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS creator_earnings (
+      id TEXT PRIMARY KEY,
+      creator_id TEXT NOT NULL,
+      video_id TEXT NOT NULL,
+      video_title TEXT NOT NULL,
+      purchase_id TEXT NOT NULL,
+      buyer_user_id TEXT NOT NULL,
+      method TEXT NOT NULL,
+      gross_usd DOUBLE PRECISION NOT NULL,
+      gross_idr INTEGER NOT NULL,
+      commission_percent INTEGER NOT NULL,
+      net_usd DOUBLE PRECISION NOT NULL,
+      net_idr INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS payouts (
+      id TEXT PRIMARY KEY,
+      creator_id TEXT NOT NULL,
+      creator_name TEXT NOT NULL,
+      amount_usd DOUBLE PRECISION NOT NULL,
+      amount_idr INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      method TEXT NOT NULL,
+      destination TEXT NOT NULL,
+      status TEXT NOT NULL,
+      admin_note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS idempotency_records (
+      full_key TEXT PRIMARY KEY,
+      status INTEGER NOT NULL,
+      body_json JSONB NOT NULL,
+      created_at_ms BIGINT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS processed_webhooks (
+      event_key TEXT PRIMARY KEY,
+      processed_at_ms BIGINT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS creator_media (
+      video_id TEXT PRIMARY KEY,
+      creator_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      asset_ref TEXT NOT NULL,
+      mime_type TEXT,
+      updated_at_iso TEXT NOT NULL
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      id TEXT PRIMARY KEY,
+      commission_percent INTEGER NOT NULL DEFAULT 20,
+      min_price_usd DOUBLE PRECISION NOT NULL DEFAULT 1.99,
+      min_price_idr INTEGER NOT NULL DEFAULT 29000
+    )
+  `);
+}
+
 async function ensureLegacyLedgerMigrated(): Promise<void> {
+  if (!isSqlConfigured()) {
+    throw new Error('Database PostgreSQL belum dihubungkan (set DATABASE_URL atau SQL_HOST).');
+  }
   if (!migrationPromise) {
     migrationPromise = (async () => {
       try {
+        await ensureSqlTablesExist();
         // Ensure default global platform_settings row always exists
         await db
           .insert(platformSettings)
@@ -270,7 +421,7 @@ function mapPaymentRow(row: typeof payments.$inferSelect): PaymentOrderRecord {
     creditsDelta: row.creditsDelta,
     status: row.status as PaymentStatus,
     gatewayOrderId: row.gatewayOrderId,
-    gatewayMode: row.gatewayMode as 'live' | 'sandbox_preview',
+    gatewayMode: row.gatewayMode as PaymentGatewayMode,
     approvalUrl: row.approvalUrl ?? undefined,
     qrString: row.qrString ?? undefined,
     expiresAt: row.expiresAt ?? undefined,
@@ -1155,6 +1306,7 @@ export async function fulfillPaymentAtomicSql(input: {
 }): Promise<{
   notFound?: boolean;
   duplicateWebhook?: boolean;
+  invalidStatus?: PaymentStatus;
   payment?: PaymentOrderRecord;
   purchase?: PurchaseRecord | null;
   entitlement?: (ServerEntitlement & { expiresAt: string; remainingDays: number }) | null;
@@ -1195,6 +1347,10 @@ export async function fulfillPaymentAtomicSql(input: {
         return { notFound: true };
       }
 
+      if (existingPay.status !== 'pending' && existingPay.status !== 'completed') {
+        return { invalidStatus: existingPay.status as PaymentStatus };
+      }
+
       // Ensure buyer wallet exists
       await tx
         .insert(wallets)
@@ -1206,29 +1362,40 @@ export async function fulfillPaymentAtomicSql(input: {
         })
         .onConflictDoNothing();
 
-      // Atomically claim fulfillment transition so concurrent requests cannot double-fulfill
-      const transitioned = await tx
-        .update(payments)
-        .set({ status: 'completed', updatedAt: nowIso })
-        .where(and(eq(payments.id, input.paymentId), ne(payments.status, 'completed')))
-        .returning();
+      // Atomically claim pending->completed transition so concurrent requests cannot double-fulfill
+      const transitioned =
+        existingPay.status === 'pending'
+          ? await tx
+              .update(payments)
+              .set({ status: 'completed', updatedAt: nowIso })
+              .where(and(eq(payments.id, input.paymentId), eq(payments.status, 'pending')))
+              .returning()
+          : [];
 
       if (!transitioned[0]) {
+        const latestRows = await tx
+          .select()
+          .from(payments)
+          .where(eq(payments.id, input.paymentId));
+        const latestPay = latestRows[0] ?? existingPay;
+        if (latestPay.status !== 'completed') {
+          return { invalidStatus: latestPay.status as PaymentStatus };
+        }
         // Already completed earlier — return idempotent snapshot
         const [walletRows, purRows, entRows] = await Promise.all([
-          tx.select().from(wallets).where(eq(wallets.userId, existingPay.userId)),
+          tx.select().from(wallets).where(eq(wallets.userId, latestPay.userId)),
           tx
             .select()
             .from(purchases)
-            .where(eq(purchases.id, `pur_${existingPay.id}`)),
-          existingPay.purpose === 'video_unlock'
+            .where(eq(purchases.id, `pur_${latestPay.id}`)),
+          latestPay.purpose === 'video_unlock'
             ? tx
                 .select()
                 .from(entitlements)
                 .where(
                   eq(
                     entitlements.compositeKey,
-                    entitlementKey(existingPay.userId, existingPay.targetId)
+                    entitlementKey(latestPay.userId, latestPay.targetId)
                   )
                 )
             : Promise.resolve([]),
@@ -1242,7 +1409,7 @@ export async function fulfillPaymentAtomicSql(input: {
             .onConflictDoNothing();
         }
         return {
-          payment: mapPaymentRow(existingPay),
+          payment: mapPaymentRow(latestPay),
           purchase: purRows[0] ? mapPurchaseRow(purRows[0]) : null,
           entitlement: ent
             ? {
@@ -1252,7 +1419,7 @@ export async function fulfillPaymentAtomicSql(input: {
               }
             : null,
           wallet: {
-            userId: existingPay.userId,
+            userId: latestPay.userId,
             balanceCredits: w?.balanceCredits ?? 0,
             totalSpentCredits: w?.totalSpentCredits ?? 0,
           },

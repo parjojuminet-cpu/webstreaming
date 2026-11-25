@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   CheckCircle2,
@@ -31,8 +31,21 @@ import type {
   PaymentGateway,
   PaymentOrderRecord,
 } from '../../types/vyora';
-import { formatPrice } from '../../i18n/translations';
+import { formatPrice, isFreeContent } from '../../i18n/translations';
 import { Button } from '../ui/Button';
+
+function getSafePayPalUrl(rawUrl?: string): string | null {
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:') return null;
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'paypal.com' && !host.endsWith('.paypal.com')) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
 
 export type CheckoutTarget =
   | {
@@ -87,6 +100,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [idemKey, setIdemKey] = useState<string>(() => crypto.randomUUID());
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const onPaymentCompletedRef = useRef(onPaymentCompleted);
+  onPaymentCompletedRef.current = onPaymentCompleted;
+
+  const targetKey = target
+    ? target.kind === 'video'
+      ? `video:${target.item.id}:${target.initialMethod ?? ''}`
+      : `pkg:${target.pkg.id}:${target.initialMethod ?? ''}`
+    : '';
+  const uid = firebaseUser?.uid ?? '';
+  const isTargetFreeVideo = Boolean(target?.kind === 'video' && isFreeContent(target.item));
+
+  useEffect(() => {
+    if (!target) return;
+    if (isTargetFreeVideo) {
+      onCloseRef.current();
+    }
+  }, [target, isTargetFreeVideo]);
+
   useEffect(() => {
     if (!target) return;
     const handleKey = (e: KeyboardEvent) => {
@@ -99,7 +132,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   }, [target, submitting, onClose]);
 
   useEffect(() => {
-    if (!target) return;
+    if (!targetKey) return;
     setPendingOrder(null);
     setSandboxToken(undefined);
     setQrDataUrl('');
@@ -107,13 +140,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setErrorMsg(null);
     setIdemKey(crypto.randomUUID());
 
-    if (target.initialMethod) {
+    if (target?.initialMethod) {
       setMethod(target.initialMethod);
     } else {
       setMethod(currency === 'IDR' ? 'qris' : 'paypal');
     }
 
-    if (firebaseUser) {
+    if (uid) {
       setLoadingWallet(true);
       void fetchMyWalletSummary()
         .then((res) => setWalletBalance(res.wallet.balanceCredits))
@@ -122,7 +155,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         })
         .finally(() => setLoadingWallet(false));
     }
-  }, [target, currency, firebaseUser]);
+  }, [targetKey, uid]);
 
   useEffect(() => {
     if (!pendingOrder?.qrString) {
@@ -143,7 +176,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   }, [pendingOrder?.qrString]);
 
   useEffect(() => {
-    if (!pendingOrder || pendingOrder.method !== 'qris' || completedOrder) return;
+    const shouldPoll =
+      Boolean(pendingOrder) &&
+      !completedOrder &&
+      (pendingOrder?.method === 'qris' || pendingOrder?.gatewayMode === 'payment_link');
+    if (!shouldPoll || !pendingOrder) return;
+
     const timer = window.setInterval(() => {
       void fetchPaymentStatus(pendingOrder.id)
         .then((res) => {
@@ -151,7 +189,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             setCompletedOrder(res.payment);
             setWalletBalance(res.wallet.balanceCredits);
             if (target) {
-              onPaymentCompleted({
+              onPaymentCompletedRef.current({
                 kind: target.kind,
                 videoItem: target.kind === 'video' ? target.item : undefined,
                 resumeSeconds: target.kind === 'video' ? target.resumeSeconds ?? 0 : 0,
@@ -162,9 +200,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         .catch(() => {});
     }, 4000);
     return () => window.clearInterval(timer);
-  }, [pendingOrder, completedOrder, target, onPaymentCompleted]);
+  }, [pendingOrder, completedOrder, target]);
 
-  if (!target) return null;
+  if (!target || isTargetFreeVideo) return null;
 
   const isVideo = target.kind === 'video';
   const title = isVideo
@@ -506,7 +544,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
 
               {!pendingOrder && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className={`grid gap-2 ${isVideo ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
                   {methodTabs.map((tab) => {
                     const active = method === tab.id;
                     return (
@@ -546,8 +584,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <div className="space-y-4">
                       <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                         {locale === 'id'
-                          ? 'Pesanan PayPal dibuat di server dengan harga terverifikasi. Pembayaran diverifikasi via capture API & webhook sebelum akses dibuka.'
-                          : 'Your PayPal order is created server-side with authoritative USD pricing and verified via capture & webhook before unlocking.'}
+                          ? 'Pesanan PayPal dibuat di server dengan harga terverifikasi dalam USD sebelum mengarahkan Anda ke halaman pembayaran PayPal resmi.'
+                          : 'Your PayPal order is created server-side with authoritative USD pricing before directing you to official PayPal checkout.'}
                       </p>
                       <Button
                         variant="primary"
@@ -557,54 +595,116 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         onClick={() => void handleStartPayPal()}
                       >
                         {locale === 'id'
-                          ? `Buat Pesanan PayPal (${formatPrice(priceUsd, priceIdr, 'USD')})`
-                          : `Create PayPal Order (${formatPrice(priceUsd, priceIdr, 'USD')})`}
+                          ? `Lanjut ke PayPal (${formatPrice(priceUsd, priceIdr, 'USD')})`
+                          : `Continue to PayPal (${formatPrice(priceUsd, priceIdr, 'USD')})`}
                       </Button>
                     </div>
                   ) : (
-                    <div className="space-y-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
-                          {pendingOrder.gatewayMode === 'live'
-                            ? 'PayPal Checkout Ready'
-                            : 'PayPal Sandbox Order'}
-                        </span>
-                        <span className="font-mono text-slate-500 dark:text-slate-400">
-                          {pendingOrder.gatewayOrderId}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600 dark:text-slate-300">
-                        {pendingOrder.gatewayMode === 'live'
-                          ? 'Approve the order in PayPal, then capture payment server-side to unlock access.'
-                          : locale === 'id'
-                          ? 'Order Sandbox bertandatangan server telah dibuat. Klik tombol di bawah untuk verifikasi capture di server.'
-                          : 'Server-signed Sandbox order created. Click below to capture and verify transaction server-side.'}
-                      </p>
-                      <div className="flex flex-wrap gap-3">
-                        {pendingOrder.approvalUrl && (
-                          <a
-                            href={pendingOrder.approvalUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-900 dark:text-slate-100"
-                          >
-                            <span>Open PayPal</span>
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                        <Button
-                          variant="primary"
-                          size="md"
-                          className="flex-1"
-                          isLoading={submitting}
-                          onClick={() => void handleCapturePayPal()}
-                        >
-                          {locale === 'id'
-                            ? 'Verifikasi & Capture PayPal'
-                            : 'Verify & Capture PayPal'}
-                        </Button>
-                      </div>
-                    </div>
+                    (() => {
+                      const safeApprovalUrl = getSafePayPalUrl(pendingOrder.approvalUrl);
+                      const isLinkMode = pendingOrder.gatewayMode === 'payment_link';
+                      return (
+                        <div className="space-y-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
+                              {pendingOrder.gatewayMode === 'live'
+                                ? 'PayPal Checkout Ready'
+                                : isLinkMode
+                                ? 'PayPal Payment Link'
+                                : 'PayPal Sandbox Order'}
+                            </span>
+                            <span className="font-mono text-slate-500 dark:text-slate-400 truncate">
+                              {pendingOrder.gatewayOrderId}
+                            </span>
+                          </div>
+
+                          <div className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs">
+                            <div className="min-w-0">
+                              <p className="text-slate-500 dark:text-slate-400">
+                                {locale === 'id' ? 'Nominal Pembayaran' : 'Exact Payment Amount'}
+                              </p>
+                              <p className="text-base font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                                {formatPrice(priceUsd, priceIdr, 'USD')}
+                              </p>
+                            </div>
+                            <div className="text-right min-w-0">
+                              <p className="text-slate-500 dark:text-slate-400">
+                                {locale === 'id' ? 'Ref Pesanan' : 'Order Ref'}
+                              </p>
+                              <p className="font-mono text-slate-800 dark:text-slate-200 break-all">
+                                {pendingOrder.id}
+                              </p>
+                            </div>
+                          </div>
+
+                          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                            {isLinkMode
+                              ? locale === 'id'
+                                ? `Selesaikan pembayaran sebesar ${formatPrice(priceUsd, priceIdr, 'USD')} melalui tautan PayPal resmi DELOKEN. Cantumkan Ref Pesanan (${pendingOrder.id}) di catatan pembayaran agar aktivasi diproses cepat via webhook atau konfirmasi Admin.`
+                                : `Complete your ${formatPrice(priceUsd, priceIdr, 'USD')} payment via the official DELOKEN PayPal Payment Link. Include Order Ref (${pendingOrder.id}) in the note so access activates promptly upon webhook or Admin verification.`
+                              : pendingOrder.gatewayMode === 'live'
+                              ? locale === 'id'
+                                ? 'Setujui pembayaran di halaman PayPal, lalu klik tombol verifikasi capture di bawah untuk membuka akses.'
+                                : 'Approve the order in PayPal, then capture payment server-side to unlock access.'
+                              : locale === 'id'
+                              ? 'Order Sandbox bertandatangan server telah dibuat. Klik tombol di bawah untuk verifikasi capture di server.'
+                              : 'Server-signed Sandbox order created. Click below to capture and verify transaction server-side.'}
+                          </p>
+
+                          <div className="flex flex-wrap gap-3">
+                            {safeApprovalUrl && (
+                              <a
+                                href={safeApprovalUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`inline-flex items-center justify-center gap-1.5 min-h-[42px] px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
+                                  isLinkMode
+                                    ? 'flex-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-900 dark:text-slate-100'
+                                }`}
+                              >
+                                <span>
+                                  {isLinkMode
+                                    ? locale === 'id'
+                                      ? 'Buka & Bayar di PayPal'
+                                      : 'Open & Pay via PayPal'
+                                    : locale === 'id'
+                                    ? 'Buka PayPal'
+                                    : 'Open PayPal'}
+                                </span>
+                                <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                              </a>
+                            )}
+
+                            {isLinkMode ? (
+                              <Button
+                                variant="outline"
+                                size="md"
+                                leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                                isLoading={submitting}
+                                onClick={() => void handleCheckPaymentStatus()}
+                              >
+                                {locale === 'id'
+                                  ? 'Cek Status Konfirmasi'
+                                  : 'Check Payment Status'}
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="primary"
+                                size="md"
+                                className="flex-1"
+                                isLoading={submitting}
+                                onClick={() => void handleCapturePayPal()}
+                              >
+                                {locale === 'id'
+                                  ? 'Verifikasi & Capture PayPal'
+                                  : 'Verify & Capture PayPal'}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()
                   )}
                 </div>
               )}
