@@ -4,8 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import dotenv from 'dotenv';
-import { getApp, getApps, initializeApp } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
 import {
   ACCESS_WINDOW_MS,
   PAYMENT_TTL_MS,
@@ -70,10 +68,102 @@ import type { PaymentGatewayMode, PaymentOrderRecord, PaymentPurpose } from '../
 
 dotenv.config();
 
-const adminApp = getApps().length
-  ? getApp()
-  : initializeApp({ projectId: firebaseConfig.projectId });
-const adminAuth = getAuth(adminApp);
+const FIREBASE_CERTS_URL =
+  'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+let cachedFirebaseCerts: { certs: Record<string, string>; expiresAtMs: number } | null = null;
+
+async function getFirebasePublicCerts(forceRefresh = false): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (!forceRefresh && cachedFirebaseCerts && now < cachedFirebaseCerts.expiresAtMs) {
+    return cachedFirebaseCerts.certs;
+  }
+  const res = await fetch(FIREBASE_CERTS_URL);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch Firebase public certificates (${res.status}).`);
+  }
+  const cacheControl = res.headers.get('cache-control') || '';
+  const maxAgeMatch = /max-age=(\d+)/i.exec(cacheControl);
+  const maxAgeSeconds = maxAgeMatch ? Number(maxAgeMatch[1]) : 3600;
+  const certs = (await res.json()) as Record<string, string>;
+  cachedFirebaseCerts = {
+    certs,
+    expiresAtMs: now + Math.max(60, maxAgeSeconds) * 1000,
+  };
+  return certs;
+}
+
+function decodeBase64UrlJson<T>(segment: string): T | null {
+  try {
+    return JSON.parse(Buffer.from(segment, 'base64url').toString('utf-8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyFirebaseIdToken(idToken: string): Promise<AuthenticatedUser | null> {
+  const parts = idToken.split('.');
+  if (parts.length !== 3) return null;
+  const [headerB64, payloadB64, signatureB64] = parts;
+  if (!headerB64 || !payloadB64 || !signatureB64) return null;
+
+  const header = decodeBase64UrlJson<{ alg?: unknown; kid?: unknown }>(headerB64);
+  if (!header || header.alg !== 'RS256' || typeof header.kid !== 'string' || !header.kid) {
+    return null;
+  }
+
+  let certs = await getFirebasePublicCerts(false);
+  let certPem = certs[header.kid];
+  if (!certPem) {
+    certs = await getFirebasePublicCerts(true);
+    certPem = certs[header.kid];
+  }
+  if (typeof certPem !== 'string' || !certPem.includes('BEGIN CERTIFICATE')) {
+    return null;
+  }
+
+  const signingInput = Buffer.from(`${headerB64}.${payloadB64}`, 'utf-8');
+  const signatureBuf = Buffer.from(signatureB64, 'base64url');
+  if (!crypto.verify('RSA-SHA256', signingInput, certPem, signatureBuf)) {
+    return null;
+  }
+
+  const payload = decodeBase64UrlJson<{
+    aud?: unknown;
+    iss?: unknown;
+    sub?: unknown;
+    exp?: unknown;
+    iat?: unknown;
+    auth_time?: unknown;
+    email?: unknown;
+    email_verified?: unknown;
+  }>(payloadB64);
+  if (!payload) return null;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const expectedIssuer = `https://securetoken.google.com/${firebaseConfig.projectId}`;
+  if (
+    payload.aud !== firebaseConfig.projectId ||
+    payload.iss !== expectedIssuer ||
+    typeof payload.sub !== 'string' ||
+    payload.sub.length === 0 ||
+    payload.sub.length > 128 ||
+    typeof payload.exp !== 'number' ||
+    payload.exp <= nowSec ||
+    typeof payload.iat !== 'number' ||
+    payload.iat > nowSec + 300 ||
+    typeof payload.auth_time !== 'number' ||
+    payload.auth_time > nowSec + 300
+  ) {
+    return null;
+  }
+
+  return {
+    uid: payload.sub,
+    email: typeof payload.email === 'string' ? payload.email : null,
+    emailVerified: Boolean(payload.email_verified),
+    rawIdToken: idToken,
+  };
+}
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const BOOTSTRAPPED_ADMIN_EMAIL = 'parjojuminet@gmail.com';
@@ -248,13 +338,7 @@ async function extractUserFromBearer(req: Request): Promise<AuthenticatedUser | 
   const idToken = header.slice(7).trim();
   if (!idToken) return null;
   try {
-    const decoded = await adminAuth.verifyIdToken(idToken);
-    return {
-      uid: decoded.uid,
-      email: decoded.email ?? null,
-      emailVerified: Boolean(decoded.email_verified),
-      rawIdToken: idToken,
-    };
+    return await verifyFirebaseIdToken(idToken);
   } catch {
     return null;
   }
