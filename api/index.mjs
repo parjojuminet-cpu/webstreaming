@@ -600,170 +600,239 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 var SERVER_DATA_DIR2 = path2.resolve(process.cwd(), ".vyora_server_data");
 var LEGACY_LEDGER_FILE = path2.resolve(SERVER_DATA_DIR2, "ledger.json");
 var migrationPromise = null;
+var TABLE_DDL_STATEMENTS = [
+  {
+    tableName: "users",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        uid TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "wallets",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS wallets (
+        user_id TEXT PRIMARY KEY,
+        balance_credits INTEGER NOT NULL DEFAULT 0,
+        total_spent_credits INTEGER NOT NULL DEFAULT 0,
+        updated_at_ms BIGINT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "wallet_transactions",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        credits_delta INTEGER NOT NULL,
+        description TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "payments",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS payments (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        user_email TEXT,
+        purpose TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        target_title TEXT NOT NULL,
+        method TEXT NOT NULL,
+        amount DOUBLE PRECISION NOT NULL,
+        currency TEXT NOT NULL,
+        credits_delta INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        gateway_order_id TEXT NOT NULL,
+        gateway_mode TEXT NOT NULL,
+        approval_url TEXT,
+        qr_string TEXT,
+        expires_at TEXT,
+        refunded_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "purchases",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS purchases (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        video_title TEXT NOT NULL,
+        method TEXT NOT NULL,
+        amount DOUBLE PRECISION NOT NULL,
+        currency TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "entitlements",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS entitlements (
+        composite_key TEXT PRIMARY KEY,
+        id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        video_title TEXT NOT NULL,
+        thumbnail_url TEXT NOT NULL DEFAULT '',
+        granted_at_ms BIGINT NOT NULL,
+        expires_at_ms BIGINT NOT NULL,
+        resume_seconds INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        source TEXT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "creator_earnings",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS creator_earnings (
+        id TEXT PRIMARY KEY,
+        creator_id TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        video_title TEXT NOT NULL,
+        purchase_id TEXT NOT NULL,
+        buyer_user_id TEXT NOT NULL,
+        method TEXT NOT NULL,
+        gross_usd DOUBLE PRECISION NOT NULL,
+        gross_idr INTEGER NOT NULL,
+        commission_percent INTEGER NOT NULL,
+        net_usd DOUBLE PRECISION NOT NULL,
+        net_idr INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "payouts",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS payouts (
+        id TEXT PRIMARY KEY,
+        creator_id TEXT NOT NULL,
+        creator_name TEXT NOT NULL,
+        amount_usd DOUBLE PRECISION NOT NULL,
+        amount_idr INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        method TEXT NOT NULL,
+        destination TEXT NOT NULL,
+        status TEXT NOT NULL,
+        admin_note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "idempotency_records",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS idempotency_records (
+        full_key TEXT PRIMARY KEY,
+        status INTEGER NOT NULL,
+        body_json JSONB NOT NULL,
+        created_at_ms BIGINT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "processed_webhooks",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS processed_webhooks (
+        event_key TEXT PRIMARY KEY,
+        processed_at_ms BIGINT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "creator_media",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS creator_media (
+        video_id TEXT PRIMARY KEY,
+        creator_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        asset_ref TEXT NOT NULL,
+        mime_type TEXT,
+        updated_at_iso TEXT NOT NULL
+      )
+    `
+  },
+  {
+    tableName: "platform_settings",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS platform_settings (
+        id TEXT PRIMARY KEY,
+        commission_percent INTEGER NOT NULL DEFAULT 20,
+        min_price_usd DOUBLE PRECISION NOT NULL DEFAULT 1.99,
+        min_price_idr INTEGER NOT NULL DEFAULT 29000
+      )
+    `
+  },
+  {
+    tableName: "video_deletion_jobs",
+    ddl: sql`
+      CREATE TABLE IF NOT EXISTS video_deletion_jobs (
+        operation_id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        video_title_snapshot TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        asset_ref_fingerprint TEXT NOT NULL,
+        requested_by TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        status TEXT NOT NULL,
+        provider_result TEXT NOT NULL DEFAULT 'pending',
+        firestore_result TEXT NOT NULL DEFAULT 'pending',
+        sql_result TEXT NOT NULL DEFAULT 'pending',
+        thumbnail_result TEXT NOT NULL DEFAULT 'skipped',
+        external_media_warning TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        completed_at TEXT
+      )
+    `
+  }
+];
 async function ensureSqlTablesExist() {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      uid TEXT NOT NULL UNIQUE,
-      email TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    )
+  const existingResult = await db.execute(sql`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
   `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS wallets (
-      user_id TEXT PRIMARY KEY,
-      balance_credits INTEGER NOT NULL DEFAULT 0,
-      total_spent_credits INTEGER NOT NULL DEFAULT 0,
-      updated_at_ms BIGINT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS wallet_transactions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      credits_delta INTEGER NOT NULL,
-      description TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS payments (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      user_email TEXT,
-      purpose TEXT NOT NULL,
-      target_id TEXT NOT NULL,
-      target_title TEXT NOT NULL,
-      method TEXT NOT NULL,
-      amount DOUBLE PRECISION NOT NULL,
-      currency TEXT NOT NULL,
-      credits_delta INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL,
-      gateway_order_id TEXT NOT NULL,
-      gateway_mode TEXT NOT NULL,
-      approval_url TEXT,
-      qr_string TEXT,
-      expires_at TEXT,
-      refunded_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS purchases (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      video_id TEXT NOT NULL,
-      video_title TEXT NOT NULL,
-      method TEXT NOT NULL,
-      amount DOUBLE PRECISION NOT NULL,
-      currency TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS entitlements (
-      composite_key TEXT PRIMARY KEY,
-      id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      video_id TEXT NOT NULL,
-      video_title TEXT NOT NULL,
-      thumbnail_url TEXT NOT NULL DEFAULT '',
-      granted_at_ms BIGINT NOT NULL,
-      expires_at_ms BIGINT NOT NULL,
-      resume_seconds INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'active',
-      source TEXT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS creator_earnings (
-      id TEXT PRIMARY KEY,
-      creator_id TEXT NOT NULL,
-      video_id TEXT NOT NULL,
-      video_title TEXT NOT NULL,
-      purchase_id TEXT NOT NULL,
-      buyer_user_id TEXT NOT NULL,
-      method TEXT NOT NULL,
-      gross_usd DOUBLE PRECISION NOT NULL,
-      gross_idr INTEGER NOT NULL,
-      commission_percent INTEGER NOT NULL,
-      net_usd DOUBLE PRECISION NOT NULL,
-      net_idr INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS payouts (
-      id TEXT PRIMARY KEY,
-      creator_id TEXT NOT NULL,
-      creator_name TEXT NOT NULL,
-      amount_usd DOUBLE PRECISION NOT NULL,
-      amount_idr INTEGER NOT NULL,
-      currency TEXT NOT NULL,
-      method TEXT NOT NULL,
-      destination TEXT NOT NULL,
-      status TEXT NOT NULL,
-      admin_note TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS idempotency_records (
-      full_key TEXT PRIMARY KEY,
-      status INTEGER NOT NULL,
-      body_json JSONB NOT NULL,
-      created_at_ms BIGINT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS processed_webhooks (
-      event_key TEXT PRIMARY KEY,
-      processed_at_ms BIGINT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS creator_media (
-      video_id TEXT PRIMARY KEY,
-      creator_id TEXT NOT NULL,
-      provider TEXT NOT NULL,
-      asset_ref TEXT NOT NULL,
-      mime_type TEXT,
-      updated_at_iso TEXT NOT NULL
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS platform_settings (
-      id TEXT PRIMARY KEY,
-      commission_percent INTEGER NOT NULL DEFAULT 20,
-      min_price_usd DOUBLE PRECISION NOT NULL DEFAULT 1.99,
-      min_price_idr INTEGER NOT NULL DEFAULT 29000
-    )
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS video_deletion_jobs (
-      operation_id TEXT PRIMARY KEY,
-      video_id TEXT NOT NULL,
-      video_title_snapshot TEXT NOT NULL,
-      provider TEXT NOT NULL,
-      asset_ref_fingerprint TEXT NOT NULL,
-      requested_by TEXT NOT NULL,
-      requested_at TEXT NOT NULL,
-      status TEXT NOT NULL,
-      provider_result TEXT NOT NULL DEFAULT 'pending',
-      firestore_result TEXT NOT NULL DEFAULT 'pending',
-      sql_result TEXT NOT NULL DEFAULT 'pending',
-      thumbnail_result TEXT NOT NULL DEFAULT 'skipped',
-      external_media_warning TEXT,
-      error_code TEXT,
-      error_message TEXT,
-      completed_at TEXT
-    )
-  `);
+  const existingTables = new Set(
+    (existingResult.rows ?? []).map((row) => String(row.table_name ?? "").trim()).filter(Boolean)
+  );
+  const missingTables = TABLE_DDL_STATEMENTS.filter(
+    ({ tableName }) => !existingTables.has(tableName)
+  );
+  if (missingTables.length === 0) {
+    return;
+  }
+  for (const { tableName, ddl } of missingTables) {
+    try {
+      await db.execute(ddl);
+    } catch (err) {
+      const code = err?.code ?? err?.cause?.code;
+      if (code === "42501") {
+        throw new Error(
+          `Database table "${tableName}" is missing and the runtime SQL role lacks schema CREATE privileges. Push the Drizzle schema using admin credentials.`,
+          { cause: err }
+        );
+      }
+      throw err;
+    }
+  }
 }
 async function ensureLegacyLedgerMigrated() {
   if (!isSqlConfigured()) {
