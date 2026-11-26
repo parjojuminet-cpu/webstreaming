@@ -40,18 +40,18 @@ export const InfoPage: React.FC<InfoPageProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-6 sm:space-y-8">
+    <div className="max-w-4xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6">
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex items-center gap-2 min-h-[44px] text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+        className="inline-flex items-center gap-1.5 min-h-[38px] text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
       >
         <ArrowLeft className="w-4 h-4" aria-hidden="true" />
         <span>{locale === 'id' ? 'Kembali ke Beranda' : 'Back to Home'}</span>
       </button>
 
       {section === 'about' && (
-        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-10 space-y-5 sm:space-y-6 shadow-xs">
+        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 space-y-4 sm:space-y-5 shadow-xs">
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Tentang DELOKEN' : 'About DELOKEN'}
           </h1>
@@ -96,7 +96,7 @@ export const InfoPage: React.FC<InfoPageProps> = ({
       )}
 
       {section === 'guidelines' && (
-        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-10 space-y-5 sm:space-y-6 shadow-xs">
+        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 space-y-4 sm:space-y-5 shadow-xs">
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Panduan Kreator DELOKEN' : 'DELOKEN Creator Guidelines'}
           </h1>
@@ -140,7 +140,7 @@ export const InfoPage: React.FC<InfoPageProps> = ({
       )}
 
       {section === 'terms' && (
-        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-10 space-y-5 shadow-xs">
+        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 space-y-4 sm:space-y-5 shadow-xs">
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Syarat & Ketentuan' : 'Terms of Service'}
           </h1>
@@ -180,7 +180,7 @@ export const InfoPage: React.FC<InfoPageProps> = ({
       )}
 
       {section === 'privacy' && (
-        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-10 space-y-5 shadow-xs">
+        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 space-y-4 sm:space-y-5 shadow-xs">
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Kebijakan Privasi' : 'Privacy Policy'}
           </h1>
@@ -220,7 +220,7 @@ export const InfoPage: React.FC<InfoPageProps> = ({
       )}
 
       {section === 'contact' && (
-        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-10 space-y-5 sm:space-y-6 shadow-xs">
+        <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 space-y-4 sm:space-y-5 shadow-xs">
           <div className="space-y-2">
             <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
               {locale === 'id' ? 'Hubungi DELOKEN' : 'Contact DELOKEN'}

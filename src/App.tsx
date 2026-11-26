@@ -221,7 +221,7 @@ const DelokenAppShell: React.FC<{
         onNavigate={navigate}
       />
 
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-14 md:pb-0">
         {route === 'home' && (
           <HomePage
             catalog={mergedCatalog}

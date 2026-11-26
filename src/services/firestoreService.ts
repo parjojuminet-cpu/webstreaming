@@ -260,6 +260,57 @@ export function subscribePublicCreators(
   );
 }
 
+function extractTimestampMs(raw: unknown, fallbackDateStr?: unknown): number {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return raw;
+  }
+  if (raw && typeof raw === 'object') {
+    const candidate = raw as { toMillis?: () => number; seconds?: number; nanoseconds?: number };
+    if (typeof candidate.toMillis === 'function') {
+      const ms = candidate.toMillis();
+      if (Number.isFinite(ms)) return ms;
+    }
+    if (typeof candidate.seconds === 'number' && Number.isFinite(candidate.seconds)) {
+      return candidate.seconds * 1000 + Math.floor((candidate.nanoseconds || 0) / 1e6);
+    }
+  }
+  if (typeof raw === 'string') {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (typeof fallbackDateStr === 'string' && fallbackDateStr.trim()) {
+    const parsed = Date.parse(fallbackDateStr);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function mapVideoSnapshotDoc(id: string, data: Record<string, unknown>): ContentItem {
+  const createdAtMs = extractTimestampMs(data.createdAt, data.publishedAt);
+  const updatedAtMs = extractTimestampMs(data.updatedAt, data.publishedAt) || createdAtMs;
+  return {
+    ...(data as unknown as ContentItem),
+    id,
+    createdAtMs,
+    updatedAtMs,
+    credits: (data.credits as ContentItem['credits']) || {
+      director: String(data.creatorName || 'DELOKEN Creator'),
+      cinematography: String(data.creatorName || 'DELOKEN Studio'),
+      sound: 'DELOKEN Mastering',
+    },
+  };
+}
+
+function sortVideosNewestFirst(list: ContentItem[]): ContentItem[] {
+  return [...list].sort((a, b) => {
+    const timeDiff =
+      (b.createdAtMs || b.updatedAtMs || Date.parse(b.publishedAt || '') || 0) -
+      (a.createdAtMs || a.updatedAtMs || Date.parse(a.publishedAt || '') || 0);
+    if (timeDiff !== 0) return timeDiff;
+    return b.id.localeCompare(a.id);
+  });
+}
+
 export function subscribePublishedVideos(
   callback: (videos: ContentItem[]) => void
 ): Unsubscribe {
@@ -268,19 +319,10 @@ export function subscribePublishedVideos(
   return onSnapshot(
     q,
     (snapshot) => {
-      const list = snapshot.docs.map((d) => {
-        const data = d.data() as Record<string, unknown>;
-        return {
-          ...(data as unknown as ContentItem),
-          id: d.id,
-          credits: (data.credits as ContentItem['credits']) || {
-            director: String(data.creatorName || 'DELOKEN Creator'),
-            cinematography: String(data.creatorName || 'DELOKEN Studio'),
-            sound: 'DELOKEN Mastering',
-          },
-        };
-      });
-      callback(list);
+      const list = snapshot.docs.map((d) =>
+        mapVideoSnapshotDoc(d.id, d.data() as Record<string, unknown>)
+      );
+      callback(sortVideosNewestFirst(list));
     },
     (error) => handleFirestoreError(error, OperationType.LIST, path)
   );
@@ -295,19 +337,10 @@ export function subscribeCreatorVideos(
   return onSnapshot(
     q,
     (snapshot) => {
-      const list = snapshot.docs.map((d) => {
-        const data = d.data() as Record<string, unknown>;
-        return {
-          ...(data as unknown as ContentItem),
-          id: d.id,
-          credits: (data.credits as ContentItem['credits']) || {
-            director: String(data.creatorName || ''),
-            cinematography: String(data.creatorName || ''),
-            sound: 'DELOKEN Studio',
-          },
-        };
-      });
-      callback(list);
+      const list = snapshot.docs.map((d) =>
+        mapVideoSnapshotDoc(d.id, d.data() as Record<string, unknown>)
+      );
+      callback(sortVideosNewestFirst(list));
     },
     (error) => handleFirestoreError(error, OperationType.LIST, path)
   );
@@ -667,20 +700,10 @@ export function subscribeAdminVideos(
   return onSnapshot(
     collection(db, 'videos'),
     (snap) => {
-      callback(
-        snap.docs.map((d) => {
-          const data = d.data() as Record<string, unknown>;
-          return {
-            ...(data as unknown as ContentItem),
-            id: d.id,
-            credits: (data.credits as ContentItem['credits']) || {
-              director: String(data.creatorName || ''),
-              cinematography: String(data.creatorName || ''),
-              sound: 'DELOKEN Studio',
-            },
-          };
-        })
+      const list = snap.docs.map((d) =>
+        mapVideoSnapshotDoc(d.id, d.data() as Record<string, unknown>)
       );
+      callback(sortVideosNewestFirst(list));
     },
     (error) => handleFirestoreError(error, OperationType.LIST, path)
   );

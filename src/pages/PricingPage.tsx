@@ -27,16 +27,16 @@ export const PricingPage: React.FC<PricingPageProps> = ({
   onNavigate,
 }) => {
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-10 sm:space-y-16">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-10">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-5 pb-6 sm:pb-8 border-b border-slate-200 dark:border-slate-800">
-        <div className="max-w-2xl space-y-3">
-          <h1 className="font-display text-2xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-slate-900 dark:text-white">
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-3.5 pb-4 sm:pb-6 border-b border-slate-200 dark:border-slate-800">
+        <div className="max-w-2xl space-y-1.5 sm:space-y-2">
+          <h1 className="font-display text-xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900 dark:text-white">
             {locale === 'id'
               ? 'Bayar Hanya untuk Apa yang Anda Tonton'
               : 'Pay Only for What You Watch'}
           </h1>
-          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
             {locale === 'id'
               ? 'Tidak ada biaya langganan bulanan berulang. Tonton pratinjau gratis 5 menit pada setiap judul, lalu buka akses penuh 30 hari per tayangan atau dengan Dompet Kredit.'
               : 'No recurring subscription lock-in. Watch a free five-minute preview on any title, then unlock full 30-day streaming access per release or via Credit Wallet.'}
@@ -48,7 +48,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({
           <button
             type="button"
             onClick={() => onChangeCurrency('USD')}
-            className={`min-h-[44px] sm:min-h-[38px] px-4 py-2 rounded-lg text-xs font-mono font-semibold transition-colors cursor-pointer ${
+            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-mono font-semibold transition-colors cursor-pointer ${
               currency === 'USD'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
@@ -59,7 +59,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({
           <button
             type="button"
             onClick={() => onChangeCurrency('IDR')}
-            className={`min-h-[44px] sm:min-h-[38px] px-4 py-2 rounded-lg text-xs font-mono font-semibold transition-colors cursor-pointer ${
+            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-mono font-semibold transition-colors cursor-pointer ${
               currency === 'IDR'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
@@ -71,8 +71,8 @@ export const PricingPage: React.FC<PricingPageProps> = ({
       </header>
 
       {/* Two Ways to Unlock */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-7 space-y-4 shadow-xs">
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-6">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 space-y-2.5 sm:space-y-3.5 shadow-xs">
           <div className="w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 text-emerald-700 dark:text-emerald-400 flex items-center justify-center">
             <CreditCard className="w-5 h-5" aria-hidden="true" />
           </div>
@@ -104,20 +104,20 @@ export const PricingPage: React.FC<PricingPageProps> = ({
           </ul>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-7 space-y-4 shadow-xs">
-          <div className="w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 text-emerald-700 dark:text-emerald-400 flex items-center justify-center">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 space-y-2.5 sm:space-y-3.5 shadow-xs">
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/70 text-emerald-700 dark:text-emerald-400 flex items-center justify-center">
             <Wallet className="w-5 h-5" aria-hidden="true" />
           </div>
-          <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
+          <h2 className="font-display text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Dompet Kredit DELOKEN' : 'DELOKEN Credit Wallet'}
           </h2>
-          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
             {locale === 'id'
               ? 'Isi saldo kredit satu kali dan buka berbagai film, dokumenter, atau kelas master dengan sekali klik tanpa perlu checkout ulang setiap saat.'
               : 'Top up credits once with bonus allocations and unlock any release in one click without repeated checkout friction.'}
           </p>
-          <ul className="space-y-2 pt-2 text-sm text-slate-700 dark:text-slate-200">
-            <li className="flex items-center gap-2.5">
+          <ul className="space-y-1.5 pt-1 text-xs sm:text-sm text-slate-700 dark:text-slate-200">
+            <li className="flex items-center gap-2">
               <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
               <span>
                 {locale === 'id'
@@ -125,7 +125,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({
                   : 'Purchased credits never expire'}
               </span>
             </li>
-            <li className="flex items-center gap-2.5">
+            <li className="flex items-center gap-2">
               <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
               <span>
                 {locale === 'id'
@@ -138,35 +138,35 @@ export const PricingPage: React.FC<PricingPageProps> = ({
       </section>
 
       {/* Credit Packages */}
-      <section aria-labelledby="packages-heading" className="space-y-6">
-        <div className="space-y-2">
+      <section aria-labelledby="packages-heading" className="space-y-4 sm:space-y-5">
+        <div className="space-y-1">
           <h2
             id="packages-heading"
-            className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white"
+            className="font-display text-lg sm:text-2xl font-bold text-slate-900 dark:text-white"
           >
             {locale === 'id' ? 'Paket Dompet Kredit' : 'Credit Wallet Packages'}
           </h2>
-          <p className="text-sm text-slate-600 dark:text-slate-300">
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300">
             {locale === 'id'
               ? 'Pilih paket kredit untuk menikmati tayangan 4K HDR lebih hemat.'
               : 'Pre-load credits with bonus value for cinema premieres and masterclasses.'}
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 sm:gap-5">
           {packages.map((pkg) => {
             const totalCredits = pkg.credits + pkg.bonusCredits;
             return (
               <div
                 key={pkg.id}
-                className={`flex flex-col rounded-2xl p-6 bg-white dark:bg-slate-900 border transition-colors ${
+                className={`flex flex-col rounded-2xl p-4 sm:p-6 bg-white dark:bg-slate-900 border transition-colors ${
                   pkg.recommended
                     ? 'border-emerald-600 dark:border-emerald-500 shadow-lg shadow-emerald-600/10'
                     : 'border-slate-200 dark:border-slate-800 shadow-xs'
                 }`}
               >
-                <div className="flex items-center justify-between gap-2 mb-4">
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                <div className="flex items-center justify-between gap-2 mb-2.5 sm:mb-4">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
                     {locale === 'id' ? pkg.nameId : pkg.name}
                   </h3>
                   {pkg.recommended && (
@@ -176,11 +176,11 @@ export const PricingPage: React.FC<PricingPageProps> = ({
                   )}
                 </div>
 
-                <div className="mb-4">
-                  <div className="text-3xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                <div className="mb-3 sm:mb-4">
+                  <div className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                     {formatPrice(pkg.priceUsd, pkg.priceIdr, currency)}
                   </div>
-                  <div className="text-xs font-mono tabular-nums text-emerald-700 dark:text-emerald-400 font-semibold mt-1">
+                  <div className="text-xs font-mono tabular-nums text-emerald-700 dark:text-emerald-400 font-semibold mt-0.5">
                     {totalCredits} {locale === 'id' ? 'Total Kredit' : 'Total Credits'}
                     {pkg.bonusCredits > 0
                       ? ` (${pkg.credits} + ${pkg.bonusCredits} bonus)`
@@ -188,7 +188,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({
                   </div>
                 </div>
 
-                <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-6 flex-1">
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4 sm:mb-5 flex-1">
                   {locale === 'id' ? pkg.descriptionId : pkg.description}
                 </p>
 
@@ -207,7 +207,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({
       </section>
 
       {/* Supported Global & Indonesian Payment Methods */}
-      <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-7 sm:p-9 grid grid-cols-1 md:grid-cols-3 gap-8 shadow-xs">
+      <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-7 grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-7 shadow-xs">
         <div className="space-y-2">
           <div className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
             <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />

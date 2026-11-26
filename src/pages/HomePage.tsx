@@ -61,21 +61,21 @@ export const HomePage: React.FC<HomePageProps> = ({
   }, [catalog, selectedCategory]);
 
   return (
-    <div className="space-y-12 sm:space-y-16 lg:space-y-20 pb-10">
+    <div className="space-y-7 sm:space-y-12 lg:space-y-14 pb-4 sm:pb-8">
       {/* 1. INITIAL MOVIE & STREAMING GALLERY (Above the fold on open) */}
       <section
         aria-labelledby="movie-gallery-heading"
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-10 space-y-5 sm:space-y-7"
+        className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-3 sm:pt-7 space-y-3 sm:space-y-5"
       >
-        <div className="flex items-start sm:items-end justify-between gap-3 pb-4 sm:pb-5 border-b border-slate-200 dark:border-slate-800">
-          <div className="space-y-1.5 min-w-0">
+        <div className="flex items-start sm:items-end justify-between gap-2.5 pb-2.5 sm:pb-4 border-b border-slate-200 dark:border-slate-800">
+          <div className="space-y-0.5 sm:space-y-1 min-w-0">
             <h1
               id="movie-gallery-heading"
-              className="font-display text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900 dark:text-white"
+              className="font-display text-base sm:text-2xl lg:text-3xl font-bold tracking-tight text-slate-900 dark:text-white leading-snug"
             >
               {dict.sections.galleryHeading}
             </h1>
-            <p className="text-xs sm:text-base text-slate-600 dark:text-slate-400 max-w-2xl">
+            <p className="text-[11px] sm:text-sm text-slate-600 dark:text-slate-400 leading-snug line-clamp-2 sm:line-clamp-none max-w-2xl">
               {dict.sections.gallerySubtitle}
             </p>
           </div>
@@ -83,10 +83,10 @@ export const HomePage: React.FC<HomePageProps> = ({
           <button
             type="button"
             onClick={() => onNavigate('explore')}
-            className="inline-flex items-center gap-1 min-h-[44px] -mt-1 sm:mt-0 text-xs sm:text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[40px] -mt-1 sm:mt-0 text-xs sm:text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
             <span>{dict.sections.viewAll}</span>
-            <ArrowRight className="w-4 h-4" aria-hidden="true" />
+            <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" aria-hidden="true" />
           </button>
         </div>
 
@@ -94,14 +94,14 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div
           role="tablist"
           aria-label={dict.sections.exploreCategories}
-          className="deloken-scroll flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0"
+          className="deloken-scroll flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 -mx-3 px-3 sm:mx-0 sm:px-0"
         >
           <button
             type="button"
             role="tab"
             aria-selected={selectedCategory === 'All'}
             onClick={() => setSelectedCategory('All')}
-            className={`min-h-[40px] px-4 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            className={`min-h-[34px] sm:min-h-[38px] px-3 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
               selectedCategory === 'All'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
@@ -122,7 +122,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 role="tab"
                 aria-selected={active}
                 onClick={() => setSelectedCategory(category)}
-                className={`min-h-[40px] px-4 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                className={`min-h-[34px] sm:min-h-[38px] px-3 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                   active
                     ? 'bg-emerald-600 text-white shadow-xs'
                     : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
@@ -173,7 +173,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             }}
           />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-5">
             {galleryItems.map((item) => (
               <ContentCard
                 key={item.id}
@@ -192,24 +192,24 @@ export const HomePage: React.FC<HomePageProps> = ({
       {/* 2. FEATURED CREATORS */}
       <section
         aria-labelledby="creators-heading"
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+        className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8"
       >
-        <div className="flex items-start sm:items-end justify-between gap-3 sm:gap-4 mb-5 sm:mb-7">
-          <div className="space-y-1 sm:space-y-1.5 min-w-0">
+        <div className="flex items-start sm:items-end justify-between gap-3 mb-3.5 sm:mb-6">
+          <div className="space-y-0.5 sm:space-y-1 min-w-0">
             <h2
               id="creators-heading"
-              className="font-display text-xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white"
+              className="font-display text-lg sm:text-2xl lg:text-3xl font-bold tracking-tight text-slate-900 dark:text-white"
             >
               {dict.sections.featuredCreators}
             </h2>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 max-w-2xl line-clamp-2 sm:line-clamp-none">
               {dict.sections.creatorsSubtitle}
             </p>
           </div>
           <button
             type="button"
             onClick={() => onNavigate('explore')}
-            className="inline-flex items-center gap-1 min-h-[44px] -mt-1.5 sm:mt-0 text-xs sm:text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[40px] -mt-1 sm:mt-0 text-xs sm:text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
             <span>{dict.sections.viewAll}</span>
             <ArrowRight className="w-4 h-4" aria-hidden="true" />
@@ -228,11 +228,11 @@ export const HomePage: React.FC<HomePageProps> = ({
             onAction={() => onNavigate('creator-dashboard')}
           />
         ) : (
-          <div className="deloken-scroll flex sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 overflow-x-auto sm:overflow-visible pb-2 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-pl-4 sm:scroll-pl-0">
+          <div className="deloken-scroll flex sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 overflow-x-auto sm:overflow-visible pb-1 sm:pb-0 -mx-3 px-3 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-pl-3 sm:scroll-pl-0">
             {creators.map((creator) => (
               <div
                 key={creator.id}
-                className="snap-start shrink-0 w-[78vw] max-w-[300px] sm:w-auto sm:max-w-none"
+                className="snap-start shrink-0 w-[68vw] max-w-[260px] sm:w-auto sm:max-w-none"
               >
                 <CreatorCard
                   creator={creator}
@@ -248,24 +248,24 @@ export const HomePage: React.FC<HomePageProps> = ({
       {/* 3. HOW DELOKEN WORKS */}
       <section
         aria-labelledby="how-heading"
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+        className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8"
       >
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-10 shadow-xs">
-          <div className="max-w-2xl mb-6 sm:mb-9 space-y-1.5 sm:space-y-2">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 shadow-xs">
+          <div className="max-w-2xl mb-4 sm:mb-6 space-y-1">
             <h2
               id="how-heading"
-              className="font-display text-xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white"
+              className="font-display text-lg sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white"
             >
               {dict.sections.howItWorks}
             </h2>
-            <p className="text-xs sm:text-base text-slate-600 dark:text-slate-400">
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
               {dict.sections.howItWorksSubtitle}
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200 dark:divide-slate-800 pt-5 sm:pt-6 border-t border-slate-200 dark:border-slate-800">
-            <div className="space-y-1.5 sm:space-y-2.5 py-4 first:pt-0 md:py-0 md:pr-6">
-              <h3 className="text-sm sm:text-lg font-semibold text-slate-900 dark:text-white">
+          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200 dark:divide-slate-800 pt-3.5 sm:pt-5 border-t border-slate-200 dark:border-slate-800">
+            <div className="space-y-1 sm:space-y-2 py-3 first:pt-0 md:py-0 md:pr-6">
+              <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
                 {dict.howSteps.step1Title}
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
@@ -273,8 +273,8 @@ export const HomePage: React.FC<HomePageProps> = ({
               </p>
             </div>
 
-            <div className="space-y-1.5 sm:space-y-2.5 py-4 md:py-0 md:px-6">
-              <h3 className="text-sm sm:text-lg font-semibold text-slate-900 dark:text-white">
+            <div className="space-y-1 sm:space-y-2 py-3 md:py-0 md:px-6">
+              <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
                 {dict.howSteps.step2Title}
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
@@ -282,8 +282,8 @@ export const HomePage: React.FC<HomePageProps> = ({
               </p>
             </div>
 
-            <div className="space-y-1.5 sm:space-y-2.5 py-4 last:pb-0 md:py-0 md:pl-6">
-              <h3 className="text-sm sm:text-lg font-semibold text-slate-900 dark:text-white">
+            <div className="space-y-1 sm:space-y-2 py-3 last:pb-0 md:py-0 md:pl-6">
+              <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
                 {dict.howSteps.step3Title}
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
@@ -297,29 +297,29 @@ export const HomePage: React.FC<HomePageProps> = ({
       {/* 4. CALL TO ACTION — BECOME A DELOKEN CREATOR */}
       <section
         aria-labelledby="creator-cta-heading"
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+        className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8"
       >
-        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/70 p-6 sm:p-10 lg:p-12 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-6 sm:gap-8">
-          <div className="max-w-2xl space-y-3">
-            <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-              <Sparkles className="w-4 h-4" aria-hidden="true" />
+        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/70 p-4 sm:p-8 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
+          <div className="max-w-2xl space-y-1.5 sm:space-y-2.5">
+            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+              <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
               <span>DELOKEN Creator Economy</span>
             </div>
             <h2
               id="creator-cta-heading"
-              className="font-display text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900 dark:text-white"
+              className="font-display text-lg sm:text-2xl lg:text-3xl font-bold tracking-tight text-slate-900 dark:text-white"
             >
               {dict.cta.heading}
             </h2>
-            <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
               {dict.cta.body}
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 shrink-0">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 shrink-0">
             <Button
               variant="primary"
-              size="lg"
+              size="md"
               className="w-full sm:w-auto"
               onClick={() => onNavigate('signup')}
             >
@@ -327,7 +327,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </Button>
             <Button
               variant="outline"
-              size="lg"
+              size="md"
               className="w-full sm:w-auto"
               onClick={() => onNavigate('guidelines')}
             >

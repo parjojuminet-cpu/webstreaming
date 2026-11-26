@@ -142,7 +142,7 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
     },
     sections: {
       galleryHeading: 'Curated Learning, DIY & Documentary Catalog',
-      gallerySubtitle: 'Select any documentary, practical workshop, or independent release to stream a 5-minute free preview immediately.',
+      gallerySubtitle: 'Stream a 5-minute free preview on any documentary, workshop, or release.',
       allCategories: 'All',
       trendingNow: 'Trending Now',
       trendingSubtitle: 'Most watched Pay-Per-View releases across Indonesia and international audiences.',
@@ -211,7 +211,7 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
     },
     sections: {
       galleryHeading: 'Katalog Edukasi, DIY & Dokumenter',
-      gallerySubtitle: 'Pilih film dokumenter, kelas keterampilan praktis, atau karya independen untuk langsung menonton pratinjau gratis 5 menit.',
+      gallerySubtitle: 'Langsung tonton pratinjau gratis 5 menit untuk dokumenter, kelas, atau rilisan pilihan.',
       allCategories: 'Semua',
       trendingNow: 'Sedang Tren',
       trendingSubtitle: 'Rilisan Pay-Per-View paling banyak ditonton di Indonesia dan mancanegara.',

@@ -167,6 +167,8 @@ export interface ContentItem {
   trending?: boolean;
   recentlyAdded?: boolean;
   featuredHero?: boolean;
+  createdAtMs?: number;
+  updatedAtMs?: number;
   rating: number;
   reviewCount: number;
   credits: {

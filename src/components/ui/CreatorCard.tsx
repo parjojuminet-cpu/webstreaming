@@ -22,9 +22,9 @@ export const CreatorCard: React.FC<CreatorCardProps> = ({
   const bioText = locale === 'id' ? creator.bioId : creator.bio;
 
   return (
-    <article className="flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-600 dark:hover:border-emerald-500 rounded-xl p-5 shadow-xs transition-colors duration-200">
-      <div className="flex items-center gap-4 mb-4">
-        <div className="w-14 h-14 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-100 dark:bg-slate-800">
+    <article className="flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-600 dark:hover:border-emerald-500 rounded-xl p-3.5 sm:p-5 shadow-xs transition-colors duration-200">
+      <div className="flex items-center gap-3 sm:gap-4 mb-2.5 sm:mb-4">
+        <div className="w-11 h-11 sm:w-14 sm:h-14 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-100 dark:bg-slate-800">
           <MediaImage
             src={creator.avatarUrl}
             alt={creator.name}
@@ -34,7 +34,7 @@ export const CreatorCard: React.FC<CreatorCardProps> = ({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <h3 className="text-base font-semibold text-slate-900 dark:text-white truncate">
+            <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white truncate">
               {creator.name}
             </h3>
             {creator.verified && (
@@ -44,14 +44,14 @@ export const CreatorCard: React.FC<CreatorCardProps> = ({
               />
             )}
           </div>
-          <p className="text-xs text-slate-600 dark:text-slate-400 truncate">{creator.role}</p>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
+          <p className="text-[11px] sm:text-xs text-slate-600 dark:text-slate-400 truncate">{creator.role}</p>
+          <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums truncate">
             {specialtyLabel} · {creator.contentCount} {dict.cards.titles}
           </p>
         </div>
       </div>
 
-      <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-2 mb-5 flex-1">
+      <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-2 mb-3.5 sm:mb-5 flex-1">
         {bioText}
       </p>
 

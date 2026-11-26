@@ -162,9 +162,9 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
   const synopsis = locale === 'id' ? item.descriptionId : item.description;
 
   return (
-    <div className="pb-16">
+    <div className="pb-8 sm:pb-12">
       {/* Cinematic Backdrop Header (high-contrast slate-950 scrim over 16:9 key art) */}
-      <section className="relative min-h-[380px] sm:min-h-[460px] lg:min-h-[540px] flex items-end overflow-hidden border-b border-slate-200 dark:border-slate-800 bg-slate-950">
+      <section className="relative min-h-[280px] sm:min-h-[420px] lg:min-h-[480px] flex items-end overflow-hidden border-b border-slate-200 dark:border-slate-800 bg-slate-950">
         <div className="absolute inset-0">
           <MediaImage
             src={item.backdropUrl}
@@ -183,18 +183,18 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
           />
         </div>
 
-        <div className="relative z-10 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-6 sm:pt-10 pb-8 sm:pb-12 space-y-4 sm:space-y-6">
+        <div className="relative z-10 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 pt-3 sm:pt-8 pb-5 sm:pb-10 space-y-2.5 sm:space-y-5">
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex items-center gap-2 min-h-[44px] text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 min-h-[36px] text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" aria-hidden="true" />
             <span>{locale === 'id' ? 'Kembali ke Katalog' : 'Back to Catalog'}</span>
           </button>
 
-          <div className="max-w-3xl space-y-3 sm:space-y-4">
-            <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-slate-300">
+          <div className="max-w-3xl space-y-2 sm:space-y-3.5">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-sm text-slate-300">
               <span className="text-emerald-400 font-semibold">{categoryLabel}</span>
               <span aria-hidden="true">·</span>
               <span className="font-mono tabular-nums">
@@ -211,11 +211,11 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
               </span>
             </div>
 
-            <h1 className="font-display text-2xl sm:text-5xl font-bold tracking-tight text-white leading-tight">
+            <h1 className="font-display text-xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-white leading-tight">
               {item.title}
             </h1>
 
-            <p className="text-sm sm:text-lg text-slate-200 leading-relaxed">
+            <p className="text-xs sm:text-base text-slate-200 leading-relaxed line-clamp-2 sm:line-clamp-none">
               {item.subtitle}
             </p>
 
@@ -277,20 +277,20 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
       </section>
 
       {/* Main Content Layout: Synopsis + Credits flow first on mobile; sticky Access sidebar on lg desktop */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-8 grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8">
         {/* Left Column: Synopsis, Technical Specs, Credits, Reviews */}
-        <div className="lg:col-span-8 space-y-7 sm:space-y-10">
-          <section className="space-y-2.5 sm:space-y-3">
-            <h2 className="font-display text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
+        <div className="lg:col-span-8 space-y-5 sm:space-y-8">
+          <section className="space-y-1.5 sm:space-y-2.5">
+            <h2 className="font-display text-base sm:text-xl font-bold text-slate-900 dark:text-white">
               {locale === 'id' ? 'Sinopsis' : 'Synopsis'}
             </h2>
-            <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">{synopsis}</p>
+            <p className="text-xs sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">{synopsis}</p>
           </section>
 
           {/* Creator & Production Credits */}
-          <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 sm:space-y-6 shadow-xs">
+          <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 shadow-xs">
             {creator && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pb-4 sm:pb-5 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-100 dark:bg-slate-800">
                     <MediaImage
@@ -665,25 +665,21 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
 
       {/* Related Releases */}
       {relatedItems.length > 0 && (
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 sm:pt-16 space-y-4 sm:space-y-6">
-          <h2 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
+        <section className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-6 sm:pt-12 space-y-3 sm:space-y-5">
+          <h2 className="font-display text-lg sm:text-2xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Tayangan Terkait' : 'More to Experience'}
           </h2>
-          <div className="deloken-scroll flex sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 overflow-x-auto sm:overflow-visible pb-2 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-pl-4 sm:scroll-pl-0">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-5">
             {relatedItems.map((rel) => (
-              <div
+              <ContentCard
                 key={rel.id}
-                className="snap-start shrink-0 w-[82vw] max-w-[310px] sm:w-auto sm:max-w-none"
-              >
-                <ContentCard
-                  item={rel}
-                  locale={locale}
-                  currency={currency}
-                  onSelectContent={onSelectContent}
-                  onWatchPreview={onWatchPreview}
-                  onSelectCreator={onExploreCreator}
-                />
-              </div>
+                item={rel}
+                locale={locale}
+                currency={currency}
+                onSelectContent={onSelectContent}
+                onWatchPreview={onWatchPreview}
+                onSelectCreator={onExploreCreator}
+              />
             ))}
           </div>
         </section>

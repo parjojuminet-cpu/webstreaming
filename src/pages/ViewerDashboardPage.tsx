@@ -270,11 +270,11 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
   const activeEntitlements = mergedEntitlements.filter((e) => e.status === 'active');
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-slate-200 dark:border-slate-800">
-        <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
-          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 shrink-0">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3.5 sm:pb-5 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+          <div className="w-11 h-11 sm:w-14 sm:h-14 rounded-full overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 shrink-0">
             <MediaImage
               src={userProfile?.photoURL || firebaseUser.photoURL || ''}
               alt={userProfile?.displayName || 'User'}
@@ -283,17 +283,17 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
             />
           </div>
           <div className="min-w-0">
-            <p className="text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
+            <p className="text-[11px] sm:text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
               {locale === 'id' ? 'Dasbor Penonton' : 'Viewer Workspace'}
             </p>
-            <h1 className="font-display text-xl sm:text-3xl font-bold text-slate-900 dark:text-white truncate">
+            <h1 className="font-display text-lg sm:text-2xl font-bold text-slate-900 dark:text-white truncate">
               {userProfile?.displayName || firebaseUser.displayName || 'DELOKEN Member'}
             </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{firebaseUser.email}</p>
+            <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 truncate">{firebaseUser.email}</p>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2.5 sm:gap-3">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-2.5">
           {isAdmin && (
             <Button
               variant="outline"
@@ -335,7 +335,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
       <div
         role="tablist"
         aria-label="Viewer dashboard sections"
-        className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 deloken-scroll"
+        className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 -mx-3 px-3 sm:mx-0 sm:px-0 deloken-scroll"
       >
         {tabs.map((tab) => {
           const active = activeTab === tab.id;
@@ -346,7 +346,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
               role="tab"
               aria-selected={active}
               onClick={() => setActiveTab(tab.id)}
-              className={`min-h-[44px] sm:min-h-[40px] inline-flex items-center gap-2 px-4 py-2 rounded-xl sm:rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+              className={`min-h-[38px] inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                 active
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
@@ -370,43 +370,43 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
 
       {/* OVERVIEW */}
       {activeTab === 'overview' && (
-        <div className="space-y-6 sm:space-y-8">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-1 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+        <div className="space-y-4 sm:space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 space-y-0.5 shadow-xs">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Akses Aktif (30 Hari)' : 'Active 30-Day Access'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+              <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                 {activeEntitlements.length}
               </p>
             </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-1 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 space-y-0.5 shadow-xs">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Saldo Dompet Kredit' : 'Credit Wallet Balance'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
+              <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
                 {effectiveWallet?.balanceCredits ?? 0}
               </p>
             </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-1 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 space-y-0.5 shadow-xs">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Total Pembelian' : 'Total Purchases'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+              <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                 {mergedPurchases.length}
               </p>
             </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-1 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 space-y-0.5 shadow-xs">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Peran Akun' : 'Account Role'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold capitalize text-slate-900 dark:text-white">
+              <p className="text-lg sm:text-2xl font-bold capitalize text-slate-900 dark:text-white">
                 {userProfile?.role ?? 'viewer'}
               </p>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-8 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-5 sm:gap-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1.5 max-w-xl">
               <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white">
                 {locale === 'id'
@@ -455,7 +455,7 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
               icon={<Film className="w-6 h-6" />}
             />
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-5">
               {mergedEntitlements.map((ent) => {
                 const catalogMatch = catalog.find((c) => c.id === ent.videoId);
                 const playableItem: ContentItem = catalogMatch ?? {
@@ -493,9 +493,9 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                 return (
                   <article
                     key={ent.id}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden p-4 flex flex-col justify-between gap-3 shadow-xs"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden p-2.5 sm:p-4 flex flex-col justify-between gap-2.5 sm:gap-3 shadow-xs"
                   >
-                    <div className="space-y-3">
+                    <div className="space-y-2 sm:space-y-3">
                       <div className="aspect-video rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800">
                         <MediaImage
                           src={ent.thumbnailUrl || playableItem.thumbnailUrl}

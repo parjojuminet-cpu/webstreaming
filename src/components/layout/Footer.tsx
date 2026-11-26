@@ -28,20 +28,20 @@ export const Footer: React.FC<FooterProps> = ({
   const dict = TRANSLATIONS[locale];
 
   return (
-    <footer className="bg-white dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 mt-10 md:mt-20 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-24 md:py-14">
-        <div className="grid grid-cols-2 lg:grid-cols-12 gap-8 md:gap-10">
+    <footer className="bg-white dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 mt-6 md:mt-12 transition-colors">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-7 pb-20 md:py-10">
+        <div className="grid grid-cols-2 lg:grid-cols-12 gap-5 md:gap-8">
           {/* Brand & Internationalization Controls */}
-          <div className="col-span-2 lg:col-span-4 space-y-4">
+          <div className="col-span-2 lg:col-span-4 space-y-3">
             <button
               type="button"
               onClick={() => onNavigate('home')}
-              className="inline-flex items-center cursor-pointer min-h-[44px]"
+              className="inline-flex items-center cursor-pointer min-h-[40px]"
               aria-label="DELOKEN Home"
             >
               <DelokenLogo size="sm" />
             </button>
-            <p className="text-sm text-slate-600 dark:text-slate-400 max-w-xs leading-relaxed">
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 max-w-xs leading-relaxed">
               {dict.tagline}
             </p>
 
@@ -241,7 +241,7 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
         </div>
 
-        <div className="mt-10 pt-6 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
+        <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs text-slate-500 dark:text-slate-400">
           <p>
             © {new Date().getFullYear()} {dict.footer.rights}
           </p>

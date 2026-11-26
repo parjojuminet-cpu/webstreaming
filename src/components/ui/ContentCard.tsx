@@ -129,9 +129,9 @@ export const ContentCard: React.FC<ContentCardProps> = ({
           />
         </button>
 
-        {/* Bottom overlay row: unboxed duration + preview trigger */}
-        <div className="absolute inset-x-3 bottom-2.5 flex items-center justify-between gap-2 pointer-events-none">
-          <span className="text-xs font-mono tabular-nums text-white font-medium tracking-tight drop-shadow-xs">
+        {/* Bottom overlay row: unboxed duration + compact mobile play button */}
+        <div className="absolute inset-x-2 sm:inset-x-3 bottom-1.5 sm:bottom-2.5 flex items-center justify-between gap-1.5 sm:gap-2 pointer-events-none">
+          <span className="text-[10px] sm:text-xs font-mono tabular-nums text-white font-medium tracking-tight drop-shadow-xs">
             {formatDuration(item.durationMinutes, locale)}
           </span>
 
@@ -141,33 +141,36 @@ export const ContentCard: React.FC<ContentCardProps> = ({
               e.stopPropagation();
               onWatchPreview(item);
             }}
-            className="pointer-events-auto inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-900/85 hover:bg-emerald-600 active:bg-emerald-700 text-white text-xs font-medium border border-white/20 transition-colors duration-150 cursor-pointer whitespace-nowrap shrink-0"
+            aria-label={`${isFree ? dict.cards.watchFree : dict.cards.watchPreview}: ${item.title}`}
+            className="pointer-events-auto inline-flex items-center justify-center gap-1.5 w-8 h-8 sm:w-auto sm:h-auto sm:min-h-[34px] sm:px-3 sm:py-1 rounded-lg bg-slate-900/85 hover:bg-emerald-600 active:bg-emerald-700 text-white text-xs font-medium border border-white/20 transition-colors duration-150 cursor-pointer whitespace-nowrap shrink-0"
           >
-            <Play className="w-3 h-3 fill-current" aria-hidden="true" />
-            <span>{isFree ? dict.cards.watchFree : dict.cards.watchPreview}</span>
+            <Play className="w-3.5 h-3.5 sm:w-3 sm:h-3 fill-current" aria-hidden="true" />
+            <span className="hidden sm:inline">
+              {isFree ? dict.cards.watchFree : dict.cards.watchPreview}
+            </span>
           </button>
         </div>
       </div>
 
-      {/* Card Body: Clean unboxed metadata + Title + Creator + Price */}
-      <div className="flex flex-col flex-1 p-4 min-w-0">
-        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-1.5 truncate">
+      {/* Card Body: Compact 2-col mobile & full desktop layout */}
+      <div className="flex flex-col flex-1 p-2.5 sm:p-4 min-w-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mb-0.5 sm:mb-1.5 truncate">
           <span className="text-emerald-700 dark:text-emerald-400 font-semibold truncate">{categoryLabel}</span>
-          <span aria-hidden="true">·</span>
-          <span className="tabular-nums shrink-0">{item.resolution}</span>
+          <span className="hidden sm:inline" aria-hidden="true">·</span>
+          <span className="hidden sm:inline tabular-nums shrink-0">{item.resolution}</span>
         </div>
 
-        <h3 className="text-base font-semibold text-slate-900 dark:text-white leading-snug mb-1">
+        <h3 className="text-xs sm:text-base font-semibold text-slate-900 dark:text-white leading-snug mb-0.5 sm:mb-1">
           <button
             type="button"
             onClick={() => onSelectContent(item)}
-            className="w-full text-left truncate hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors cursor-pointer"
+            className="w-full text-left line-clamp-2 sm:line-clamp-1 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors cursor-pointer"
           >
             {item.title}
           </button>
         </h3>
 
-        <div className="text-xs text-slate-500 dark:text-slate-400 mb-4 truncate">
+        <div className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mb-2 sm:mb-3.5 truncate">
           {onSelectCreator ? (
             <button
               type="button"
@@ -177,14 +180,14 @@ export const ContentCard: React.FC<ContentCardProps> = ({
               {item.creatorName}
             </button>
           ) : (
-            <span>{item.creatorName}</span>
+            <span className="truncate block">{item.creatorName}</span>
           )}
         </div>
 
-        <div className="mt-auto pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2.5">
+        <div className="mt-auto pt-1.5 sm:pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
           <div className="flex flex-col min-w-0">
             <span
-              className={`text-sm font-semibold font-mono tabular-nums truncate ${
+              className={`text-xs sm:text-sm font-semibold font-mono tabular-nums truncate ${
                 isFree
                   ? 'text-emerald-700 dark:text-emerald-400'
                   : 'text-slate-900 dark:text-white'
@@ -192,7 +195,7 @@ export const ContentCard: React.FC<ContentCardProps> = ({
             >
               {formatReleasePrice(item, locale, currency)}
             </span>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            <span className="hidden sm:block text-[11px] text-slate-500 dark:text-slate-400 truncate">
               {isFree ? dict.cards.freeAccess : dict.cards.access30Days}
             </span>
           </div>
@@ -200,7 +203,7 @@ export const ContentCard: React.FC<ContentCardProps> = ({
           <button
             type="button"
             onClick={() => onSelectContent(item)}
-            className="min-h-[44px] sm:min-h-[40px] px-3.5 py-2 rounded-lg text-xs font-semibold text-slate-800 dark:text-slate-100 bg-slate-50 dark:bg-slate-800 hover:bg-emerald-600 dark:hover:bg-emerald-600 hover:text-white border border-slate-200 dark:border-slate-700 hover:border-transparent transition-colors duration-150 cursor-pointer whitespace-nowrap shrink-0"
+            className="hidden sm:inline-flex items-center justify-center min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-800 dark:text-slate-100 bg-slate-50 dark:bg-slate-800 hover:bg-emerald-600 dark:hover:bg-emerald-600 hover:text-white border border-slate-200 dark:border-slate-700 hover:border-transparent transition-colors duration-150 cursor-pointer whitespace-nowrap shrink-0"
           >
             {dict.cards.viewDetails}
           </button>

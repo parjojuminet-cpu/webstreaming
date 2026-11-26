@@ -181,7 +181,10 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     setLoadingDeletionJobs(true);
     try {
       const jobs = await fetchAdminVideoDeletionJobs();
-      setDeletionJobs(jobs);
+      const sortedJobs = [...jobs].sort(
+        (a, b) => (Date.parse(b.requestedAt || '') || 0) - (Date.parse(a.requestedAt || '') || 0)
+      );
+      setDeletionJobs(sortedJobs);
     } catch {
       // Non-fatal if deletion audit logs cannot be loaded yet
     } finally {
@@ -549,19 +552,44 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     }
   };
 
-  const activeVideos = videos.filter(
-    (v) =>
-      v.status === 'published' ||
-      v.status === 'pending_review' ||
-      v.status === 'approved' ||
-      v.status === 'draft'
-  );
-  const removedVideos = videos.filter(
-    (v) =>
-      v.status === 'archived' ||
-      v.status === 'rejected' ||
-      v.status === 'deletion_pending'
-  );
+  const activeRank = (status: ContentStatus): number => {
+    if (status === 'pending_review') return 0;
+    if (status === 'approved') return 1;
+    if (status === 'draft') return 2;
+    return 3;
+  };
+
+  const getVideoRecencyMs = (v: ContentItem): number =>
+    v.createdAtMs || v.updatedAtMs || Date.parse(v.publishedAt || '') || 0;
+
+  const activeVideos = videos
+    .filter(
+      (v) =>
+        v.status === 'published' ||
+        v.status === 'pending_review' ||
+        v.status === 'approved' ||
+        v.status === 'draft'
+    )
+    .sort((a, b) => {
+      const rankDiff = activeRank(a.status) - activeRank(b.status);
+      if (rankDiff !== 0) return rankDiff;
+      const timeDiff = getVideoRecencyMs(b) - getVideoRecencyMs(a);
+      if (timeDiff !== 0) return timeDiff;
+      return b.id.localeCompare(a.id);
+    });
+
+  const removedVideos = videos
+    .filter(
+      (v) =>
+        v.status === 'archived' ||
+        v.status === 'rejected' ||
+        v.status === 'deletion_pending'
+    )
+    .sort((a, b) => {
+      const timeDiff = getVideoRecencyMs(b) - getVideoRecencyMs(a);
+      if (timeDiff !== 0) return timeDiff;
+      return b.id.localeCompare(a.id);
+    });
 
   const publishedCount = activeVideos.filter((v) => v.status === 'published').length;
   const approvedDraftCount = activeVideos.filter(
@@ -870,14 +898,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-slate-200 dark:border-slate-800">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-            <Shield className="w-4 h-4" aria-hidden="true" />
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 pb-3.5 sm:pb-5 border-b border-slate-200 dark:border-slate-800">
+        <div className="space-y-0.5 sm:space-y-1">
+          <div className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+            <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4" aria-hidden="true" />
             <span>DELOKEN Admin Console</span>
           </div>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
+          <h1 className="font-display text-lg sm:text-2xl lg:text-3xl font-bold text-slate-900 dark:text-white">
             {locale === 'id' ? 'Manajemen & Moderasi Platform' : 'Platform Operations & Moderation'}
           </h1>
         </div>
@@ -887,7 +915,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       <div
         role="tablist"
         aria-label="Admin dashboard sections"
-        className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 deloken-scroll"
+        className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 -mx-3 px-3 sm:mx-0 sm:px-0 deloken-scroll"
       >
         {[
           { id: 'overview' as AdminTab, label: locale === 'id' ? 'Ringkasan' : 'Overview', icon: <Shield className="w-4 h-4" /> },
@@ -905,7 +933,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             role="tab"
             aria-selected={activeTab === tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`min-h-[44px] sm:min-h-[40px] inline-flex items-center gap-2 px-4 py-2 rounded-xl sm:rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            className={`min-h-[38px] inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
               activeTab === tab.id
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
@@ -919,45 +947,45 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
       {/* OVERVIEW */}
       {activeTab === 'overview' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+        <div className="space-y-4 sm:space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 shadow-xs">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Total Pengguna' : 'Total Users'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
+              <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
                 {users.length}
               </p>
             </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 shadow-xs">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Kreator' : 'Creators'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
+              <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
                 {creators.length}
               </p>
             </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 shadow-xs">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Menunggu Moderasi' : 'Pending Moderation'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1">
+              <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-0.5">
                 {pendingVideos.length}
               </p>
             </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 shadow-xs">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Akses Aktif (30 Hari)' : 'Active Entitlements'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
+              <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
                 {financeOverview?.activeEntitlementsCount ?? 0}
               </p>
             </div>
-            <div className="col-span-2 lg:col-span-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="col-span-2 lg:col-span-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 shadow-xs">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                 {locale === 'id' ? 'Komisi Platform' : 'Platform Commission'}
               </p>
-              <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
+              <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
                 {financeOverview?.commissionPercent ??
                   settings?.commissionPercent ??
                   commissionPercent}
@@ -1240,21 +1268,21 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
             {/* LEFT PANEL: ACTIVE & PENDING MODERATION TABLE */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden flex flex-col">
-              <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="p-3.5 sm:p-4 border-b border-slate-200 dark:border-slate-800 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h2 className="font-display text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                    <h2 className="font-display text-sm sm:text-base font-bold text-slate-900 dark:text-white">
                       {locale === 'id'
                         ? `Video Aktif & Moderasi (${activeVideos.length})`
                         : `Active & Pending Videos (${activeVideos.length})`}
                     </h2>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
                       {locale === 'id'
-                        ? 'Tayangan tampil publik, pengajuan baru, dan draf aktif. Centang untuk aksi massal.'
-                        : 'Live titles, pending submissions, and active drafts. Select checkboxes for bulk actions.'}
+                        ? 'Pengajuan baru & video terbaru tampil di baris teratas. Centang untuk aksi massal.'
+                        : 'Pending & newest submissions are pinned at the top. Select checkboxes for bulk actions.'}
                     </p>
                   </div>
                 </div>

@@ -87,13 +87,13 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-12 space-y-5 sm:space-y-8">
-      <div className="flex items-start md:items-end justify-between gap-3 pb-4 sm:pb-6 border-b border-slate-200 dark:border-slate-800">
-        <div className="space-y-1.5 sm:space-y-2 min-w-0">
-          <h1 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-white">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-3.5 sm:space-y-6">
+      <div className="flex items-start md:items-end justify-between gap-3 pb-3 sm:pb-5 border-b border-slate-200 dark:border-slate-800">
+        <div className="space-y-0.5 sm:space-y-1.5 min-w-0">
+          <h1 className="font-display text-lg sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
             {locale === 'id' ? 'Jelajahi Katalog DELOKEN' : 'Explore DELOKEN Catalog'}
           </h1>
-          <p className="text-xs sm:text-base text-slate-600 dark:text-slate-400 max-w-2xl">
+          <p className="text-[11px] sm:text-sm text-slate-600 dark:text-slate-400 max-w-2xl line-clamp-2 sm:line-clamp-none">
             {locale === 'id'
               ? 'Temukan film panjang, dokumenter, kelas master, dan pertunjukan langsung. Setiap judul memiliki pratinjau gratis 5 menit.'
               : 'Browse curated films, documentaries, masterclasses, and live events. Every title includes a five-minute free preview.'}
@@ -107,7 +107,7 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
             window.setTimeout(() => setPreviewSkeleton(false), 650);
           }}
           aria-label={locale === 'id' ? 'Segarkan Katalog' : 'Refresh Catalog'}
-          className="inline-flex items-center justify-center gap-2 shrink-0 min-h-[40px] min-w-[40px] sm:min-h-[38px] px-2.5 sm:px-3.5 py-2 rounded-xl sm:rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer whitespace-nowrap shadow-xs"
+          className="inline-flex items-center justify-center gap-2 shrink-0 min-h-[38px] min-w-[38px] px-2.5 sm:px-3.5 py-1.5 rounded-xl sm:rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer whitespace-nowrap shadow-xs"
         >
           <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
           <span className="hidden sm:inline">{locale === 'id' ? 'Segarkan Katalog' : 'Refresh Catalog'}</span>
@@ -115,9 +115,9 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
       </div>
 
       {/* Category Filter Tabs & Search/Sort Controls */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-4">
         <div
-          className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 deloken-scroll"
+          className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 -mx-3 px-3 sm:mx-0 sm:px-0 deloken-scroll"
           role="tablist"
           aria-label="Filter by category"
         >
@@ -126,7 +126,7 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
             role="tab"
             aria-selected={selectedCategory === 'All'}
             onClick={() => onChangeCategory('All')}
-            className={`min-h-[44px] sm:min-h-[40px] px-4 py-2 rounded-xl sm:rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            className={`min-h-[36px] sm:min-h-[38px] px-3 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
               selectedCategory === 'All'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
@@ -145,7 +145,7 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
                 role="tab"
                 aria-selected={active}
                 onClick={() => onChangeCategory(category)}
-                className={`min-h-[44px] sm:min-h-[40px] px-4 py-2 rounded-xl sm:rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                className={`min-h-[36px] sm:min-h-[38px] px-3 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                   active
                     ? 'bg-emerald-600 text-white shadow-xs'
                     : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
@@ -157,35 +157,35 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
           })}
         </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:gap-3">
           <input
             type="search"
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
             placeholder={
-              locale === 'id' ? 'Saring judul atau kreator...' : 'Filter title or creator...'
+              locale === 'id' ? 'Saring judul...' : 'Filter title...'
             }
             aria-label="Filter catalog"
-            className="min-h-[44px] sm:min-h-[40px] px-3.5 py-2 rounded-xl sm:rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+            className="min-w-0 min-h-[38px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-600"
           />
 
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortOption)}
             aria-label="Sort catalog"
-            className="min-h-[44px] sm:min-h-[40px] px-3.5 py-2 rounded-xl sm:rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600 cursor-pointer"
+            className="min-w-0 min-h-[38px] px-2.5 sm:px-3.5 py-1.5 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600 cursor-pointer"
           >
             <option value="trending">
-              {locale === 'id' ? 'Urutkan: Sedang Tren' : 'Sort: Trending'}
+              {locale === 'id' ? 'Urut: Tren' : 'Sort: Trending'}
             </option>
             <option value="recent">
-              {locale === 'id' ? 'Urutkan: Terbaru' : 'Sort: Recently Added'}
+              {locale === 'id' ? 'Urut: Terbaru' : 'Sort: Recent'}
             </option>
             <option value="price-asc">
-              {locale === 'id' ? 'Urutkan: Harga Terendah' : 'Sort: Price Low to High'}
+              {locale === 'id' ? 'Urut: Termurah' : 'Sort: Lowest Price'}
             </option>
             <option value="duration">
-              {locale === 'id' ? 'Urutkan: Durasi Terpanjang' : 'Sort: Longest Runtime'}
+              {locale === 'id' ? 'Urut: Terpanjang' : 'Sort: Longest'}
             </option>
           </select>
         </div>
@@ -213,7 +213,7 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
 
       {/* Results Grid / Skeleton / Empty State */}
       {previewSkeleton ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-5">
           {Array.from({ length: 4 }).map((_, idx) => (
             <ContentCardSkeleton key={idx} />
           ))}
@@ -230,7 +230,7 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
           onAction={resetFilters}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-5">
           {filteredItems.map((item) => (
             <ContentCard
               key={item.id}
