@@ -8,6 +8,7 @@ import {
   Flag,
   RefreshCw,
   RotateCcw,
+  Search,
   Settings,
   Shield,
   Trash2,
@@ -39,6 +40,7 @@ import {
 import {
   AdminVideoApiError,
   adminArchiveVideoApi,
+  adminBulkDeleteVideosApi,
   adminDeleteVideoPermanentlyApi,
   adminRestoreVideoApi,
   fetchAdminVideoAssetInfo,
@@ -116,8 +118,25 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const [processingActionId, setProcessingActionId] = useState<string | null>(null);
   const [payoutNotes, setPayoutNotes] = useState<Record<string, string>>({});
 
-  type ModerationFilter = 'all' | 'pending_review' | 'published' | 'archived' | 'other';
-  const [moderationFilter, setModerationFilter] = useState<ModerationFilter>('all');
+  type ActiveModerationFilter = 'all' | 'pending_review' | 'published' | 'approved_draft';
+  type RemovedModerationFilter = 'all' | 'archived' | 'rejected' | 'deletion_pending';
+  type RemovedPanelTab = 'archived_rejected' | 'deleted_history';
+
+  const [activeModerationFilter, setActiveModerationFilter] =
+    useState<ActiveModerationFilter>('all');
+  const [activeSearchQuery, setActiveSearchQuery] = useState('');
+  const [removedPanelTab, setRemovedPanelTab] =
+    useState<RemovedPanelTab>('archived_rejected');
+  const [removedModerationFilter, setRemovedModerationFilter] =
+    useState<RemovedModerationFilter>('all');
+  const [removedSearchQuery, setRemovedSearchQuery] = useState('');
+
+  const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
+  const [selectedRemovedIds, setSelectedRemovedIds] = useState<string[]>([]);
+  const [bulkNoteActive, setBulkNoteActive] = useState('');
+  const [bulkNoteRemoved, setBulkNoteRemoved] = useState('');
+  const [bulkProcessingSide, setBulkProcessingSide] = useState<'active' | 'removed' | null>(null);
+
   const [videoActionFeedback, setVideoActionFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -132,12 +151,27 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     submitting: boolean;
   } | null>(null);
 
+  const [bulkRestoreModal, setBulkRestoreModal] = useState<{
+    videos: ContentItem[];
+    missingOriginCount: number;
+    targetStatus: Exclude<ContentStatus, 'archived' | 'deletion_pending'>;
+    error: string | null;
+    submitting: boolean;
+  } | null>(null);
+
   const [deleteModal, setDeleteModal] = useState<{
     videoId: string;
     fallbackTitle: string;
     loadingInfo: boolean;
     assetInfo: AdminVideoAssetInfo | null;
     latestJob: VideoDeletionJobRecord | null;
+    confirmationInput: string;
+    submitting: boolean;
+    error: string | null;
+  } | null>(null);
+
+  const [bulkDeleteModal, setBulkDeleteModal] = useState<{
+    items: ContentItem[];
     confirmationInput: string;
     submitting: boolean;
     error: string | null;
@@ -194,6 +228,32 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       u5();
     };
   }, [authReady, firebaseUser, isAdmin, financeRetryTick]);
+
+  useEffect(() => {
+    const activeIdSet = new Set(
+      videos
+        .filter(
+          (v) =>
+            v.status === 'published' ||
+            v.status === 'pending_review' ||
+            v.status === 'approved' ||
+            v.status === 'draft'
+        )
+        .map((v) => v.id)
+    );
+    const removedIdSet = new Set(
+      videos
+        .filter(
+          (v) =>
+            v.status === 'archived' ||
+            v.status === 'rejected' ||
+            v.status === 'deletion_pending'
+        )
+        .map((v) => v.id)
+    );
+    setSelectedActiveIds((prev) => prev.filter((id) => activeIdSet.has(id)));
+    setSelectedRemovedIds((prev) => prev.filter((id) => removedIdSet.has(id)));
+  }, [videos]);
 
   if (!authReady) {
     return <DashboardSkeleton />;
@@ -489,20 +549,310 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     }
   };
 
-  const archivedCount = videos.filter((v) => v.status === 'archived').length;
-  const publishedCount = videos.filter((v) => v.status === 'published').length;
-  const filteredVideos = videos.filter((v) => {
-    if (moderationFilter === 'all') return true;
-    if (moderationFilter === 'pending_review') return v.status === 'pending_review';
-    if (moderationFilter === 'published') return v.status === 'published';
-    if (moderationFilter === 'archived') return v.status === 'archived';
-    return (
-      v.status === 'draft' ||
+  const activeVideos = videos.filter(
+    (v) =>
+      v.status === 'published' ||
+      v.status === 'pending_review' ||
       v.status === 'approved' ||
+      v.status === 'draft'
+  );
+  const removedVideos = videos.filter(
+    (v) =>
+      v.status === 'archived' ||
       v.status === 'rejected' ||
       v.status === 'deletion_pending'
+  );
+
+  const publishedCount = activeVideos.filter((v) => v.status === 'published').length;
+  const approvedDraftCount = activeVideos.filter(
+    (v) => v.status === 'approved' || v.status === 'draft'
+  ).length;
+  const archivedCount = removedVideos.filter((v) => v.status === 'archived').length;
+  const rejectedCount = removedVideos.filter((v) => v.status === 'rejected').length;
+  const deletionPendingCount = removedVideos.filter(
+    (v) => v.status === 'deletion_pending'
+  ).length;
+
+  const normalizedActiveSearch = activeSearchQuery.trim().toLowerCase();
+  const filteredActiveVideos = activeVideos.filter((v) => {
+    const matchesStatus =
+      activeModerationFilter === 'all'
+        ? true
+        : activeModerationFilter === 'pending_review'
+        ? v.status === 'pending_review'
+        : activeModerationFilter === 'published'
+        ? v.status === 'published'
+        : v.status === 'approved' || v.status === 'draft';
+    if (!matchesStatus) return false;
+    if (!normalizedActiveSearch) return true;
+    return (
+      v.title.toLowerCase().includes(normalizedActiveSearch) ||
+      v.creatorName.toLowerCase().includes(normalizedActiveSearch) ||
+      v.category.toLowerCase().includes(normalizedActiveSearch) ||
+      v.id.toLowerCase().includes(normalizedActiveSearch)
     );
   });
+
+  const normalizedRemovedSearch = removedSearchQuery.trim().toLowerCase();
+  const filteredRemovedVideos = removedVideos.filter((v) => {
+    const matchesStatus =
+      removedModerationFilter === 'all'
+        ? true
+        : v.status === removedModerationFilter;
+    if (!matchesStatus) return false;
+    if (!normalizedRemovedSearch) return true;
+    return (
+      v.title.toLowerCase().includes(normalizedRemovedSearch) ||
+      v.creatorName.toLowerCase().includes(normalizedRemovedSearch) ||
+      v.category.toLowerCase().includes(normalizedRemovedSearch) ||
+      v.id.toLowerCase().includes(normalizedRemovedSearch)
+    );
+  });
+
+  const selectedActiveItems = activeVideos.filter((v) => selectedActiveIds.includes(v.id));
+  const selectedRemovedItems = removedVideos.filter((v) => selectedRemovedIds.includes(v.id));
+
+  const allFilteredActiveSelected =
+    filteredActiveVideos.length > 0 &&
+    filteredActiveVideos.every((v) => selectedActiveIds.includes(v.id));
+  const allFilteredRemovedSelected =
+    filteredRemovedVideos.length > 0 &&
+    filteredRemovedVideos.every((v) => selectedRemovedIds.includes(v.id));
+
+  const toggleActiveSelection = (videoId: string) => {
+    setSelectedActiveIds((prev) =>
+      prev.includes(videoId) ? prev.filter((id) => id !== videoId) : [...prev, videoId]
+    );
+  };
+
+  const toggleRemovedSelection = (videoId: string) => {
+    setSelectedRemovedIds((prev) =>
+      prev.includes(videoId) ? prev.filter((id) => id !== videoId) : [...prev, videoId]
+    );
+  };
+
+  const toggleSelectAllActive = () => {
+    const visibleIds = filteredActiveVideos.map((v) => v.id);
+    if (visibleIds.length === 0) return;
+    if (allFilteredActiveSelected) {
+      setSelectedActiveIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedActiveIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const toggleSelectAllRemoved = () => {
+    const visibleIds = filteredRemovedVideos.map((v) => v.id);
+    if (visibleIds.length === 0) return;
+    if (allFilteredRemovedSelected) {
+      setSelectedRemovedIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedRemovedIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleBulkActiveAction = async (
+    action: 'approve_publish' | 'approve_only' | 'reject' | 'archive'
+  ) => {
+    if (selectedActiveItems.length === 0) return;
+    setVideoActionFeedback(null);
+    setBulkProcessingSide('active');
+    let okCount = 0;
+    let failCount = 0;
+    const note = bulkNoteActive.trim();
+
+    for (const vid of selectedActiveItems) {
+      try {
+        if (action === 'approve_publish') {
+          if (vid.status === 'published') {
+            okCount += 1;
+            continue;
+          }
+          const finalNote = note || moderationNotes[vid.id] || 'Approved & published in bulk';
+          if (vid.status !== 'approved') {
+            await adminModerateVideo(vid.id, 'approved', finalNote);
+          }
+          await adminModerateVideo(vid.id, 'published', finalNote);
+          okCount += 1;
+        } else if (action === 'approve_only') {
+          if (vid.status === 'published') {
+            okCount += 1;
+            continue;
+          }
+          await adminModerateVideo(
+            vid.id,
+            'approved',
+            note || moderationNotes[vid.id] || 'Approved in bulk'
+          );
+          okCount += 1;
+        } else if (action === 'reject') {
+          await adminModerateVideo(
+            vid.id,
+            'rejected',
+            note || moderationNotes[vid.id] || 'Rejected in bulk by Admin'
+          );
+          okCount += 1;
+        } else if (action === 'archive') {
+          await adminArchiveVideoApi(
+            vid.id,
+            note || moderationNotes[vid.id] || 'Archived in bulk by Admin'
+          );
+          okCount += 1;
+        }
+      } catch {
+        failCount += 1;
+      }
+    }
+
+    setBulkProcessingSide(null);
+    setSelectedActiveIds([]);
+    const actionLabelId =
+      action === 'approve_publish'
+        ? 'disetujui & ditayangkan'
+        : action === 'approve_only'
+        ? 'disetujui'
+        : action === 'reject'
+        ? 'ditolak dan dipindahkan ke panel kanan'
+        : 'diarsipkan dan dipindahkan ke panel kanan';
+    const actionLabelEn =
+      action === 'approve_publish'
+        ? 'approved & published'
+        : action === 'approve_only'
+        ? 'approved'
+        : action === 'reject'
+        ? 'rejected and moved to the right panel'
+        : 'archived and moved to the right panel';
+
+    setVideoActionFeedback({
+      type: failCount > 0 && okCount === 0 ? 'error' : 'success',
+      message:
+        locale === 'id'
+          ? `${okCount} video berhasil ${actionLabelId}${failCount > 0 ? ` (${failCount} gagal diproses)` : ''}.`
+          : `${okCount} videos ${actionLabelEn}${failCount > 0 ? ` (${failCount} failed)` : ''}.`,
+    });
+  };
+
+  const runBulkRestore = async (
+    targets: ContentItem[],
+    fallbackTargetStatus?: Exclude<ContentStatus, 'archived' | 'deletion_pending'>
+  ) => {
+    setVideoActionFeedback(null);
+    setBulkProcessingSide('removed');
+    let okCount = 0;
+    let failCount = 0;
+    const note = bulkNoteRemoved.trim();
+
+    for (const vid of targets) {
+      try {
+        if (vid.status === 'archived') {
+          await adminRestoreVideoApi(vid.id, {
+            ...(vid.previousStatus ? {} : { targetStatus: fallbackTargetStatus || 'draft' }),
+            moderationNote: note || moderationNotes[vid.id],
+          });
+          okCount += 1;
+        } else if (vid.status === 'rejected') {
+          await adminModerateVideo(
+            vid.id,
+            fallbackTargetStatus || 'draft',
+            note || moderationNotes[vid.id] || 'Restored from rejected by Admin'
+          );
+          okCount += 1;
+        }
+      } catch {
+        failCount += 1;
+      }
+    }
+
+    setBulkProcessingSide(null);
+    setSelectedRemovedIds([]);
+    setVideoActionFeedback({
+      type: failCount > 0 && okCount === 0 ? 'error' : 'success',
+      message:
+        locale === 'id'
+          ? `${okCount} video dipulihkan kembali ke panel aktif${failCount > 0 ? ` (${failCount} gagal)` : ''}.`
+          : `${okCount} videos restored to the active panel${failCount > 0 ? ` (${failCount} failed)` : ''}.`,
+    });
+  };
+
+  const handleBulkRestoreClick = async () => {
+    const restorable = selectedRemovedItems.filter(
+      (v) => v.status === 'archived' || v.status === 'rejected'
+    );
+    if (restorable.length === 0) return;
+    const missingOriginCount = restorable.filter(
+      (v) => v.status === 'rejected' || !v.previousStatus
+    ).length;
+    if (missingOriginCount > 0) {
+      setBulkRestoreModal({
+        videos: restorable,
+        missingOriginCount,
+        targetStatus: 'draft',
+        error: null,
+        submitting: false,
+      });
+      return;
+    }
+    await runBulkRestore(restorable);
+  };
+
+  const handleConfirmBulkRestore = async () => {
+    if (!bulkRestoreModal) return;
+    setBulkRestoreModal((prev) => (prev ? { ...prev, submitting: true, error: null } : null));
+    await runBulkRestore(bulkRestoreModal.videos, bulkRestoreModal.targetStatus);
+    setBulkRestoreModal(null);
+  };
+
+  const openBulkDeleteModal = (items: ContentItem[]) => {
+    if (items.length === 0) return;
+    setVideoActionFeedback(null);
+    setBulkDeleteModal({
+      items: items.slice(0, 50),
+      confirmationInput: '',
+      submitting: false,
+      error: null,
+    });
+  };
+
+  const handleExecuteBulkDelete = async () => {
+    if (!bulkDeleteModal) return;
+    setBulkDeleteModal((prev) => (prev ? { ...prev, submitting: true, error: null } : null));
+    try {
+      const res = await adminBulkDeleteVideosApi(
+        bulkDeleteModal.items.map((v) => v.id),
+        bulkDeleteModal.confirmationInput
+      );
+      setSelectedActiveIds((prev) =>
+        prev.filter((id) => !bulkDeleteModal.items.some((it) => it.id === id))
+      );
+      setSelectedRemovedIds((prev) =>
+        prev.filter((id) => !bulkDeleteModal.items.some((it) => it.id === id))
+      );
+      setVideoActionFeedback({
+        type: res.failedCount > 0 && res.deletedCount === 0 ? 'error' : 'success',
+        message:
+          locale === 'id'
+            ? `${res.deletedCount} video dihapus permanen${res.failedCount > 0 ? `, ${res.failedCount} gagal (cek tab Sudah Dihapus Permanen)` : ''}. Catatan keuangan & pendapatan kreator tetap aman.`
+            : `${res.deletedCount} videos permanently deleted${res.failedCount > 0 ? `, ${res.failedCount} failed` : ''}. Financial records and creator earnings were preserved.`,
+      });
+      setBulkDeleteModal(null);
+      setRemovedPanelTab('deleted_history');
+      void refreshDeletionJobs();
+    } catch (err) {
+      void refreshDeletionJobs();
+      setBulkDeleteModal((prev) =>
+        prev
+          ? {
+              ...prev,
+              submitting: false,
+              error:
+                err instanceof Error
+                  ? err.message
+                  : 'Penghapusan massal gagal dijalankan.',
+            }
+          : null
+      );
+    }
+  };
 
   const providerLabel = (provider?: string) => {
     if (provider === 'cloudflare_stream') return 'Cloudflare Stream';
@@ -866,35 +1216,9 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         </section>
       )}
 
-      {/* CONTENT MODERATION */}
+      {/* CONTENT MODERATION (2-COLUMN SPLIT: ACTIVE LEFT vs ARCHIVED/DELETED RIGHT + BULK CHECKBOXES) */}
       {activeTab === 'moderation' && (
-        <section className="space-y-6">
-          {/* Moderation Filter Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {[
-                { id: 'all' as ModerationFilter, label: `${locale === 'id' ? 'Semua' : 'All'} (${videos.length})` },
-                { id: 'pending_review' as ModerationFilter, label: `${locale === 'id' ? 'Menunggu Review' : 'Pending'} (${pendingVideos.length})` },
-                { id: 'published' as ModerationFilter, label: `${locale === 'id' ? 'Tayang' : 'Published'} (${publishedCount})` },
-                { id: 'archived' as ModerationFilter, label: `${locale === 'id' ? 'Diarsipkan' : 'Archived'} (${archivedCount})` },
-                { id: 'other' as ModerationFilter, label: locale === 'id' ? 'Draft / Lainnya' : 'Draft / Other' },
-              ].map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => setModerationFilter(f.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                    moderationFilter === f.id
-                      ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
-                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
+        <section className="space-y-5">
           {videoActionFeedback && (
             <div
               role={videoActionFeedback.type === 'error' ? 'alert' : 'status'}
@@ -916,296 +1240,659 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             </div>
           )}
 
-          {filteredVideos.length === 0 ? (
-            <EmptyState
-              title={
-                locale === 'id'
-                  ? 'Tidak ada video pada filter ini'
-                  : 'No videos match this filter'
-              }
-              description={
-                locale === 'id'
-                  ? 'Pengajuan video kreator, tayangan aktif, dan arsip akan muncul di sini.'
-                  : 'Creator submissions, published titles, and archived content appear here.'
-              }
-            />
-          ) : (
-            <div className="space-y-4">
-              {filteredVideos.map((vid) => (
-                <article
-                  key={vid.id}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-3.5 sm:space-y-4 shadow-xs"
-                >
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4">
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                        <span
-                          className={`font-semibold uppercase ${
-                            vid.status === 'deletion_pending'
-                              ? 'text-rose-700 dark:text-rose-400'
-                              : vid.status === 'archived'
-                              ? 'text-amber-700 dark:text-amber-400'
-                              : 'text-emerald-700 dark:text-emerald-400'
-                          }`}
-                        >
-                          {vid.status.replace('_', ' ')}
-                        </span>
-                        {vid.status === 'archived' && vid.previousStatus && (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                              {locale === 'id' ? 'Asal' : 'Origin'}: {vid.previousStatus.replace('_', ' ')}
-                            </span>
-                          </>
-                        )}
-                        <span aria-hidden="true">·</span>
-                        <span>{vid.category}</span>
-                        <span aria-hidden="true">·</span>
-                        <span>By {vid.creatorName}</span>
-                        <span aria-hidden="true">·</span>
-                        <span
-                          className={`font-mono tabular-nums ${
-                            isFreeContent(vid)
-                              ? 'text-emerald-700 dark:text-emerald-400 font-semibold'
-                              : ''
-                          }`}
-                        >
-                          {formatReleasePrice(vid, locale, locale === 'id' ? 'IDR' : 'USD')}
-                        </span>
-                      </div>
-                      <h3 className="text-base sm:text-lg font-semibold text-slate-900 dark:text-white break-words">
-                        {vid.title}
-                      </h3>
-                      <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2">{vid.subtitle}</p>
-                      <p className="text-[11px] font-mono text-slate-400 dark:text-slate-500">
-                        ID: {vid.id}
-                      </p>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+            {/* LEFT PANEL: ACTIVE & PENDING MODERATION TABLE */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden flex flex-col">
+              <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="font-display text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                      {locale === 'id'
+                        ? `Video Aktif & Moderasi (${activeVideos.length})`
+                        : `Active & Pending Videos (${activeVideos.length})`}
+                    </h2>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {locale === 'id'
+                        ? 'Tayangan tampil publik, pengajuan baru, dan draf aktif. Centang untuk aksi massal.'
+                        : 'Live titles, pending submissions, and active drafts. Select checkboxes for bulk actions.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Left Filters + Search */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { id: 'all' as ActiveModerationFilter, label: `${locale === 'id' ? 'Semua' : 'All'} (${activeVideos.length})` },
+                      { id: 'pending_review' as ActiveModerationFilter, label: `${locale === 'id' ? 'Review' : 'Pending'} (${pendingVideos.length})` },
+                      { id: 'published' as ActiveModerationFilter, label: `${locale === 'id' ? 'Tayang' : 'Live'} (${publishedCount})` },
+                      { id: 'approved_draft' as ActiveModerationFilter, label: `Draft/OK (${approvedDraftCount})` },
+                    ].map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setActiveModerationFilter(f.id)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                          activeModerationFilter === f.id
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="relative w-full sm:w-48">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="search"
+                      value={activeSearchQuery}
+                      onChange={(e) => setActiveSearchQuery(e.target.value)}
+                      placeholder={locale === 'id' ? 'Cari video aktif...' : 'Search active...'}
+                      className="w-full min-h-[34px] pl-8 pr-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                </div>
+
+                {/* Left Bulk Action Toolbar */}
+                {selectedActiveItems.length > 0 && (
+                  <div className="p-3 rounded-xl bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/70 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-bold text-emerald-900 dark:text-emerald-200">
+                        {locale === 'id'
+                          ? `${selectedActiveItems.length} video aktif dipilih`
+                          : `${selectedActiveItems.length} active videos selected`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedActiveIds([])}
+                        className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:underline cursor-pointer"
+                      >
+                        {locale === 'id' ? 'Bersihkan Pilihan' : 'Clear Selection'}
+                      </button>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 w-full md:w-auto shrink-0">
-                      {vid.status === 'pending_review' && (
-                        <>
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={async () => {
-                              const note = moderationNotes[vid.id] || 'Approved & published';
-                              await adminModerateVideo(vid.id, 'approved', note);
-                              await adminModerateVideo(vid.id, 'published', note);
-                            }}
+                    <input
+                      type="text"
+                      value={bulkNoteActive}
+                      onChange={(e) => setBulkNoteActive(e.target.value)}
+                      placeholder={
+                        locale === 'id'
+                          ? 'Catatan moderasi massal opsional...'
+                          : 'Optional bulk moderation note...'
+                      }
+                      className="w-full min-h-[34px] px-2.5 py-1 rounded-lg bg-white dark:bg-slate-950 border border-emerald-200 dark:border-emerald-800 text-xs text-slate-900 dark:text-slate-100"
+                    />
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        isLoading={bulkProcessingSide === 'active'}
+                        onClick={() => void handleBulkActiveAction('approve_publish')}
+                      >
+                        {locale === 'id' ? 'Setujui & Tayangkan' : 'Approve & Publish'}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={bulkProcessingSide === 'active'}
+                        onClick={() => void handleBulkActiveAction('approve_only')}
+                      >
+                        {locale === 'id' ? 'Setujui' : 'Approve'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={bulkProcessingSide === 'active'}
+                        onClick={() => void handleBulkActiveAction('reject')}
+                      >
+                        {locale === 'id' ? 'Tolak' : 'Reject'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        leftIcon={<Archive className="w-3.5 h-3.5" />}
+                        disabled={bulkProcessingSide === 'active'}
+                        onClick={() => void handleBulkActiveAction('archive')}
+                      >
+                        {locale === 'id' ? 'Arsipkan' : 'Archive'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60"
+                        leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                        disabled={bulkProcessingSide === 'active'}
+                        onClick={() => openBulkDeleteModal(selectedActiveItems)}
+                      >
+                        {locale === 'id' ? 'Hapus Permanen' : 'Delete Permanently'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Left Active Table */}
+              {filteredActiveVideos.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                  {locale === 'id'
+                    ? 'Tidak ada video aktif pada filter ini.'
+                    : 'No active or pending videos match this filter.'}
+                </div>
+              ) : (
+                <div className="overflow-x-auto max-h-[680px] overflow-y-auto deloken-scroll">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      <tr>
+                        <th className="py-2.5 pl-4 pr-2 w-9">
+                          <input
+                            type="checkbox"
+                            checked={allFilteredActiveSelected}
+                            onChange={toggleSelectAllActive}
+                            aria-label={locale === 'id' ? 'Pilih semua video aktif' : 'Select all active videos'}
+                            className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"
+                          />
+                        </th>
+                        <th className="py-2.5 px-2">{locale === 'id' ? 'Video & Kreator' : 'Video & Creator'}</th>
+                        <th className="py-2.5 px-2 whitespace-nowrap">{locale === 'id' ? 'Status' : 'Status'}</th>
+                        <th className="py-2.5 pl-2 pr-4 text-right whitespace-nowrap">{locale === 'id' ? 'Aksi' : 'Actions'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                      {filteredActiveVideos.map((vid) => {
+                        const checked = selectedActiveIds.includes(vid.id);
+                        return (
+                          <tr
+                            key={vid.id}
+                            className={`transition-colors ${
+                              checked
+                                ? 'bg-emerald-50/50 dark:bg-emerald-950/20'
+                                : 'hover:bg-slate-50/70 dark:hover:bg-slate-800/40'
+                            }`}
                           >
-                            {locale === 'id' ? 'Setujui & Tayangkan' : 'Approve & Publish'}
-                          </Button>
+                            <td className="py-3 pl-4 pr-2 align-top">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleActiveSelection(vid.id)}
+                                aria-label={`Select ${vid.title}`}
+                                className="w-4 h-4 mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"
+                              />
+                            </td>
+                            <td className="py-3 px-2 align-top min-w-[190px]">
+                              <p className="font-semibold text-slate-900 dark:text-white line-clamp-2 break-words">
+                                {vid.title}
+                              </p>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                {vid.creatorName} · {vid.category} ·{' '}
+                                <span
+                                  className={`font-mono ${
+                                    isFreeContent(vid)
+                                      ? 'text-emerald-700 dark:text-emerald-400 font-semibold'
+                                      : ''
+                                  }`}
+                                >
+                                  {formatReleasePrice(vid, locale, locale === 'id' ? 'IDR' : 'USD')}
+                                </span>
+                              </p>
+                              <input
+                                type="text"
+                                value={moderationNotes[vid.id] ?? vid.moderationNote ?? ''}
+                                onChange={(e) =>
+                                  setModerationNotes((prev) => ({
+                                    ...prev,
+                                    [vid.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder={locale === 'id' ? 'Catatan...' : 'Note...'}
+                                className="mt-1.5 w-full px-2 py-1 rounded bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-700 dark:text-slate-300"
+                              />
+                            </td>
+                            <td className="py-3 px-2 align-top whitespace-nowrap">
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                                  vid.status === 'published'
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300'
+                                    : vid.status === 'pending_review'
+                                    ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
+                                {vid.status.replace('_', ' ')}
+                              </span>
+                            </td>
+                            <td className="py-3 pl-2 pr-4 align-top text-right">
+                              <div className="flex flex-wrap items-center justify-end gap-1">
+                                {vid.status === 'pending_review' && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const note = moderationNotes[vid.id] || 'Approved & published';
+                                        await adminModerateVideo(vid.id, 'approved', note);
+                                        await adminModerateVideo(vid.id, 'published', note);
+                                      }}
+                                      className="px-2 py-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold cursor-pointer"
+                                    >
+                                      {locale === 'id' ? 'Tayangkan' : 'Publish'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void adminModerateVideo(
+                                          vid.id,
+                                          'rejected',
+                                          moderationNotes[vid.id] || 'Needs metadata or asset adjustment'
+                                        )
+                                      }
+                                      className="px-2 py-1 rounded-md border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                                    >
+                                      {locale === 'id' ? 'Tolak' : 'Reject'}
+                                    </button>
+                                  </>
+                                )}
+
+                                {vid.status === 'approved' && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void adminModerateVideo(
+                                        vid.id,
+                                        'published',
+                                        moderationNotes[vid.id] || 'Published'
+                                      )
+                                    }
+                                    className="px-2 py-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold cursor-pointer"
+                                  >
+                                    {locale === 'id' ? 'Tayangkan' : 'Publish'}
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  disabled={processingActionId === `arch_${vid.id}`}
+                                  onClick={() => void handleArchiveVideo(vid)}
+                                  title={locale === 'id' ? 'Arsipkan' : 'Archive'}
+                                  className="px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer disabled:opacity-50"
+                                >
+                                  {locale === 'id' ? 'Arsip' : 'Archive'}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => void openPermanentDeleteModal(vid.id, vid.title)}
+                                  title={locale === 'id' ? 'Hapus Permanen' : 'Delete Permanently'}
+                                  className="px-2 py-1 rounded-md border border-rose-300 dark:border-rose-800/80 text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 text-[11px] font-semibold cursor-pointer"
+                                >
+                                  {locale === 'id' ? 'Hapus' : 'Delete'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* RIGHT PANEL: ARCHIVED, REJECTED & PERMANENTLY DELETED TABLE */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden flex flex-col">
+              <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="font-display text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                      {locale === 'id'
+                        ? `Video Nonaktif & Sudah Dihapus (${removedVideos.length + deletionJobs.length})`
+                        : `Archived, Rejected & Deleted (${removedVideos.length + deletionJobs.length})`}
+                    </h2>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {locale === 'id'
+                        ? 'Terpisah dari katalog aktif. Pulihkan video arsip atau hapus permanen secara massal.'
+                        : 'Separated from active catalog. Restore archived titles or permanently delete in bulk.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Right Sub-Tabs: Arsip/Ditolak vs Riwayat Hapus Permanen */}
+                <div className="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setRemovedPanelTab('archived_rejected')}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                      removedPanelTab === 'archived_rejected'
+                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {locale === 'id'
+                      ? `Arsip & Ditolak (${removedVideos.length})`
+                      : `Archived & Rejected (${removedVideos.length})`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRemovedPanelTab('deleted_history')}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                      removedPanelTab === 'deleted_history'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {locale === 'id'
+                      ? `Sudah Dihapus Permanen (${deletionJobs.length})`
+                      : `Permanently Deleted (${deletionJobs.length})`}
+                  </button>
+                </div>
+
+                {removedPanelTab === 'archived_rejected' ? (
+                  <>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {[
+                          { id: 'all' as RemovedModerationFilter, label: `${locale === 'id' ? 'Semua' : 'All'} (${removedVideos.length})` },
+                          { id: 'archived' as RemovedModerationFilter, label: `${locale === 'id' ? 'Arsip' : 'Archived'} (${archivedCount})` },
+                          { id: 'rejected' as RemovedModerationFilter, label: `${locale === 'id' ? 'Ditolak' : 'Rejected'} (${rejectedCount})` },
+                          ...(deletionPendingCount > 0
+                            ? [{ id: 'deletion_pending' as RemovedModerationFilter, label: `Tertunda (${deletionPendingCount})` }]
+                            : []),
+                        ].map((f) => (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() => setRemovedModerationFilter(f.id)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                              removedModerationFilter === f.id
+                                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="relative w-full sm:w-48">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="search"
+                          value={removedSearchQuery}
+                          onChange={(e) => setRemovedSearchQuery(e.target.value)}
+                          placeholder={locale === 'id' ? 'Cari arsip/ditolak...' : 'Search removed...'}
+                          className="w-full min-h-[34px] pl-8 pr-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Right Bulk Action Toolbar */}
+                    {selectedRemovedItems.length > 0 && (
+                      <div className="p-3 rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span className="font-bold text-amber-900 dark:text-amber-200">
+                            {locale === 'id'
+                              ? `${selectedRemovedItems.length} video nonaktif dipilih`
+                              : `${selectedRemovedItems.length} removed videos selected`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedRemovedIds([])}
+                            className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:underline cursor-pointer"
+                          >
+                            {locale === 'id' ? 'Bersihkan Pilihan' : 'Clear Selection'}
+                          </button>
+                        </div>
+
+                        <input
+                          type="text"
+                          value={bulkNoteRemoved}
+                          onChange={(e) => setBulkNoteRemoved(e.target.value)}
+                          placeholder={
+                            locale === 'id'
+                              ? 'Catatan pemulihan massal opsional...'
+                              : 'Optional bulk restore note...'
+                          }
+                          className="w-full min-h-[34px] px-2.5 py-1 rounded-lg bg-white dark:bg-slate-950 border border-amber-200 dark:border-amber-800 text-xs text-slate-900 dark:text-slate-100"
+                        />
+
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <Button
                             variant="secondary"
                             size="sm"
-                            onClick={() =>
-                              void adminModerateVideo(
-                                vid.id,
-                                'approved',
-                                moderationNotes[vid.id] || 'Approved for release'
-                              )
-                            }
+                            leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+                            isLoading={bulkProcessingSide === 'removed'}
+                            disabled={!selectedRemovedItems.some((v) => v.status === 'archived' || v.status === 'rejected')}
+                            onClick={() => void handleBulkRestoreClick()}
                           >
-                            {locale === 'id' ? 'Setujui Saja' : 'Approve'}
+                            {locale === 'id' ? 'Pulihkan Massal' : 'Restore Selected'}
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() =>
-                              void adminModerateVideo(
-                                vid.id,
-                                'rejected',
-                                moderationNotes[vid.id] || 'Needs metadata or asset adjustment'
-                              )
-                            }
+                            className="border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60"
+                            leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                            disabled={bulkProcessingSide === 'removed'}
+                            onClick={() => openBulkDeleteModal(selectedRemovedItems)}
                           >
-                            {locale === 'id' ? 'Tolak' : 'Reject'}
+                            {locale === 'id' ? 'Hapus Permanen Massal' : 'Delete Selected Permanently'}
                           </Button>
-                        </>
-                      )}
-
-                      {vid.status === 'approved' && (
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() =>
-                            void adminModerateVideo(
-                              vid.id,
-                              'published',
-                              moderationNotes[vid.id] || 'Published'
-                            )
-                          }
-                        >
-                          {locale === 'id' ? 'Tayangkan Sekarang' : 'Publish Now'}
-                        </Button>
-                      )}
-
-                      {vid.status !== 'archived' && vid.status !== 'deletion_pending' && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          leftIcon={<Archive className="w-3.5 h-3.5" />}
-                          isLoading={processingActionId === `arch_${vid.id}`}
-                          onClick={() => void handleArchiveVideo(vid)}
-                        >
-                          {locale === 'id' ? 'Arsipkan' : 'Archive'}
-                        </Button>
-                      )}
-
-                      {vid.status === 'archived' && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
-                          isLoading={processingActionId === `rest_${vid.id}`}
-                          onClick={() => void handleRestoreVideoClick(vid)}
-                        >
-                          {locale === 'id' ? 'Pulihkan' : 'Restore'}
-                        </Button>
-                      )}
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="border-rose-300 dark:border-rose-800/80 text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60"
-                        leftIcon={<Trash2 className="w-3.5 h-3.5" />}
-                        onClick={() => void openPermanentDeleteModal(vid.id, vid.title)}
-                      >
-                        {vid.status === 'deletion_pending'
-                          ? locale === 'id'
-                            ? 'Lanjutkan Hapus'
-                            : 'Retry Delete'
-                          : locale === 'id'
-                          ? 'Hapus Permanen'
-                          : 'Delete Permanently'}
-                      </Button>
-                    </div>
-                  </div>
-
-                  <input
-                    type="text"
-                    value={moderationNotes[vid.id] ?? vid.moderationNote ?? ''}
-                    onChange={(e) =>
-                      setModerationNotes((prev) => ({
-                        ...prev,
-                        [vid.id]: e.target.value,
-                      }))
-                    }
-                    placeholder={
-                      locale === 'id'
-                        ? 'Catatan moderasi opsional untuk kreator...'
-                        : 'Optional moderation note for the creator...'
-                    }
-                    className="w-full min-h-[42px] sm:min-h-[40px] px-3.5 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
-                  />
-                </article>
-              ))}
-            </div>
-          )}
-
-          {/* Deletion Audit Trail */}
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                  {locale === 'id'
-                    ? 'Log Audit Penghapusan Media Permanen'
-                    : 'Permanent Media Deletion Audit Log'}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {locale === 'id'
-                    ? 'Riwayat pembersihan aset provider, metadata, serta status retry yang aman. Data keuangan tetap terjaga.'
-                    : 'Tracks provider cleanup, metadata removal, and safe retries. Financial records are preserved.'}
-                </p>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
-                isLoading={loadingDeletionJobs}
-                onClick={() => void refreshDeletionJobs()}
-              >
-                {locale === 'id' ? 'Muat Ulang' : 'Refresh'}
-              </Button>
-            </div>
-
-            {deletionJobs.length === 0 ? (
-              <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
-                {locale === 'id'
-                  ? 'Belum ada operasi penghapusan permanen yang tercatat.'
-                  : 'No permanent video deletion jobs recorded yet.'}
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {deletionJobs.map((job) => (
-                  <div
-                    key={job.operationId}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                  >
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
-                        <span
-                          className={`font-semibold uppercase ${
-                            job.status === 'completed'
-                              ? 'text-emerald-700 dark:text-emerald-400'
-                              : job.status === 'failed'
-                              ? 'text-rose-700 dark:text-rose-400'
-                              : 'text-amber-700 dark:text-amber-400'
-                          }`}
-                        >
-                          {job.status}
-                        </span>
-                        <span aria-hidden="true">·</span>
-                        <span>{providerLabel(job.provider)}</span>
-                        <span aria-hidden="true">·</span>
-                        <span className="text-slate-500 dark:text-slate-400">
-                          {job.assetRefFingerprint}
-                        </span>
-                        <span aria-hidden="true">·</span>
-                        <span className="text-slate-400">{job.operationId}</span>
+                        </div>
                       </div>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white break-words">
-                        {job.videoTitleSnapshot}{' '}
-                        <span className="text-xs font-mono text-slate-400">
-                          ({job.videoId})
-                        </span>
-                      </p>
-                      <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                        Provider: {job.providerResult} · Firestore: {job.firestoreResult} · SQL: {job.sqlResult} · Thumb: {job.thumbnailResult}
-                      </p>
-                      {job.externalMediaWarning && (
-                        <p className="text-xs text-amber-700 dark:text-amber-300">
-                          {job.externalMediaWarning}
-                        </p>
-                      )}
-                      {job.errorMessage && (
-                        <p className="text-xs text-rose-700 dark:text-rose-300">
-                          {job.errorCode ? `[${job.errorCode}] ` : ''}
-                          {job.errorMessage}
-                        </p>
-                      )}
-                    </div>
-
-                    {job.status !== 'completed' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0"
-                        onClick={() =>
-                          void openPermanentDeleteModal(
-                            job.videoId,
-                            job.videoTitleSnapshot
-                          )
-                        }
-                      >
-                        {locale === 'id' ? 'Lanjutkan / Retry' : 'Resume / Retry'}
-                      </Button>
                     )}
+                  </>
+                ) : (
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {locale === 'id'
+                        ? 'Catatan video yang aset & katalognya telah dihapus permanen (data keuangan tetap terjaga).'
+                        : 'Log of permanently deleted videos (financial transactions and creator earnings preserved).'}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                      isLoading={loadingDeletionJobs}
+                      onClick={() => void refreshDeletionJobs()}
+                    >
+                      {locale === 'id' ? 'Muat Ulang' : 'Refresh'}
+                    </Button>
                   </div>
-                ))}
+                )}
               </div>
-            )}
+
+              {/* Right Panel Body */}
+              {removedPanelTab === 'archived_rejected' ? (
+                filteredRemovedVideos.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                    {locale === 'id'
+                      ? 'Belum ada video yang diarsipkan atau ditolak.'
+                      : 'No archived or rejected videos yet.'}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto max-h-[680px] overflow-y-auto deloken-scroll">
+                    <table className="w-full text-left border-collapse">
+                      <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                        <tr>
+                          <th className="py-2.5 pl-4 pr-2 w-9">
+                            <input
+                              type="checkbox"
+                              checked={allFilteredRemovedSelected}
+                              onChange={toggleSelectAllRemoved}
+                              aria-label={locale === 'id' ? 'Pilih semua video nonaktif' : 'Select all removed videos'}
+                              className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"
+                            />
+                          </th>
+                          <th className="py-2.5 px-2">{locale === 'id' ? 'Video & Asal' : 'Video & Origin'}</th>
+                          <th className="py-2.5 px-2 whitespace-nowrap">{locale === 'id' ? 'Status' : 'Status'}</th>
+                          <th className="py-2.5 pl-2 pr-4 text-right whitespace-nowrap">{locale === 'id' ? 'Aksi' : 'Actions'}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                        {filteredRemovedVideos.map((vid) => {
+                          const checked = selectedRemovedIds.includes(vid.id);
+                          return (
+                            <tr
+                              key={vid.id}
+                              className={`transition-colors ${
+                                checked
+                                  ? 'bg-amber-50/50 dark:bg-amber-950/20'
+                                  : 'hover:bg-slate-50/70 dark:hover:bg-slate-800/40'
+                              }`}
+                            >
+                              <td className="py-3 pl-4 pr-2 align-top">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleRemovedSelection(vid.id)}
+                                  aria-label={`Select ${vid.title}`}
+                                  className="w-4 h-4 mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"
+                                />
+                              </td>
+                              <td className="py-3 px-2 align-top min-w-[190px]">
+                                <p className="font-semibold text-slate-900 dark:text-white line-clamp-2 break-words">
+                                  {vid.title}
+                                </p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                  {vid.creatorName} · {vid.category}
+                                  {vid.status === 'archived' && vid.previousStatus
+                                    ? ` · ${locale === 'id' ? 'Asal' : 'Origin'}: ${vid.previousStatus.replace('_', ' ')}`
+                                    : ''}
+                                </p>
+                              </td>
+                              <td className="py-3 px-2 align-top whitespace-nowrap">
+                                <span
+                                  className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                                    vid.status === 'deletion_pending'
+                                      ? 'bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300'
+                                      : vid.status === 'rejected'
+                                      ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                                      : 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300'
+                                  }`}
+                                >
+                                  {vid.status.replace('_', ' ')}
+                                </span>
+                              </td>
+                              <td className="py-3 pl-2 pr-4 align-top text-right">
+                                <div className="flex flex-wrap items-center justify-end gap-1">
+                                  {vid.status === 'archived' && (
+                                    <button
+                                      type="button"
+                                      disabled={processingActionId === `rest_${vid.id}`}
+                                      onClick={() => void handleRestoreVideoClick(vid)}
+                                      className="px-2 py-1 rounded-md bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 text-white text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                                    >
+                                      {locale === 'id' ? 'Pulihkan' : 'Restore'}
+                                    </button>
+                                  )}
+                                  {vid.status === 'rejected' && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void adminModerateVideo(
+                                          vid.id,
+                                          'draft',
+                                          moderationNotes[vid.id] || 'Returned to draft by Admin'
+                                        )
+                                      }
+                                      className="px-2 py-1 rounded-md bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 text-white text-[11px] font-semibold cursor-pointer"
+                                    >
+                                      {locale === 'id' ? 'Ke Draf' : 'To Draft'}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => void openPermanentDeleteModal(vid.id, vid.title)}
+                                    className="px-2 py-1 rounded-md border border-rose-300 dark:border-rose-800/80 text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 text-[11px] font-semibold cursor-pointer"
+                                  >
+                                    {vid.status === 'deletion_pending'
+                                      ? locale === 'id'
+                                        ? 'Lanjutkan Hapus'
+                                        : 'Retry'
+                                      : locale === 'id'
+                                      ? 'Hapus Permanen'
+                                      : 'Delete'}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              ) : deletionJobs.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                  {locale === 'id'
+                    ? 'Belum ada video yang dihapus permanen.'
+                    : 'No permanently deleted video records yet.'}
+                </div>
+              ) : (
+                <div className="overflow-x-auto max-h-[680px] overflow-y-auto deloken-scroll">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      <tr>
+                        <th className="py-2.5 pl-4 pr-2">{locale === 'id' ? 'Video Dihapus' : 'Deleted Video'}</th>
+                        <th className="py-2.5 px-2 whitespace-nowrap">Provider</th>
+                        <th className="py-2.5 pl-2 pr-4 text-right whitespace-nowrap">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                      {deletionJobs.map((job) => (
+                        <tr key={job.operationId} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                          <td className="py-3 pl-4 pr-2 align-top min-w-[180px]">
+                            <p className="font-semibold text-slate-900 dark:text-white break-words">
+                              {job.videoTitleSnapshot}
+                            </p>
+                            <p className="text-[11px] font-mono text-slate-400 mt-0.5 break-all">
+                              {job.videoId} · {job.operationId}
+                            </p>
+                            {job.errorMessage && (
+                              <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">
+                                {job.errorMessage}
+                              </p>
+                            )}
+                          </td>
+                          <td className="py-3 px-2 align-top text-[11px] text-slate-600 dark:text-slate-300">
+                            <p className="font-medium">{providerLabel(job.provider)}</p>
+                            <p className="font-mono text-[10px] text-slate-400 truncate max-w-[140px]">
+                              {job.assetRefFingerprint}
+                            </p>
+                          </td>
+                          <td className="py-3 pl-2 pr-4 align-top text-right whitespace-nowrap">
+                            <div className="inline-flex flex-col items-end gap-1">
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                                  job.status === 'completed'
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300'
+                                    : job.status === 'failed'
+                                    ? 'bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300'
+                                    : 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300'
+                                }`}
+                              >
+                                {job.status}
+                              </span>
+                              {job.status !== 'completed' && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void openPermanentDeleteModal(job.videoId, job.videoTitleSnapshot)
+                                  }
+                                  className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 text-[10px] font-semibold cursor-pointer"
+                                >
+                                  {locale === 'id' ? 'Retry' : 'Retry'}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </section>
       )}
@@ -1652,6 +2339,200 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 onClick={() => void handleExecutePermanentDelete()}
               >
                 {locale === 'id' ? 'Hapus Permanen Sekarang' : 'Delete Permanently Now'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK RESTORE FALLBACK TARGET STATUS MODAL */}
+      {bulkRestoreModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Pilih status pemulihan massal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs"
+        >
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white">
+                  {locale === 'id' ? 'Pulihkan Video Massal' : 'Bulk Restore Videos'}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  {locale === 'id'
+                    ? `${bulkRestoreModal.missingOriginCount} dari ${bulkRestoreModal.videos.length} video tidak memiliki status asal otomatis. Pilih status tujuan untuk video tersebut:`
+                    : `${bulkRestoreModal.missingOriginCount} of ${bulkRestoreModal.videos.length} videos lack a saved origin status. Choose their fallback target status:`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBulkRestoreModal(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                {locale === 'id' ? 'Status Tujuan' : 'Fallback Target Status'}
+              </label>
+              <select
+                value={bulkRestoreModal.targetStatus}
+                onChange={(e) =>
+                  setBulkRestoreModal((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          targetStatus: e.target.value as Exclude<
+                            ContentStatus,
+                            'archived' | 'deletion_pending'
+                          >,
+                        }
+                      : null
+                  )
+                }
+                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100"
+              >
+                <option value="draft">Draft</option>
+                <option value="pending_review">Pending Review</option>
+                <option value="approved">Approved</option>
+                <option value="published">Published (Tayang Publik)</option>
+              </select>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setBulkRestoreModal(null)}>
+                {locale === 'id' ? 'Batal' : 'Cancel'}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                isLoading={bulkRestoreModal.submitting}
+                onClick={() => void handleConfirmBulkRestore()}
+              >
+                {locale === 'id' ? 'Pulihkan Sekarang' : 'Restore Now'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK PERMANENT DELETE CONFIRMATION MODAL */}
+      {bulkDeleteModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Konfirmasi hapus permanen massal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs"
+        >
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/70 rounded-2xl p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400 shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white">
+                    {locale === 'id'
+                      ? `Hapus Permanen ${bulkDeleteModal.items.length} Video`
+                      : `Permanently Delete ${bulkDeleteModal.items.length} Videos`}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {locale === 'id'
+                      ? 'Seluruh video terpilih akan dihapus permanen dari katalog dan penyimpanan media terkait.'
+                      : 'All selected videos will be permanently removed from the catalog and associated media storage.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBulkDeleteModal(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5 max-h-44 overflow-y-auto text-xs">
+              {bulkDeleteModal.items.slice(0, 12).map((item, idx) => (
+                <p key={item.id} className="text-slate-700 dark:text-slate-300 truncate">
+                  {idx + 1}. <span className="font-semibold">{item.title}</span>{' '}
+                  <span className="font-mono text-[10px] text-slate-400">({item.status})</span>
+                </p>
+              ))}
+              {bulkDeleteModal.items.length > 12 && (
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  +{bulkDeleteModal.items.length - 12}{' '}
+                  {locale === 'id' ? 'video lainnya' : 'more videos'}
+                </p>
+              )}
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300">
+              {locale === 'id'
+                ? 'Catatan transaksi, pembelian, entitlement historis, pendapatan kreator, dan payout tetap dijaga untuk audit finansial.'
+                : 'Transactions, purchases, historical entitlements, creator earnings, and payouts remain preserved for financial auditing.'}
+            </div>
+
+            {bulkDeleteModal.error && (
+              <div
+                role="alert"
+                className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300"
+              >
+                {bulkDeleteModal.error}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                {locale === 'id'
+                  ? `Ketik frasa berikut untuk konfirmasi:`
+                  : `Type the following confirmation phrase:`}
+              </label>
+              <p className="text-xs font-mono font-semibold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg select-all">
+                {`HAPUS ${bulkDeleteModal.items.length} VIDEO`}
+              </p>
+              <input
+                type="text"
+                value={bulkDeleteModal.confirmationInput}
+                onChange={(e) =>
+                  setBulkDeleteModal((prev) =>
+                    prev ? { ...prev, confirmationInput: e.target.value } : null
+                  )
+                }
+                placeholder={`HAPUS ${bulkDeleteModal.items.length} VIDEO`}
+                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setBulkDeleteModal(null)}>
+                {locale === 'id' ? 'Batal' : 'Cancel'}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                disabled={
+                  bulkDeleteModal.confirmationInput
+                    .trim()
+                    .toUpperCase()
+                    .replace(/\s+/g, ' ') !==
+                    `HAPUS ${bulkDeleteModal.items.length} VIDEO` &&
+                  bulkDeleteModal.confirmationInput
+                    .trim()
+                    .toUpperCase()
+                    .replace(/\s+/g, ' ') !==
+                    `DELETE ${bulkDeleteModal.items.length} VIDEOS`
+                }
+                isLoading={bulkDeleteModal.submitting}
+                onClick={() => void handleExecuteBulkDelete()}
+              >
+                {locale === 'id'
+                  ? `Hapus ${bulkDeleteModal.items.length} Video Permanen`
+                  : `Delete ${bulkDeleteModal.items.length} Videos Permanently`}
               </Button>
             </div>
           </div>

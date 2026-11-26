@@ -164,3 +164,36 @@ export async function adminDeleteVideoPermanentlyApi(
     preservedFinancialRecords: boolean;
   };
 }
+
+export interface BulkDeleteVideoResultItem {
+  videoId: string;
+  ok: boolean;
+  error?: string;
+  code?: string;
+  job?: VideoDeletionJobRecord;
+}
+
+export interface BulkDeleteVideosResponse {
+  ok: boolean;
+  total: number;
+  deletedCount: number;
+  failedCount: number;
+  preservedFinancialRecords: boolean;
+  results: BulkDeleteVideoResultItem[];
+}
+
+export async function adminBulkDeleteVideosApi(
+  videoIds: string[],
+  confirmationPhrase: string
+): Promise<BulkDeleteVideosResponse> {
+  const headers = await getAdminAuthHeaders();
+  const res = await fetch('/api/admin/videos/bulk-delete', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ videoIds, confirmationPhrase }),
+  });
+  if (!res.ok) {
+    await parseErrorResponse(res, 'Failed to run bulk permanent video deletion.');
+  }
+  return (await res.json()) as BulkDeleteVideosResponse;
+}

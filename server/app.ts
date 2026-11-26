@@ -3307,24 +3307,36 @@ export function createApiApp(): Express {
     }
   });
 
-  app.delete('/api/admin/videos/:videoId', requireAdmin, async (req: AuthedRequest, res) => {
-    const videoId = req.params.videoId;
+  interface PermanentDeleteParams {
+    videoId: string;
+    adminUid: string;
+    bearerToken: string;
+    confirmationMode: 'exact_title' | 'bulk_verified';
+    confirmationText?: string;
+  }
+
+  type PermanentDeleteOutcome =
+    | {
+        ok: true;
+        idempotent?: boolean;
+        job: VideoDeletionJobRecord;
+        preservedFinancialRecords: true;
+      }
+    | {
+        ok: false;
+        status: number;
+        error: string;
+        code?: string;
+        job?: VideoDeletionJobRecord;
+      };
+
+  const performPermanentVideoDelete = async (
+    params: PermanentDeleteParams
+  ): Promise<PermanentDeleteOutcome> => {
+    const { videoId, adminUid, bearerToken, confirmationMode, confirmationText = '' } = params;
     if (!isValidSafeId(videoId)) {
-      res.status(400).json({ error: 'Invalid videoId.' });
-      return;
+      return { ok: false, status: 400, error: 'Invalid videoId.' };
     }
-
-    const body = (req.body || {}) as { confirmationText?: unknown };
-    const headerConf = req.headers['x-delete-confirmation'];
-    const rawConfirmation =
-      typeof body.confirmationText === 'string'
-        ? body.confirmationText.trim()
-        : typeof headerConf === 'string'
-        ? headerConf.trim()
-        : '';
-
-    const bearerToken = req.user!.rawIdToken;
-    const adminUid = req.user!.uid;
 
     let videoDoc;
     let assetDoc;
@@ -3351,10 +3363,11 @@ export function createApiApp(): Express {
         fetchLatestDeletionJob(videoId).catch(() => null),
       ]);
     } catch (err) {
-      res.status(500).json({
+      return {
+        ok: false,
+        status: 500,
         error: err instanceof Error ? err.message : 'Failed to read authoritative video records.',
-      });
-      return;
+      };
     }
 
     if (
@@ -3364,13 +3377,12 @@ export function createApiApp(): Express {
       !sqlMedia
     ) {
       blockedVideoStatuses.set(videoId, 'deleted');
-      res.json({
+      return {
         ok: true,
         idempotent: true,
         job: priorJob,
         preservedFinancialRecords: true,
-      });
-      return;
+      };
     }
 
     const titleSnapshot = (
@@ -3380,19 +3392,22 @@ export function createApiApp(): Express {
     ).trim();
 
     if (!titleSnapshot) {
-      res.status(404).json({ error: 'Video record not found.' });
-      return;
+      return { ok: false, status: 404, error: 'Video record not found.' };
     }
 
-    if (
-      !rawConfirmation ||
-      rawConfirmation.toLowerCase() !== titleSnapshot.toLowerCase()
-    ) {
-      res.status(400).json({
-        error: `Konfirmasi penghapusan gagal. Ketik judul video secara persis: "${titleSnapshot}".`,
-        code: 'CONFIRMATION_MISMATCH',
-      });
-      return;
+    if (confirmationMode === 'exact_title') {
+      const rawConfirmation = confirmationText.trim();
+      if (
+        !rawConfirmation ||
+        rawConfirmation.toLowerCase() !== titleSnapshot.toLowerCase()
+      ) {
+        return {
+          ok: false,
+          status: 400,
+          error: `Konfirmasi penghapusan gagal. Ketik judul video secara persis: "${titleSnapshot}".`,
+          code: 'CONFIRMATION_MISMATCH',
+        };
+      }
     }
 
     // Never trust client-supplied provider or assetRef: read strictly from server records
@@ -3436,30 +3451,33 @@ export function createApiApp(): Express {
 
     if (!providerAlreadyResolved) {
       if (normalized.provider === 'unknown' || !normalized.assetRef) {
-        res.status(422).json({
+        return {
+          ok: false,
+          status: 422,
           error:
             'Provider media tidak dikenal atau metadata aset video tidak ditemukan. Penghapusan dihentikan aman tanpa menghapus metadata.',
           code: 'UNKNOWN_OR_MISSING_ASSET_PROVIDER',
-        });
-        return;
+        };
       }
 
       if (normalized.provider === 'cloudflare_stream') {
         if (!/^[a-zA-Z0-9_-]{8,128}$/.test(normalized.assetRef)) {
-          res.status(422).json({
+          return {
+            ok: false,
+            status: 422,
             error:
               'ID aset Cloudflare Stream tidak valid. Penghapusan dihentikan aman tanpa menghapus metadata.',
             code: 'INVALID_CLOUDFLARE_UID',
-          });
-          return;
+          };
         }
         if (!isCloudflareStreamConfigured()) {
-          res.status(503).json({
+          return {
+            ok: false,
+            status: 503,
             error:
               'Kredensial Cloudflare Stream server belum aktif sehingga penghapusan file Cloudflare tidak dapat dilakukan.',
             code: 'CLOUDFLARE_NOT_CONFIGURED',
-          });
-          return;
+          };
         }
       } else if (normalized.provider === 'private_storage') {
         validatedPrivateFile = validatePrivateStorageAssetRef(
@@ -3467,20 +3485,22 @@ export function createApiApp(): Express {
           normalized.assetRef
         );
         if (validatedPrivateFile.kind === 'invalid') {
-          res.status(422).json({
+          return {
+            ok: false,
+            status: 422,
             error:
               'Referensi file penyimpanan lokal tidak valid atau keluar dari direktori upload. Penghapusan dihentikan aman.',
             code: 'INVALID_ASSET_REF',
-          });
-          return;
+          };
         }
       } else if (isExternalLinkProvider(normalized.provider)) {
         if (!validateExternalProviderAssetRef(normalized.provider, normalized.assetRef)) {
-          res.status(422).json({
+          return {
+            ok: false,
+            status: 422,
             error: `Referensi tautan eksternal (${normalized.provider}) tidak valid.`,
             code: 'INVALID_EXTERNAL_REF',
-          });
-          return;
+          };
         }
       }
     }
@@ -3513,10 +3533,11 @@ export function createApiApp(): Express {
     try {
       job = await saveDeletionJob(job);
     } catch (err) {
-      res.status(500).json({
+      return {
+        ok: false,
+        status: 500,
         error: err instanceof Error ? err.message : 'Unable to create deletion audit record.',
-      });
-      return;
+      };
     }
 
     // 2. Mark Firestore document as deletion_pending tombstone & block playback immediately
@@ -3547,12 +3568,13 @@ export function createApiApp(): Express {
             errorCode: 'TOMBSTONE_FAILED',
             errorMessage: safeMsg.slice(0, 280),
           }).catch(() => {});
-          res.status(502).json({
+          return {
+            ok: false,
+            status: 502,
             error: safeMsg,
             code: 'TOMBSTONE_FAILED',
-            operationId,
-          });
-          return;
+            job,
+          };
         }
       }
     }
@@ -3594,12 +3616,13 @@ export function createApiApp(): Express {
           errorCode: job.errorCode,
           errorMessage: job.errorMessage,
         }).catch(() => {});
-        res.status(502).json({
+        return {
+          ok: false,
+          status: 502,
           error: safeMsg,
           code: 'PROVIDER_DELETE_FAILED',
           job,
-        });
-        return;
+        };
       }
     } else {
       job.status = 'asset_deleted';
@@ -3691,12 +3714,13 @@ export function createApiApp(): Express {
         errorCode: job.errorCode,
         errorMessage: job.errorMessage,
       }).catch(() => {});
-      res.status(502).json({
+      return {
+        ok: false,
+        status: 502,
         error: safeMsg,
         code: 'FIRESTORE_DELETE_FAILED',
         job,
-      });
-      return;
+      };
     }
 
     // 6. Delete PostgreSQL / Ledger creator_media mapping ONLY (financial tables preserved)
@@ -3729,18 +3753,148 @@ export function createApiApp(): Express {
         errorCode: job.errorCode,
         errorMessage: job.errorMessage,
       }).catch(() => {});
-      res.status(502).json({
+      return {
+        ok: false,
+        status: 502,
         error: safeMsg,
         code: 'SQL_CLEANUP_FAILED',
         job,
+      };
+    }
+
+    return {
+      ok: true,
+      job,
+      preservedFinancialRecords: true,
+    };
+  };
+
+  app.delete('/api/admin/videos/:videoId', requireAdmin, async (req: AuthedRequest, res) => {
+    const videoId = req.params.videoId;
+    const body = (req.body || {}) as { confirmationText?: unknown };
+    const headerConf = req.headers['x-delete-confirmation'];
+    const rawConfirmation =
+      typeof body.confirmationText === 'string'
+        ? body.confirmationText.trim()
+        : typeof headerConf === 'string'
+        ? headerConf.trim()
+        : '';
+
+    const outcome = await performPermanentVideoDelete({
+      videoId,
+      adminUid: req.user!.uid,
+      bearerToken: req.user!.rawIdToken,
+      confirmationMode: 'exact_title',
+      confirmationText: rawConfirmation,
+    });
+
+    if (!outcome.ok) {
+      res.status(outcome.status).json({
+        error: outcome.error,
+        ...(outcome.code ? { code: outcome.code } : {}),
+        ...(outcome.job ? { job: outcome.job } : {}),
       });
       return;
     }
 
+    res.json(outcome);
+  });
+
+  app.post('/api/admin/videos/bulk-delete', requireAdmin, async (req: AuthedRequest, res) => {
+    const body = (req.body || {}) as {
+      videoIds?: unknown;
+      confirmationPhrase?: unknown;
+    };
+
+    if (!Array.isArray(body.videoIds) || body.videoIds.length === 0) {
+      res.status(400).json({ error: 'Pilih minimal satu video untuk dihapus permanen.' });
+      return;
+    }
+
+    const uniqueIds = Array.from(
+      new Set(
+        body.videoIds
+          .filter((id): id is string => typeof id === 'string')
+          .map((id) => id.trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (uniqueIds.length === 0 || uniqueIds.length > 50) {
+      res.status(400).json({
+        error: 'Jumlah video untuk penghapusan massal harus antara 1 sampai 50 video.',
+      });
+      return;
+    }
+
+    for (const id of uniqueIds) {
+      if (!isValidSafeId(id)) {
+        res.status(400).json({ error: `Invalid videoId in selection: ${id}` });
+        return;
+      }
+    }
+
+    const rawPhrase =
+      typeof body.confirmationPhrase === 'string'
+        ? body.confirmationPhrase.trim().toUpperCase().replace(/\s+/g, ' ')
+        : '';
+    const expectedIdPhrase = `HAPUS ${uniqueIds.length} VIDEO`;
+    const expectedEnPhrase = `DELETE ${uniqueIds.length} VIDEOS`;
+    const expectedEnSingular = `DELETE ${uniqueIds.length} VIDEO`;
+
+    if (
+      rawPhrase !== expectedIdPhrase &&
+      rawPhrase !== expectedEnPhrase &&
+      rawPhrase !== expectedEnSingular
+    ) {
+      res.status(400).json({
+        error: `Konfirmasi penghapusan massal tidak cocok. Ketik "${expectedIdPhrase}" untuk melanjutkan.`,
+        code: 'BULK_CONFIRMATION_MISMATCH',
+      });
+      return;
+    }
+
+    const results: Array<{
+      videoId: string;
+      ok: boolean;
+      error?: string;
+      code?: string;
+      job?: VideoDeletionJobRecord;
+    }> = [];
+
+    let deletedCount = 0;
+    let failedCount = 0;
+
+    for (const videoId of uniqueIds) {
+      const outcome = await performPermanentVideoDelete({
+        videoId,
+        adminUid: req.user!.uid,
+        bearerToken: req.user!.rawIdToken,
+        confirmationMode: 'bulk_verified',
+      });
+
+      if (outcome.ok) {
+        deletedCount += 1;
+        results.push({ videoId, ok: true, job: outcome.job });
+      } else {
+        failedCount += 1;
+        results.push({
+          videoId,
+          ok: false,
+          error: outcome.error,
+          code: outcome.code,
+          job: outcome.job,
+        });
+      }
+    }
+
     res.json({
-      ok: true,
-      job,
+      ok: deletedCount > 0 || failedCount === 0,
+      total: uniqueIds.length,
+      deletedCount,
+      failedCount,
       preservedFinancialRecords: true,
+      results,
     });
   });
 
