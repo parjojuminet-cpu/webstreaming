@@ -2,6 +2,7 @@ import type {
   DirectStreamFormat,
   LinkCheckStatus,
   PlaybackCheckStatus,
+  VideoAspectRatio,
   VideoAssetProvider,
 } from '../../types/vyora';
 
@@ -45,6 +46,9 @@ export interface LinkInspectionDiagnostics {
   authorHint?: string;
   thumbnailUrl?: string;
   durationSecondsHint?: number;
+  detectedWidth?: number;
+  detectedHeight?: number;
+  aspectRatioHint?: Exclude<VideoAspectRatio, 'auto'>;
   mimeType?: string;
   contentLength?: number;
   supportsRange?: boolean;

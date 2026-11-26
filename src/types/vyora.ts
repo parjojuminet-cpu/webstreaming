@@ -69,6 +69,17 @@ export type PlaybackCheckStatus =
 
 export type DirectStreamFormat = 'mp4' | 'hls' | 'dash';
 
+export type VideoAspectRatio =
+  | 'auto'
+  | '16:9'
+  | '9:16'
+  | '4:5'
+  | '1:1'
+  | '4:3'
+  | '21:9';
+
+export type VideoFitMode = 'contain' | 'cover';
+
 export interface AdminVideoAssetInfo {
   videoId: string;
   title: string;
@@ -158,6 +169,8 @@ export interface ContentItem {
   releaseYear: number;
   publishedAt: string;
   resolution: '4K HDR' | '4K UHD' | '1080p HD';
+  aspectRatio?: VideoAspectRatio;
+  videoFitMode?: VideoFitMode;
   audioFormat: string;
   languages: string[];
   status: ContentStatus;

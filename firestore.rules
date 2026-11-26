@@ -105,7 +105,8 @@ service cloud.firestore {
           'id', 'slug', 'title', 'subtitle', 'description', 'descriptionId',
           'category', 'creatorId', 'creatorName', 'thumbnailUrl', 'backdropUrl',
           'durationMinutes', 'previewSeconds', 'priceUsd', 'priceIdr', 'creditCost',
-          'releaseYear', 'publishedAt', 'resolution', 'audioFormat', 'languages',
+          'releaseYear', 'publishedAt', 'resolution', 'aspectRatio', 'videoFitMode',
+          'audioFormat', 'languages',
           'status', 'previousStatus', 'moderationNote', 'viewCount', 'rating', 'reviewCount',
           'createdAt', 'updatedAt'
         ])
@@ -136,6 +137,8 @@ service cloud.firestore {
         && data.releaseYear is int && data.releaseYear >= 1950 && data.releaseYear <= 2100
         && data.publishedAt is string && data.publishedAt.size() <= 40
         && data.resolution in ['4K HDR', '4K UHD', '1080p HD']
+        && (!('aspectRatio' in data) || (data.aspectRatio is string && data.aspectRatio in ['auto', '16:9', '9:16', '4:5', '1:1', '4:3', '21:9']))
+        && (!('videoFitMode' in data) || (data.videoFitMode is string && data.videoFitMode in ['contain', 'cover']))
         && data.audioFormat is string && data.audioFormat.size() >= 2 && data.audioFormat.size() <= 60
         && data.languages is list && data.languages.size() >= 1 && data.languages.size() <= 8 && data.languages[0] is string
         && data.status in ['draft', 'pending_review', 'approved', 'rejected', 'published', 'archived', 'deletion_pending']
@@ -363,6 +366,7 @@ service cloud.firestore {
                   'slug', 'title', 'subtitle', 'description', 'descriptionId',
                   'category', 'thumbnailUrl', 'backdropUrl', 'durationMinutes',
                   'priceUsd', 'priceIdr', 'creditCost', 'releaseYear', 'resolution',
+                  'aspectRatio', 'videoFitMode',
                   'audioFormat', 'languages', 'status', 'updatedAt'
                 ])
               ) ||
@@ -370,7 +374,7 @@ service cloud.firestore {
                 existing().status in ['draft', 'pending_review', 'approved', 'rejected', 'published']
                 && incoming().status == existing().status
                 && incoming().diff(existing()).affectedKeys().hasOnly([
-                  'thumbnailUrl', 'backdropUrl', 'updatedAt'
+                  'thumbnailUrl', 'backdropUrl', 'aspectRatio', 'videoFitMode', 'updatedAt'
                 ])
               ) ||
               (

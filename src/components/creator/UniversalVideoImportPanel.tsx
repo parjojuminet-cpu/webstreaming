@@ -20,8 +20,18 @@ import type {
   LinkCheckStatus,
   LocaleCode,
   PlaybackCheckStatus,
+  VideoAspectRatio,
   VideoAssetProvider,
+  VideoFitMode,
 } from '../../types/vyora';
+import {
+  VIDEO_ASPECT_OPTIONS,
+  getAdaptiveFrameStyle,
+  inferAspectRatioFromDimensions,
+  inferAspectRatioFromUrlOrProvider,
+  resolveEffectiveAspectRatio,
+  type FixedVideoAspectRatio,
+} from '../../utils/videoAspect';
 import { loadYouTubeIframeApi, type YTPlayerInstance } from '../../utils/youtubeApi';
 import { Button } from '../ui/Button';
 
@@ -33,6 +43,8 @@ export interface VerifiedImportedVideoPayload {
   titleHint?: string;
   thumbnailUrl?: string;
   durationMinutesHint?: number;
+  aspectRatio?: VideoAspectRatio;
+  videoFitMode?: VideoFitMode;
   mimeType?: string;
   directFormat?: DirectStreamFormat;
 }
@@ -144,6 +156,10 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
   const [detectedDurationSec, setDetectedDurationSec] = useState<number | undefined>(
     undefined
   );
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<VideoAspectRatio>('auto');
+  const [detectedAspectRatio, setDetectedAspectRatio] =
+    useState<FixedVideoAspectRatio | null>(null);
+  const [videoFitMode, setVideoFitMode] = useState<VideoFitMode>('contain');
 
   // Refs for official player verification instances
   const ytHostRef = useRef<HTMLDivElement | null>(null);
@@ -201,6 +217,9 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
     setPlaybackNote('');
     setObservedPlaySeconds(0);
     setDetectedDurationSec(undefined);
+    setSelectedAspectRatio('auto');
+    setDetectedAspectRatio(null);
+    setVideoFitMode('contain');
     onInvalidate();
   };
 
@@ -235,6 +254,15 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
       if (diag.durationSecondsHint) {
         setDetectedDurationSec(diag.durationSecondsHint);
       }
+      const inferredRatio =
+        diag.aspectRatioHint ||
+        inferAspectRatioFromUrlOrProvider({
+          provider: diag.provider,
+          url: diag.canonicalUrl || trimmed,
+          width: diag.detectedWidth,
+          height: diag.detectedHeight,
+        });
+      setDetectedAspectRatio(inferredRatio);
     } catch (err) {
       setLinkStatus('uncertain');
       setInspectErr(
@@ -997,96 +1025,173 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
             )}
           </div>
 
-          {/* Player Stage */}
-          <div className="aspect-video w-full rounded-xl overflow-hidden bg-slate-950 border border-slate-800 relative">
-            {inspection.provider === 'youtube' && (
-              <div ref={ytHostRef} className="w-full h-full" />
-            )}
+          {/* Aspect Ratio & Framing Controls */}
+          {(() => {
+            const effectiveRatio = resolveEffectiveAspectRatio(
+              selectedAspectRatio,
+              detectedAspectRatio
+            );
+            const stageStyle = getAdaptiveFrameStyle(effectiveRatio, '56dvh');
 
-            {(inspection.provider === 'vimeo' ||
-              inspection.provider === 'dailymotion' ||
-              inspection.provider === 'streamable' ||
-              inspection.provider === 'tiktok' ||
-              inspection.provider === 'facebook' ||
-              inspection.provider === 'instagram') &&
-              inspection.embedUrl && (
-                <iframe
-                  ref={iframeRef}
-                  src={inspection.embedUrl}
-                  title={`${inspection.platformLabel} Preview`}
-                  className="w-full h-full border-0"
-                  allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-                  allowFullScreen
-                  referrerPolicy="strict-origin-when-cross-origin"
-                />
-              )}
+            return (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mr-1">
+                      {locale === 'id' ? 'Rasio:' : 'Aspect:'}
+                    </span>
+                    {VIDEO_ASPECT_OPTIONS.map((opt) => {
+                      const active = selectedAspectRatio === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setSelectedAspectRatio(opt.value)}
+                          className={`min-h-[30px] px-2 py-1 rounded-lg text-[11px] font-mono font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                            active
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-emerald-500'
+                          }`}
+                        >
+                          {opt.value === 'auto'
+                            ? `${opt.shortLabel} (${effectiveRatio})`
+                            : opt.shortLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
 
-            {inspection.provider === 'x' && (
-              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-2 text-slate-200">
-                <ShieldAlert className="w-7 h-7 text-amber-400" />
-                <p className="text-xs font-semibold">
-                  {locale === 'id'
-                    ? 'Preview Kartu X (Twitter) Tidak Dapat Diverifikasi Otomatis'
-                    : 'X (Twitter) Card Preview Cannot Verify Video Playback'}
-                </p>
-                <p className="text-[11px] text-slate-400 max-w-md">
-                  {locale === 'id'
-                    ? 'X tidak menyediakan API status PLAY lintas-domain untuk memverifikasi pemutaran video pada tautan eksternal.'
-                    : 'X provides no cross-origin video PLAY state API to confirm playback.'}
-                </p>
-              </div>
-            )}
+                  {inspection.provider === 'direct_video' && (
+                    <div className="inline-flex items-center gap-1 p-0.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setVideoFitMode('contain')}
+                        className={`px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer transition-colors ${
+                          videoFitMode === 'contain'
+                            ? 'bg-slate-900 dark:bg-emerald-600 text-white'
+                            : 'text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        {locale === 'id' ? 'Utuh (Fit)' : 'Fit'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVideoFitMode('cover')}
+                        className={`px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer transition-colors ${
+                          videoFitMode === 'cover'
+                            ? 'bg-slate-900 dark:bg-emerald-600 text-white'
+                            : 'text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        {locale === 'id' ? 'Penuh (Fill)' : 'Fill'}
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-            {inspection.provider === 'direct_video' && (
-              <video
-                ref={htmlVideoRef}
-                controls
-                playsInline
-                preload="metadata"
-                onLoadedMetadata={() => {
-                  const v = htmlVideoRef.current;
-                  if (v && Number.isFinite(v.duration) && v.duration > 0) {
-                    setDetectedDurationSec(Math.round(v.duration));
-                  }
-                }}
-                onPlaying={() => {
-                  if (playbackStatusRef.current === 'waiting_play') {
-                    setPlaybackStatus('verifying');
-                  }
-                }}
-                onTimeUpdate={() => {
-                  const v = htmlVideoRef.current;
-                  if (!v) return;
-                  if (v.currentTime > 0) {
-                    setObservedPlaySeconds(v.currentTime);
-                  }
-                  if (v.currentTime >= 0.25 && v.readyState >= 2) {
-                    if (playAttemptTimeoutRef.current) {
-                      window.clearTimeout(playAttemptTimeoutRef.current);
-                      playAttemptTimeoutRef.current = null;
-                    }
-                    setPlaybackStatus('verified_playing');
-                    setPlaybackNote(
-                      locale === 'id'
-                        ? `Stream video berhasil diputar (${v.currentTime.toFixed(1)} detik berjalan). Tombol LANJUTKAN kini aktif.`
-                        : `Direct video stream verified (${v.currentTime.toFixed(1)}s elapsed). CONTINUE is now enabled.`
-                    );
-                  }
-                }}
-                onError={() => {
-                  const err = htmlVideoRef.current?.error;
-                  setPlaybackStatus('play_failed');
-                  onInvalidate();
-                  setPlaybackNote(
-                    locale === 'id'
-                      ? `Gagal memutar file/stream video (kode MediaError ${err?.code ?? 'unknown'}). Periksa codec, status HTTP, atau header CORS.`
-                      : `Video playback failed (MediaError code ${err?.code ?? 'unknown'}). Check codec, HTTP access, or CORS headers.`
-                  );
-                }}
-                className="w-full h-full object-contain bg-black"
-              />
-            )}
-          </div>
+                {/* Adaptive Player Stage */}
+                <div className="w-full rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+                  <div style={stageStyle} className="relative bg-black overflow-hidden">
+                    {inspection.provider === 'youtube' && (
+                      <div ref={ytHostRef} className="w-full h-full" />
+                    )}
+
+                    {(inspection.provider === 'vimeo' ||
+                      inspection.provider === 'dailymotion' ||
+                      inspection.provider === 'streamable' ||
+                      inspection.provider === 'tiktok' ||
+                      inspection.provider === 'facebook' ||
+                      inspection.provider === 'instagram') &&
+                      inspection.embedUrl && (
+                        <iframe
+                          ref={iframeRef}
+                          src={inspection.embedUrl}
+                          title={`${inspection.platformLabel} Preview`}
+                          className="w-full h-full border-0"
+                          allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+                          allowFullScreen
+                          referrerPolicy="strict-origin-when-cross-origin"
+                        />
+                      )}
+
+                    {inspection.provider === 'x' && (
+                      <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-2 text-slate-200">
+                        <ShieldAlert className="w-7 h-7 text-amber-400" />
+                        <p className="text-xs font-semibold">
+                          {locale === 'id'
+                            ? 'Preview Kartu X (Twitter) Tidak Dapat Diverifikasi Otomatis'
+                            : 'X (Twitter) Card Preview Cannot Verify Video Playback'}
+                        </p>
+                        <p className="text-[11px] text-slate-400 max-w-md">
+                          {locale === 'id'
+                            ? 'X tidak menyediakan API status PLAY lintas-domain untuk memverifikasi pemutaran video pada tautan eksternal.'
+                            : 'X provides no cross-origin video PLAY state API to confirm playback.'}
+                        </p>
+                      </div>
+                    )}
+
+                    {inspection.provider === 'direct_video' && (
+                      <video
+                        ref={htmlVideoRef}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        onLoadedMetadata={() => {
+                          const v = htmlVideoRef.current;
+                          if (!v) return;
+                          if (Number.isFinite(v.duration) && v.duration > 0) {
+                            setDetectedDurationSec(Math.round(v.duration));
+                          }
+                          if (v.videoWidth > 0 && v.videoHeight > 0) {
+                            setDetectedAspectRatio(
+                              inferAspectRatioFromDimensions(v.videoWidth, v.videoHeight)
+                            );
+                          }
+                        }}
+                        onPlaying={() => {
+                          if (playbackStatusRef.current === 'waiting_play') {
+                            setPlaybackStatus('verifying');
+                          }
+                        }}
+                        onTimeUpdate={() => {
+                          const v = htmlVideoRef.current;
+                          if (!v) return;
+                          if (v.currentTime > 0) {
+                            setObservedPlaySeconds(v.currentTime);
+                          }
+                          if (v.currentTime >= 0.25 && v.readyState >= 2) {
+                            if (playAttemptTimeoutRef.current) {
+                              window.clearTimeout(playAttemptTimeoutRef.current);
+                              playAttemptTimeoutRef.current = null;
+                            }
+                            setPlaybackStatus('verified_playing');
+                            setPlaybackNote(
+                              locale === 'id'
+                                ? `Stream video berhasil diputar (${v.currentTime.toFixed(1)} detik berjalan). Tombol LANJUTKAN kini aktif.`
+                                : `Direct video stream verified (${v.currentTime.toFixed(1)}s elapsed). CONTINUE is now enabled.`
+                            );
+                          }
+                        }}
+                        onError={() => {
+                          const err = htmlVideoRef.current?.error;
+                          setPlaybackStatus('play_failed');
+                          onInvalidate();
+                          setPlaybackNote(
+                            locale === 'id'
+                              ? `Gagal memutar file/stream video (kode MediaError ${err?.code ?? 'unknown'}). Periksa codec, status HTTP, atau header CORS.`
+                              : `Video playback failed (MediaError code ${err?.code ?? 'unknown'}). Check codec, HTTP access, or CORS headers.`
+                          );
+                        }}
+                        className={`w-full h-full bg-black ${
+                          videoFitMode === 'cover' ? 'object-cover' : 'object-contain'
+                        }`}
+                      />
+                    )}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           {/* Playback Verification Status & Action Controls */}
           <div className={`p-3.5 rounded-xl border space-y-2 ${playMeta.toneClass}`}>
@@ -1150,6 +1255,11 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
                   durationMinutesHint: detectedDurationSec
                     ? Math.max(1, Math.round(detectedDurationSec / 60))
                     : undefined,
+                  aspectRatio: resolveEffectiveAspectRatio(
+                    selectedAspectRatio,
+                    detectedAspectRatio
+                  ),
+                  videoFitMode,
                   mimeType:
                     inspection.mimeType ||
                     `video/${inspection.provider}`,

@@ -27,9 +27,21 @@ import type {
   CurrencyCode,
   LocaleCode,
   PaymentGateway,
+  VideoAspectRatio,
+  VideoFitMode,
 } from '../../types/vyora';
 import { formatPrice, isFreeContent } from '../../i18n/translations';
 import { getFacebookEmbedUrl } from '../../utils/facebook';
+import {
+  VIDEO_ASPECT_OPTIONS,
+  getAdaptiveFrameStyle,
+  inferAspectRatioFromDimensions,
+  inferAspectRatioFromUrlOrProvider,
+  normalizeVideoAspectRatio,
+  normalizeVideoFitMode,
+  resolveEffectiveAspectRatio,
+  type FixedVideoAspectRatio,
+} from '../../utils/videoAspect';
 import { loadYouTubeIframeApi, type YTPlayerInstance } from '../../utils/youtubeApi';
 import { Button } from '../ui/Button';
 
@@ -94,6 +106,9 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   const [selectedLevel, setSelectedLevel] = useState<number>(-1);
   const [fbIframeLoaded, setFbIframeLoaded] = useState(false);
   const [fbReplayNonce, setFbReplayNonce] = useState(0);
+  const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('auto');
+  const [autoAspectRatio, setAutoAspectRatio] = useState<FixedVideoAspectRatio>('16:9');
+  const [videoFitMode, setVideoFitMode] = useState<VideoFitMode>('contain');
 
   const isYoutubeStream =
     authData?.streamType === 'youtube' &&
@@ -192,10 +207,29 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
       setStreamError(null);
       setPaywallReached(false);
       setFbIframeLoaded(false);
+      setAspectRatio(
+        targetItem.aspectRatio && targetItem.aspectRatio !== 'auto'
+          ? normalizeVideoAspectRatio(targetItem.aspectRatio, 'auto')
+          : 'auto'
+      );
+      setVideoFitMode(normalizeVideoFitMode(targetItem.videoFitMode, 'contain'));
+      setAutoAspectRatio(
+        targetItem.aspectRatio && targetItem.aspectRatio !== 'auto'
+          ? resolveEffectiveAspectRatio(targetItem.aspectRatio, null)
+          : '16:9'
+      );
 
       try {
         const authResp = await authorizeVideoStream(targetItem.id, targetItem.category);
         setAuthData(authResp);
+        if (!targetItem.aspectRatio || targetItem.aspectRatio === 'auto') {
+          setAutoAspectRatio(
+            inferAspectRatioFromUrlOrProvider({
+              provider: authResp.provider || authResp.streamType,
+              url: authResp.facebookVideoUrl || authResp.manifestUrl,
+            })
+          );
+        }
 
         const startSeek =
           typeof overrideSeekSeconds === 'number'
@@ -931,99 +965,124 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
 
         {/* Scrollable Player & Paywall Region */}
         <div className="relative flex-1 overflow-y-auto">
-          <div
-            ref={playerStageRef}
-            onContextMenu={(e) => e.preventDefault()}
-            className="relative aspect-video bg-slate-950 overflow-hidden select-none"
-          >
-            {isYoutubeStream ? (
+          {(() => {
+            const effectiveRatio = resolveEffectiveAspectRatio(
+              aspectRatio,
+              autoAspectRatio
+            );
+            const stageStyle = getAdaptiveFrameStyle(
+              effectiveRatio,
+              isFullscreen ? '100dvh' : '64dvh'
+            );
+
+            return (
               <div
-                ref={ytContainerRef}
-                className={`w-full h-full bg-black select-none ${
-                  isSurfaceLocked ? 'pointer-events-none' : ''
-                }`}
-                aria-label={`${item.title} YouTube video player`}
-              />
-            ) : isGenericEmbedStream ? (
-              (() => {
-                const embedSrc =
-                  authData?.streamType === 'facebook'
-                    ? authData?.facebookVideoUrl
-                      ? getFacebookEmbedUrl(authData.facebookVideoUrl, {
-                          autoplay: true,
-                          startSeconds:
-                            fbReplayNonce > 0 && !isFullUnlocked
-                              ? 0
-                              : startSeekRef.current,
-                        })
-                      : authData?.manifestUrl || ''
-                    : authData?.manifestUrl || '';
-
-                if (paywallReached || !embedSrc) {
-                  return <div className="w-full h-full bg-slate-950" />;
-                }
-
-                return (
-                  <div
-                    className={`w-full h-full bg-black select-none ${
-                      isSurfaceLocked ? 'pointer-events-none' : ''
-                    }`}
-                  >
-                    <iframe
-                      ref={embedIframeRef}
-                      key={`${authData?.videoId}-${authData?.streamType}-${authData?.mode}-${fbReplayNonce}`}
-                      src={embedSrc}
-                      title={`${item.title} ${authData?.provider || 'Embed'} video player`}
-                      className="w-full h-full border-0 bg-black"
-                      allow="autoplay; fullscreen; clipboard-write; encrypted-media; picture-in-picture; web-share"
-                      allowFullScreen
-                      referrerPolicy="strict-origin-when-cross-origin"
-                      onLoad={() => setFbIframeLoaded(true)}
-                      onError={() =>
-                        setStreamError(
-                          locale === 'id'
-                            ? 'Gagal memuat pemutar video embed. Pastikan tautan video publik dan tidak diblokir ekstensi browser.'
-                            : 'Unable to load embedded video player. Ensure the video is public and not blocked by privacy extensions.'
-                        )
-                      }
-                    />
-                  </div>
-                );
-              })()
-            ) : (
-              <video
-                ref={videoRef}
-                poster={item.backdropUrl}
-                playsInline
-                muted={isMuted}
-                controlsList="nodownload noplaybackrate"
-                disablePictureInPicture
+                ref={playerStageRef}
                 onContextMenu={(e) => e.preventDefault()}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onTimeUpdate={() => {
-                  if (!videoRef.current) return;
-                  const t = videoRef.current.currentTime;
-                  setCurrentTime(t);
-                  if (!isFullUnlocked && t >= 299.5) {
-                    videoRef.current.pause();
-                    setPaywallReached(true);
-                  }
-                }}
-                onLoadedMetadata={() => {
-                  if (videoRef.current && Number.isFinite(videoRef.current.duration)) {
-                    setDuration(videoRef.current.duration);
-                  }
-                }}
-                onEnded={() => {
-                  setIsPlaying(false);
-                  if (!isFullUnlocked) {
-                    setPaywallReached(true);
-                  }
-                }}
-                className="w-full h-full object-cover bg-black pointer-events-none"
-              />
-            )}
+                className="relative w-full min-h-[220px] sm:min-h-[300px] bg-slate-950 overflow-hidden select-none flex items-center justify-center"
+              >
+                <div
+                  style={stageStyle}
+                  className="relative bg-black overflow-hidden shrink-0"
+                >
+                  {isYoutubeStream ? (
+                    <div
+                      ref={ytContainerRef}
+                      className={`w-full h-full bg-black select-none ${
+                        isSurfaceLocked ? 'pointer-events-none' : ''
+                      }`}
+                      aria-label={`${item.title} YouTube video player`}
+                    />
+                  ) : isGenericEmbedStream ? (
+                    (() => {
+                      const embedSrc =
+                        authData?.streamType === 'facebook'
+                          ? authData?.facebookVideoUrl
+                            ? getFacebookEmbedUrl(authData.facebookVideoUrl, {
+                                autoplay: true,
+                                startSeconds:
+                                  fbReplayNonce > 0 && !isFullUnlocked
+                                    ? 0
+                                    : startSeekRef.current,
+                              })
+                            : authData?.manifestUrl || ''
+                          : authData?.manifestUrl || '';
+
+                      if (paywallReached || !embedSrc) {
+                        return <div className="w-full h-full bg-slate-950" />;
+                      }
+
+                      return (
+                        <div
+                          className={`w-full h-full bg-black select-none ${
+                            isSurfaceLocked ? 'pointer-events-none' : ''
+                          }`}
+                        >
+                          <iframe
+                            ref={embedIframeRef}
+                            key={`${authData?.videoId}-${authData?.streamType}-${authData?.mode}-${fbReplayNonce}`}
+                            src={embedSrc}
+                            title={`${item.title} ${authData?.provider || 'Embed'} video player`}
+                            className="w-full h-full border-0 bg-black"
+                            allow="autoplay; fullscreen; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                            allowFullScreen
+                            referrerPolicy="strict-origin-when-cross-origin"
+                            onLoad={() => setFbIframeLoaded(true)}
+                            onError={() =>
+                              setStreamError(
+                                locale === 'id'
+                                  ? 'Gagal memuat pemutar video embed. Pastikan tautan video publik dan tidak diblokir ekstensi browser.'
+                                  : 'Unable to load embedded video player. Ensure the video is public and not blocked by privacy extensions.'
+                              )
+                            }
+                          />
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <video
+                      ref={videoRef}
+                      poster={item.backdropUrl}
+                      playsInline
+                      muted={isMuted}
+                      controlsList="nodownload noplaybackrate"
+                      disablePictureInPicture
+                      onContextMenu={(e) => e.preventDefault()}
+                      onPlay={() => setIsPlaying(true)}
+                      onPause={() => setIsPlaying(false)}
+                      onTimeUpdate={() => {
+                        if (!videoRef.current) return;
+                        const t = videoRef.current.currentTime;
+                        setCurrentTime(t);
+                        if (!isFullUnlocked && t >= 299.5) {
+                          videoRef.current.pause();
+                          setPaywallReached(true);
+                        }
+                      }}
+                      onLoadedMetadata={() => {
+                        const v = videoRef.current;
+                        if (!v) return;
+                        if (Number.isFinite(v.duration)) {
+                          setDuration(v.duration);
+                        }
+                        if (v.videoWidth > 0 && v.videoHeight > 0) {
+                          setAutoAspectRatio(
+                            inferAspectRatioFromDimensions(v.videoWidth, v.videoHeight)
+                          );
+                        }
+                      }}
+                      onEnded={() => {
+                        setIsPlaying(false);
+                        if (!isFullUnlocked) {
+                          setPaywallReached(true);
+                        }
+                      }}
+                      className={`w-full h-full bg-black pointer-events-none ${
+                        videoFitMode === 'cover' ? 'object-cover' : 'object-contain'
+                      }`}
+                    />
+                  )}
+                </div>
 
             {/* Anti-Redirect Click-Shield over Video Area */}
             {!loadingStream && !streamError && !paywallReached && isSurfaceLocked && (
@@ -1183,7 +1242,39 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 sm:gap-2.5">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <select
+                        aria-label={locale === 'id' ? 'Rasio layar video' : 'Video aspect ratio'}
+                        value={aspectRatio}
+                        onChange={(e) =>
+                          setAspectRatio(e.target.value as VideoAspectRatio)
+                        }
+                        className="min-h-[32px] px-1.5 sm:px-2 py-1 rounded-md bg-slate-900/90 border border-white/20 text-[11px] font-mono text-white cursor-pointer"
+                      >
+                        {VIDEO_ASPECT_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.value === 'auto'
+                              ? `Auto (${autoAspectRatio})`
+                              : opt.shortLabel}
+                          </option>
+                        ))}
+                      </select>
+
+                      {!isYoutubeStream && !isGenericEmbedStream && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setVideoFitMode((prev) =>
+                              prev === 'contain' ? 'cover' : 'contain'
+                            )
+                          }
+                          aria-label={locale === 'id' ? 'Mode isi bingkai' : 'Toggle frame fit'}
+                          className="min-h-[32px] px-2 py-1 rounded-md bg-slate-900/90 border border-white/20 text-[11px] font-mono text-slate-200 hover:text-white hover:border-emerald-500 cursor-pointer whitespace-nowrap"
+                        >
+                          {videoFitMode === 'contain' ? 'Fit' : 'Fill'}
+                        </button>
+                      )}
+
                       {!isYoutubeStream && !isGenericEmbedStream && qualityLevels.length > 0 && (
                         <select
                           aria-label="Stream quality"
@@ -1270,6 +1361,8 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
               </div>
             )}
           </div>
+            );
+          })()}
 
           {/* Paywall Gate Panel */}
           {paywallReached && !isFreeRelease && (

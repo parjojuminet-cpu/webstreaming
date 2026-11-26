@@ -8,6 +8,7 @@ import { detectVideoSourceFromInput } from '../src/services/videoImport/registry
 import type { LinkInspectionDiagnostics } from '../src/services/videoImport/types.ts';
 import { parseStrictHttpsUrl } from '../src/services/videoImport/urlGuards.ts';
 import type { DirectStreamFormat } from '../src/types/vyora';
+import { inferAspectRatioFromUrlOrProvider } from '../src/utils/videoAspect.ts';
 
 const INSPECT_TIMEOUT_MS = 7000;
 const MAX_REDIRECT_HOPS = 3;
@@ -225,6 +226,8 @@ async function probeOfficialOEmbed(
   authorName?: string;
   thumbnailUrl?: string;
   durationSeconds?: number;
+  width?: number;
+  height?: number;
   errorDetail?: string;
 }> {
   try {
@@ -241,6 +244,8 @@ async function probeOfficialOEmbed(
           author_name?: string;
           thumbnail_url?: string;
           duration?: number;
+          width?: number;
+          height?: number;
         };
         return {
           status: 'ok',
@@ -258,6 +263,14 @@ async function probeOfficialOEmbed(
           durationSeconds:
             typeof parsed.duration === 'number' && Number.isFinite(parsed.duration)
               ? Math.round(parsed.duration)
+              : undefined,
+          width:
+            typeof parsed.width === 'number' && Number.isFinite(parsed.width) && parsed.width > 0
+              ? Math.round(parsed.width)
+              : undefined,
+          height:
+            typeof parsed.height === 'number' && Number.isFinite(parsed.height) && parsed.height > 0
+              ? Math.round(parsed.height)
               : undefined,
         };
       } catch {
@@ -410,6 +423,12 @@ export async function inspectUniversalVideoLink(
     const probe = await probeOfficialOEmbed(oEmbedEndpoint, source.platformLabel);
 
     if (probe.status === 'ok') {
+      const urlBasedRatio = inferAspectRatioFromUrlOrProvider({
+        provider: source.provider,
+        url: rawUrl,
+        width: probe.width,
+        height: probe.height,
+      });
       return {
         detected: true,
         provider: source.provider,
@@ -425,6 +444,9 @@ export async function inspectUniversalVideoLink(
         authorHint: probe.authorName,
         thumbnailUrl: probe.thumbnailUrl || source.thumbnailUrl,
         durationSecondsHint: probe.durationSeconds,
+        detectedWidth: probe.width,
+        detectedHeight: probe.height,
+        aspectRatioHint: urlBasedRatio,
         verifiability: source.verifiability,
         verifiabilityNoteId: source.verifiabilityNoteId,
         verifiabilityNoteEn: source.verifiabilityNoteEn,
@@ -533,6 +555,14 @@ export async function inspectUniversalVideoLink(
         titleHint: probe.title,
         authorHint: probe.authorName,
         thumbnailUrl: probe.thumbnailUrl,
+        detectedWidth: probe.width,
+        detectedHeight: probe.height,
+        aspectRatioHint: inferAspectRatioFromUrlOrProvider({
+          provider: 'tiktok',
+          url: resolvedUrl,
+          width: probe.width,
+          height: probe.height,
+        }),
         verifiability: source.verifiability,
         verifiabilityNoteId: source.verifiabilityNoteId,
         verifiabilityNoteEn: source.verifiabilityNoteEn,
@@ -646,6 +676,10 @@ export async function inspectUniversalVideoLink(
       canonicalRef: source.canonicalRef,
       canonicalUrl: source.canonicalUrl,
       embedUrl: source.embedUrl,
+      aspectRatioHint: inferAspectRatioFromUrlOrProvider({
+        provider: source.provider,
+        url: rawUrl,
+      }),
       linkStatus: 'uncertain',
       reasonCode: 'PLATFORM_NO_PUBLIC_OEMBED',
       messageId: `Tautan ${source.platformLabel} dikenali, tetapi ketersediaan privasi dan status putar lintas-domain tidak dapat dipastikan dari server. Anda dapat mencoba PREVIEW, namun pemutaran di iframe ${source.platformLabel} tidak dapat diverifikasi oleh sistem.`,

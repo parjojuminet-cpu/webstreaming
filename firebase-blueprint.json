@@ -234,6 +234,14 @@
           "type": "string",
           "enum": ["4K HDR", "4K UHD", "1080p HD"]
         },
+        "aspectRatio": {
+          "type": "string",
+          "enum": ["auto", "16:9", "9:16", "4:5", "1:1", "4:3", "21:9"]
+        },
+        "videoFitMode": {
+          "type": "string",
+          "enum": ["contain", "cover"]
+        },
         "audioFormat": {
           "type": "string",
           "maxLength": 60

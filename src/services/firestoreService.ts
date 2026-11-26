@@ -32,10 +32,16 @@ import type {
   ReviewItem,
   UserProfile,
   UserRole,
+  VideoAspectRatio,
   VideoAssetProvider,
+  VideoFitMode,
   WalletRecord,
   WalletTransactionRecord,
 } from '../types/vyora';
+import {
+  normalizeVideoAspectRatio,
+  normalizeVideoFitMode,
+} from '../utils/videoAspect';
 
 function sanitizeId(raw: string): string {
   return raw
@@ -360,6 +366,8 @@ export interface CreateVideoInput {
   creditCost: number;
   releaseYear: number;
   resolution: '4K HDR' | '4K UHD' | '1080p HD';
+  aspectRatio?: VideoAspectRatio;
+  videoFitMode?: VideoFitMode;
   audioFormat: string;
   languages: string[];
   assetProvider: VideoAssetProvider;
@@ -432,6 +440,8 @@ export async function createCreatorVideo(
     publishedAt:
       input.initialStatus === 'published' ? new Date().toISOString().slice(0, 10) : '',
     resolution: input.resolution,
+    aspectRatio: normalizeVideoAspectRatio(input.aspectRatio, '16:9'),
+    videoFitMode: normalizeVideoFitMode(input.videoFitMode, 'contain'),
     audioFormat: clampString(input.audioFormat || 'Studio Stereo', 60),
     languages: input.languages.length > 0 ? input.languages.slice(0, 8) : ['Indonesian', 'English'],
     status: input.initialStatus,
@@ -515,6 +525,23 @@ export async function updateVideoCover(
     await updateDoc(doc(db, 'videos', videoId), {
       thumbnailUrl: safeCover,
       backdropUrl: safeCover,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateVideoDisplaySettings(
+  videoId: string,
+  aspectRatio: VideoAspectRatio,
+  videoFitMode: VideoFitMode
+): Promise<void> {
+  const path = `videos/${videoId}`;
+  try {
+    await updateDoc(doc(db, 'videos', videoId), {
+      aspectRatio: normalizeVideoAspectRatio(aspectRatio, '16:9'),
+      videoFitMode: normalizeVideoFitMode(videoFitMode, 'contain'),
       updatedAt: serverTimestamp(),
     });
   } catch (error) {

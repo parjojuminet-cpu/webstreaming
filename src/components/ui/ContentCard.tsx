@@ -81,13 +81,25 @@ export const ContentCard: React.FC<ContentCardProps> = ({
     }
   };
 
+  const isPortraitOrSquare =
+    item.aspectRatio === '9:16' ||
+    item.aspectRatio === '4:5' ||
+    item.aspectRatio === '1:1';
+  const showCustomRatio = Boolean(
+    item.aspectRatio && item.aspectRatio !== 'auto' && item.aspectRatio !== '16:9'
+  );
+
   return (
     <article
       className={`group flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-600 dark:hover:border-emerald-500 rounded-xl overflow-hidden shadow-xs hover:shadow-md transition-all duration-200 ${className}`}
     >
-      {/* 16:9 Thumbnail / Hover Video Clip */}
+      {/* Thumbnail / Hover Video Clip */}
       <div
-        className="relative aspect-video overflow-hidden bg-slate-100 dark:bg-slate-800"
+        className={`relative aspect-video overflow-hidden ${
+          isPortraitOrSquare
+            ? 'bg-slate-950'
+            : 'bg-slate-100 dark:bg-slate-800'
+        }`}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
@@ -101,6 +113,7 @@ export const ContentCard: React.FC<ContentCardProps> = ({
             src={item.thumbnailUrl}
             alt={item.title}
             fallbackTitle={item.title}
+            fit={isPortraitOrSquare ? 'contain' : 'cover'}
             className="w-full h-full transition-transform duration-300 ease-out group-hover:scale-[1.03]"
           />
 
@@ -117,7 +130,9 @@ export const ContentCard: React.FC<ContentCardProps> = ({
                   e.currentTarget.currentTime = 0;
                 }
               }}
-              className={`absolute inset-0 w-full h-full object-cover pointer-events-none transition-opacity duration-300 ${
+              className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity duration-300 ${
+                isPortraitOrSquare ? 'object-contain bg-black' : 'object-cover'
+              } ${
                 clipReady ? 'opacity-100' : 'opacity-0'
               }`}
             />
@@ -156,6 +171,12 @@ export const ContentCard: React.FC<ContentCardProps> = ({
       <div className="flex flex-col flex-1 p-2.5 sm:p-4 min-w-0">
         <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mb-0.5 sm:mb-1.5 truncate">
           <span className="text-emerald-700 dark:text-emerald-400 font-semibold truncate">{categoryLabel}</span>
+          {showCustomRatio && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="font-mono tabular-nums shrink-0">{item.aspectRatio}</span>
+            </>
+          )}
           <span className="hidden sm:inline" aria-hidden="true">·</span>
           <span className="hidden sm:inline tabular-nums shrink-0">{item.resolution}</span>
         </div>

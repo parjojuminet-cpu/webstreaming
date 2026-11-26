@@ -3759,6 +3759,95 @@ function detectVideoSourceFromInput(rawInput) {
   };
 }
 
+// src/utils/videoAspect.ts
+var VIDEO_ASPECT_OPTIONS = [
+  {
+    value: "auto",
+    shortLabel: "Auto",
+    labelId: "Otomatis",
+    labelEn: "Auto Detect",
+    cssRatio: "16 / 9",
+    numericRatio: 16 / 9,
+    isPortrait: false
+  },
+  {
+    value: "16:9",
+    shortLabel: "16:9",
+    labelId: "16:9 (Landscape)",
+    labelEn: "16:9 (Widescreen)",
+    cssRatio: "16 / 9",
+    numericRatio: 16 / 9,
+    isPortrait: false
+  },
+  {
+    value: "9:16",
+    shortLabel: "9:16",
+    labelId: "9:16 (Vertikal / Shorts)",
+    labelEn: "9:16 (Vertical / Shorts)",
+    cssRatio: "9 / 16",
+    numericRatio: 9 / 16,
+    isPortrait: true
+  },
+  {
+    value: "4:5",
+    shortLabel: "4:5",
+    labelId: "4:5 (Potret Feed)",
+    labelEn: "4:5 (Portrait Feed)",
+    cssRatio: "4 / 5",
+    numericRatio: 4 / 5,
+    isPortrait: true
+  },
+  {
+    value: "1:1",
+    shortLabel: "1:1",
+    labelId: "1:1 (Persegi)",
+    labelEn: "1:1 (Square)",
+    cssRatio: "1 / 1",
+    numericRatio: 1,
+    isPortrait: false
+  },
+  {
+    value: "4:3",
+    shortLabel: "4:3",
+    labelId: "4:3 (Klasik)",
+    labelEn: "4:3 (Classic)",
+    cssRatio: "4 / 3",
+    numericRatio: 4 / 3,
+    isPortrait: false
+  },
+  {
+    value: "21:9",
+    shortLabel: "21:9",
+    labelId: "21:9 (Sinema)",
+    labelEn: "21:9 (Cinema)",
+    cssRatio: "21 / 9",
+    numericRatio: 21 / 9,
+    isPortrait: false
+  }
+];
+function inferAspectRatioFromDimensions(width, height) {
+  if (typeof width !== "number" || typeof height !== "number" || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return "16:9";
+  }
+  const ratio = width / height;
+  if (ratio <= 0.68) return "9:16";
+  if (ratio <= 0.9) return "4:5";
+  if (ratio <= 1.15) return "1:1";
+  if (ratio <= 1.52) return "4:3";
+  if (ratio <= 2.05) return "16:9";
+  return "21:9";
+}
+function inferAspectRatioFromUrlOrProvider(params) {
+  if (typeof params.width === "number" && typeof params.height === "number" && params.width > 0 && params.height > 0) {
+    return inferAspectRatioFromDimensions(params.width, params.height);
+  }
+  const lowerUrl = (params.url || "").toLowerCase();
+  if (lowerUrl.includes("/shorts/") || lowerUrl.includes("/reel/") || lowerUrl.includes("/reels/") || params.provider === "tiktok") {
+    return "9:16";
+  }
+  return "16:9";
+}
+
 // server/videoInspector.ts
 var INSPECT_TIMEOUT_MS = 7e3;
 var MAX_REDIRECT_HOPS = 3;
@@ -3936,7 +4025,9 @@ async function probeOfficialOEmbed(oEmbedUrl, platformLabel) {
           title: typeof parsed.title === "string" ? parsed.title.slice(0, 140) : void 0,
           authorName: typeof parsed.author_name === "string" ? parsed.author_name.slice(0, 80) : void 0,
           thumbnailUrl: typeof parsed.thumbnail_url === "string" && parsed.thumbnail_url.startsWith("https://") ? parsed.thumbnail_url.slice(0, 500) : void 0,
-          durationSeconds: typeof parsed.duration === "number" && Number.isFinite(parsed.duration) ? Math.round(parsed.duration) : void 0
+          durationSeconds: typeof parsed.duration === "number" && Number.isFinite(parsed.duration) ? Math.round(parsed.duration) : void 0,
+          width: typeof parsed.width === "number" && Number.isFinite(parsed.width) && parsed.width > 0 ? Math.round(parsed.width) : void 0,
+          height: typeof parsed.height === "number" && Number.isFinite(parsed.height) && parsed.height > 0 ? Math.round(parsed.height) : void 0
         };
       } catch {
         return {
@@ -4015,6 +4106,12 @@ async function inspectUniversalVideoLink(rawUrl) {
     )}`;
     const probe = await probeOfficialOEmbed(oEmbedEndpoint, source.platformLabel);
     if (probe.status === "ok") {
+      const urlBasedRatio = inferAspectRatioFromUrlOrProvider({
+        provider: source.provider,
+        url: rawUrl,
+        width: probe.width,
+        height: probe.height
+      });
       return {
         detected: true,
         provider: source.provider,
@@ -4030,6 +4127,9 @@ async function inspectUniversalVideoLink(rawUrl) {
         authorHint: probe.authorName,
         thumbnailUrl: probe.thumbnailUrl || source.thumbnailUrl,
         durationSecondsHint: probe.durationSeconds,
+        detectedWidth: probe.width,
+        detectedHeight: probe.height,
+        aspectRatioHint: urlBasedRatio,
         verifiability: source.verifiability,
         verifiabilityNoteId: source.verifiabilityNoteId,
         verifiabilityNoteEn: source.verifiabilityNoteEn
@@ -4125,6 +4225,14 @@ async function inspectUniversalVideoLink(rawUrl) {
         titleHint: probe.title,
         authorHint: probe.authorName,
         thumbnailUrl: probe.thumbnailUrl,
+        detectedWidth: probe.width,
+        detectedHeight: probe.height,
+        aspectRatioHint: inferAspectRatioFromUrlOrProvider({
+          provider: "tiktok",
+          url: resolvedUrl,
+          width: probe.width,
+          height: probe.height
+        }),
         verifiability: source.verifiability,
         verifiabilityNoteId: source.verifiabilityNoteId,
         verifiabilityNoteEn: source.verifiabilityNoteEn
@@ -4226,6 +4334,10 @@ async function inspectUniversalVideoLink(rawUrl) {
       canonicalRef: source.canonicalRef,
       canonicalUrl: source.canonicalUrl,
       embedUrl: source.embedUrl,
+      aspectRatioHint: inferAspectRatioFromUrlOrProvider({
+        provider: source.provider,
+        url: rawUrl
+      }),
       linkStatus: "uncertain",
       reasonCode: "PLATFORM_NO_PUBLIC_OEMBED",
       messageId: `Tautan ${source.platformLabel} dikenali, tetapi ketersediaan privasi dan status putar lintas-domain tidak dapat dipastikan dari server. Anda dapat mencoba PREVIEW, namun pemutaran di iframe ${source.platformLabel} tidak dapat diverifikasi oleh sistem.`,

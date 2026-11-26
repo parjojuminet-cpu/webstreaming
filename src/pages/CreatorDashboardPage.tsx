@@ -22,6 +22,7 @@ import {
   creatorSubmitForReview,
   subscribeCreatorVideos,
   updateVideoCover,
+  updateVideoDisplaySettings,
   upsertCreatorProfile,
 } from '../services/firestoreService';
 import {
@@ -37,6 +38,15 @@ import {
   type StreamCapabilities,
 } from '../services/streamService';
 import { autoCaptureCoverFromVideoFile } from '../utils/videoThumbnail';
+import {
+  VIDEO_ASPECT_OPTIONS,
+  getAdaptiveFrameStyle,
+  inferAspectRatioFromDimensions,
+  normalizeVideoAspectRatio,
+  normalizeVideoFitMode,
+  resolveEffectiveAspectRatio,
+  type FixedVideoAspectRatio,
+} from '../utils/videoAspect';
 import { CoverPicker } from '../components/creator/CoverPicker';
 import {
   UniversalVideoImportPanel,
@@ -56,7 +66,9 @@ import type {
   ContentItem,
   CurrencyCode,
   LocaleCode,
+  VideoAspectRatio,
   VideoAssetProvider,
+  VideoFitMode,
   ViewRoute,
 } from '../types/vyora';
 import { Button } from '../components/ui/Button';
@@ -165,6 +177,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   const [vResolution, setVResolution] = useState<'4K HDR' | '4K UHD' | '1080p HD'>(
     '4K HDR'
   );
+  const [vAspectRatio, setVAspectRatio] = useState<VideoAspectRatio>('auto');
+  const [vDetectedAspectRatio, setVDetectedAspectRatio] =
+    useState<FixedVideoAspectRatio | null>(null);
+  const [vVideoFitMode, setVVideoFitMode] = useState<VideoFitMode>('contain');
   const [vAudio, setVAudio] = useState('Dolby Atmos');
   const [vPricingMode, setVPricingMode] = useState<'paid' | 'free'>('paid');
   const [vPriceUsd, setVPriceUsd] = useState(4.99);
@@ -189,9 +205,11 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   const [videoMsg, setVideoMsg] = useState<string | null>(null);
   const [videoErr, setVideoErr] = useState<string | null>(null);
 
-  // Edit Cover Modal state (Kelola Konten)
+  // Edit Cover & Display Modal state (Kelola Konten)
   const [editingCoverItem, setEditingCoverItem] = useState<ContentItem | null>(null);
   const [editingCoverUrl, setEditingCoverUrl] = useState('');
+  const [editingAspectRatio, setEditingAspectRatio] = useState<VideoAspectRatio>('16:9');
+  const [editingFitMode, setEditingFitMode] = useState<VideoFitMode>('contain');
   const [savingEditedCover, setSavingEditedCover] = useState(false);
   const [editingCoverErr, setEditingCoverErr] = useState<string | null>(null);
 
@@ -432,6 +450,14 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
         if (Number.isFinite(probe.duration) && probe.duration > 0) {
           setVDuration(Math.max(1, Math.round(probe.duration / 60)));
         }
+        if (probe.videoWidth > 0 && probe.videoHeight > 0) {
+          const detected = inferAspectRatioFromDimensions(
+            probe.videoWidth,
+            probe.videoHeight
+          );
+          setVDetectedAspectRatio(detected);
+          setVAspectRatio(detected);
+        }
       };
       probe.src = nextPreviewUrl;
     } catch {
@@ -577,6 +603,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
         creditCost: isFreeUpload ? 0 : Number(vCreditCost),
         releaseYear: safeYear,
         resolution: vResolution,
+        aspectRatio: resolveEffectiveAspectRatio(vAspectRatio, vDetectedAspectRatio),
+        videoFitMode: vVideoFitMode,
         audioFormat: vAudio,
         languages: parsedLanguages.length > 0 ? parsedLanguages : ['Indonesian', 'English'],
         assetProvider: effectiveProvider,
@@ -602,6 +630,9 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
       setVerifiedImportPayload(null);
       setVUploadedFileName(null);
       setVUploadedMimeType(undefined);
+      setVAspectRatio('auto');
+      setVDetectedAspectRatio(null);
+      setVVideoFitMode('contain');
       setVReleaseYear(new Date().getFullYear());
       setVLanguages('Indonesian, English');
       setVThumbnail(THUMBNAIL_PRESETS[0].url);
@@ -1017,6 +1048,10 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                         <span>{vid.category}</span>
                         <span aria-hidden="true">·</span>
                         <span className="font-mono tabular-nums">
+                          {vid.aspectRatio && vid.aspectRatio !== 'auto' ? vid.aspectRatio : '16:9'}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className="font-mono tabular-nums">
                           {formatDuration(vid.durationMinutes, locale)}
                         </span>
                         <span aria-hidden="true">·</span>
@@ -1053,10 +1088,16 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                         onClick={() => {
                           setEditingCoverItem(vid);
                           setEditingCoverUrl(vid.thumbnailUrl);
+                          setEditingAspectRatio(
+                            normalizeVideoAspectRatio(vid.aspectRatio, '16:9')
+                          );
+                          setEditingFitMode(
+                            normalizeVideoFitMode(vid.videoFitMode, 'contain')
+                          );
                           setEditingCoverErr(null);
                         }}
                       >
-                        {locale === 'id' ? 'Ganti Cover' : 'Edit Cover'}
+                        {locale === 'id' ? 'Cover & Rasio' : 'Cover & Ratio'}
                       </Button>
                     )}
                     {(vid.status === 'draft' || vid.status === 'rejected') && (
@@ -1293,17 +1334,80 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                       </div>
                     )}
 
-                    {vVideoPreviewUrl && (
-                      <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-200 dark:border-slate-800">
-                        <video
-                          src={vVideoPreviewUrl}
-                          controls
-                          playsInline
-                          preload="metadata"
-                          className="w-full h-full object-contain"
-                        />
-                      </div>
-                    )}
+                    {vVideoPreviewUrl && (() => {
+                      const effectiveDeviceRatio = resolveEffectiveAspectRatio(
+                        vAspectRatio,
+                        vDetectedAspectRatio
+                      );
+                      return (
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mr-1">
+                                {locale === 'id' ? 'Rasio:' : 'Aspect:'}
+                              </span>
+                              {VIDEO_ASPECT_OPTIONS.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  onClick={() => setVAspectRatio(opt.value)}
+                                  className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[11px] font-mono font-semibold cursor-pointer transition-colors ${
+                                    vAspectRatio === opt.value
+                                      ? 'bg-emerald-600 text-white'
+                                      : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-emerald-500'
+                                  }`}
+                                >
+                                  {opt.value === 'auto'
+                                    ? `${opt.shortLabel} (${effectiveDeviceRatio})`
+                                    : opt.shortLabel}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="inline-flex items-center gap-1 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                              <button
+                                type="button"
+                                onClick={() => setVVideoFitMode('contain')}
+                                className={`px-2 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${
+                                  vVideoFitMode === 'contain'
+                                    ? 'bg-slate-900 dark:bg-emerald-600 text-white'
+                                    : 'text-slate-600 dark:text-slate-300'
+                                }`}
+                              >
+                                {locale === 'id' ? 'Utuh (Fit)' : 'Fit'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setVVideoFitMode('cover')}
+                                className={`px-2 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${
+                                  vVideoFitMode === 'cover'
+                                    ? 'bg-slate-900 dark:bg-emerald-600 text-white'
+                                    : 'text-slate-600 dark:text-slate-300'
+                                }`}
+                              >
+                                {locale === 'id' ? 'Penuh (Fill)' : 'Fill'}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="w-full rounded-xl overflow-hidden bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-center">
+                            <div
+                              style={getAdaptiveFrameStyle(effectiveDeviceRatio, '48dvh')}
+                              className="bg-black overflow-hidden"
+                            >
+                              <video
+                                src={vVideoPreviewUrl}
+                                controls
+                                playsInline
+                                preload="metadata"
+                                className={`w-full h-full ${
+                                  vVideoFitMode === 'cover' ? 'object-cover' : 'object-contain'
+                                }`}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="flex flex-wrap items-center gap-2">
                       <Button
@@ -1379,6 +1483,14 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                           setVAssetRef(payload.assetRef);
                           setVUploadedFileName(null);
                           setVUploadedMimeType(payload.mimeType);
+                          if (payload.aspectRatio) {
+                            const fixed = resolveEffectiveAspectRatio(payload.aspectRatio, null);
+                            setVDetectedAspectRatio(fixed);
+                            setVAspectRatio(fixed);
+                          }
+                          if (payload.videoFitMode) {
+                            setVVideoFitMode(payload.videoFitMode);
+                          }
                           if (!vTitle.trim() && payload.titleHint) {
                             setVTitle(payload.titleHint.slice(0, 140));
                           }
@@ -1426,6 +1538,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                               creditCost: item.creditCost,
                               releaseYear: item.releaseYear,
                               resolution: item.resolution,
+                              aspectRatio: item.aspectRatio,
+                              videoFitMode: item.videoFitMode,
                               audioFormat: item.audioFormat,
                               languages: item.languages,
                               assetProvider: item.assetProvider,
@@ -1620,9 +1734,11 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                      {locale === 'id' ? 'Resolusi & Format Audio' : 'Resolution & Audio'}
+                      {locale === 'id'
+                        ? 'Resolusi, Rasio Video & Format Audio'
+                        : 'Resolution, Video Aspect Ratio & Audio'}
                     </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <select
                         value={vResolution}
                         onChange={(e) =>
@@ -1634,10 +1750,46 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                         <option value="4K UHD">4K UHD</option>
                         <option value="1080p HD">1080p HD</option>
                       </select>
+                      <select
+                        value={vAspectRatio}
+                        onChange={(e) =>
+                          setVAspectRatio(e.target.value as VideoAspectRatio)
+                        }
+                        className={inputClass}
+                      >
+                        {VIDEO_ASPECT_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.value === 'auto'
+                              ? locale === 'id'
+                                ? `Otomatis (${vDetectedAspectRatio || '16:9'})`
+                                : `Auto (${vDetectedAspectRatio || '16:9'})`
+                              : locale === 'id'
+                              ? opt.labelId
+                              : opt.labelEn}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={vVideoFitMode}
+                        onChange={(e) =>
+                          setVVideoFitMode(e.target.value as VideoFitMode)
+                        }
+                        className={inputClass}
+                      >
+                        <option value="contain">
+                          {locale === 'id' ? 'Tampilan Utuh (Fit)' : 'Fit Entire Frame'}
+                        </option>
+                        <option value="cover">
+                          {locale === 'id' ? 'Isi Penuh (Crop/Fill)' : 'Fill Frame (Cover)'}
+                        </option>
+                      </select>
+                    </div>
+                    <div className="mt-2.5">
                       <input
                         type="text"
                         value={vAudio}
                         onChange={(e) => setVAudio(e.target.value)}
+                        placeholder="Dolby Atmos / Studio Stereo"
                         className={inputClass}
                       />
                     </div>
@@ -2140,6 +2292,45 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                 presets={THUMBNAIL_PRESETS}
                 onChange={(nextUrl) => setEditingCoverUrl(nextUrl)}
               />
+
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2.5">
+                <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                  {locale === 'id'
+                    ? 'Penyesuaian Rasio & Bingkai Video'
+                    : 'Video Aspect Ratio & Framing'}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <select
+                    value={editingAspectRatio}
+                    onChange={(e) =>
+                      setEditingAspectRatio(e.target.value as VideoAspectRatio)
+                    }
+                    className={inputClass}
+                  >
+                    {VIDEO_ASPECT_OPTIONS.filter((opt) => opt.value !== 'auto').map(
+                      (opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {locale === 'id' ? opt.labelId : opt.labelEn}
+                        </option>
+                      )
+                    )}
+                  </select>
+                  <select
+                    value={editingFitMode}
+                    onChange={(e) =>
+                      setEditingFitMode(e.target.value as VideoFitMode)
+                    }
+                    className={inputClass}
+                  >
+                    <option value="contain">
+                      {locale === 'id' ? 'Utuh tanpa terpotong (Fit)' : 'Fit Frame (Contain)'}
+                    </option>
+                    <option value="cover">
+                      {locale === 'id' ? 'Penuh memenuhi layar (Fill)' : 'Fill Frame (Cover)'}
+                    </option>
+                  </select>
+                </div>
+              </div>
             </div>
 
             <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2.5">
@@ -2159,10 +2350,15 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   setSavingEditedCover(true);
                   try {
                     await updateVideoCover(editingCoverItem.id, editingCoverUrl);
+                    await updateVideoDisplaySettings(
+                      editingCoverItem.id,
+                      editingAspectRatio,
+                      editingFitMode
+                    );
                     setVideoMsg(
                       locale === 'id'
-                        ? `Cover "${editingCoverItem.title}" berhasil diperbarui di galeri!`
-                        : `Gallery cover for "${editingCoverItem.title}" updated!`
+                        ? `Cover dan rasio video (${editingAspectRatio}) untuk "${editingCoverItem.title}" berhasil diperbarui!`
+                        : `Cover and aspect ratio (${editingAspectRatio}) for "${editingCoverItem.title}" updated!`
                     );
                     setEditingCoverItem(null);
                   } catch (err) {
@@ -2178,7 +2374,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   }
                 }}
               >
-                {locale === 'id' ? 'Simpan Cover Baru' : 'Save New Cover'}
+                {locale === 'id' ? 'Simpan Perubahan' : 'Save Changes'}
               </Button>
             </div>
           </div>

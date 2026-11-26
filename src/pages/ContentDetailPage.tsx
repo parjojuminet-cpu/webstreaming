@@ -204,6 +204,12 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
               <span className="font-mono tabular-nums">{item.releaseYear}</span>
               <span aria-hidden="true">·</span>
               <span className="font-mono tabular-nums">{item.resolution}</span>
+              {item.aspectRatio && item.aspectRatio !== 'auto' && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-mono tabular-nums">{item.aspectRatio}</span>
+                </>
+              )}
               <span aria-hidden="true">·</span>
               <span className="inline-flex items-center gap-1 font-mono tabular-nums text-white">
                 <Star className="w-3.5 h-3.5 text-emerald-400 fill-current" aria-hidden="true" />

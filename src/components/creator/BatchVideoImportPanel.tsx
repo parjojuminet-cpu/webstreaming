@@ -22,9 +22,17 @@ import type {
   LinkCheckStatus,
   LocaleCode,
   PlaybackCheckStatus,
+  VideoAspectRatio,
   VideoAssetProvider,
+  VideoFitMode,
 } from '../../types/vyora';
 import { CATEGORY_LIST } from '../../i18n/translations';
+import {
+  VIDEO_ASPECT_OPTIONS,
+  getAdaptiveFrameStyle,
+  inferAspectRatioFromUrlOrProvider,
+  resolveEffectiveAspectRatio,
+} from '../../utils/videoAspect';
 import { loadYouTubeIframeApi, type YTPlayerInstance } from '../../utils/youtubeApi';
 import { Button } from '../ui/Button';
 
@@ -41,6 +49,8 @@ export interface BatchSaveVideoInput {
   creditCost: number;
   releaseYear: number;
   resolution: '4K HDR' | '4K UHD' | '1080p HD';
+  aspectRatio: VideoAspectRatio;
+  videoFitMode: VideoFitMode;
   audioFormat: string;
   languages: string[];
   assetProvider: VideoAssetProvider;
@@ -57,6 +67,7 @@ interface BatchQueueItem {
   description: string;
   thumbnailUrl: string;
   durationMinutes: number;
+  aspectRatio: VideoAspectRatio;
   linkStatus: LinkCheckStatus;
   playbackStatus: PlaybackCheckStatus;
   inspection: LinkInspectionDiagnostics | null;
@@ -164,6 +175,7 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
       description: (p.description || '').slice(0, 2000),
       thumbnailUrl: FALLBACK_COVER,
       durationMinutes: 15,
+      aspectRatio: inferAspectRatioFromUrlOrProvider({ url: p.url }),
       linkStatus: 'checking',
       playbackStatus: 'waiting_play',
       inspection: null,
@@ -211,6 +223,14 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
             : 15;
 
           const resolvedThumb = diag.thumbnailUrl || FALLBACK_COVER;
+          const resolvedRatio =
+            diag.aspectRatioHint ||
+            inferAspectRatioFromUrlOrProvider({
+              provider: diag.provider,
+              url: diag.canonicalUrl || current.rawUrl,
+              width: diag.detectedWidth,
+              height: diag.detectedHeight,
+            });
 
           if (!mountedRef.current) return;
           updateItem(current.id, {
@@ -219,6 +239,7 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
             description: resolvedDesc,
             thumbnailUrl: resolvedThumb,
             durationMinutes: resolvedDuration,
+            aspectRatio: resolvedRatio,
             inspection: diag,
             linkStatus: diag.linkStatus,
             playbackStatus:
@@ -727,6 +748,8 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
           creditCost: isFree ? 0 : Number(batchCreditCost),
           releaseYear: new Date().getFullYear(),
           resolution: '1080p HD',
+          aspectRatio: resolveEffectiveAspectRatio(item.aspectRatio, diag.aspectRatioHint),
+          videoFitMode: 'contain',
           audioFormat: 'Studio Stereo',
           languages,
           assetProvider: diag.provider!,
@@ -873,33 +896,44 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
             )}
           </div>
 
-          <div className="aspect-video max-h-64 w-full rounded-xl overflow-hidden bg-slate-950 border border-slate-800">
-            {activePreviewItem.inspection?.provider === 'youtube' && (
-              <div ref={ytHostRef} className="w-full h-full" />
-            )}
-            {activePreviewItem.inspection?.provider === 'direct_video' && (
-              <video
-                ref={htmlVideoRef}
-                controls
-                muted
-                playsInline
-                className="w-full h-full object-contain bg-black"
-              />
-            )}
-            {(activePreviewItem.inspection?.provider === 'vimeo' ||
-              activePreviewItem.inspection?.provider === 'dailymotion' ||
-              activePreviewItem.inspection?.provider === 'streamable' ||
-              activePreviewItem.inspection?.provider === 'tiktok') &&
-              activePreviewItem.inspection.embedUrl && (
-                <iframe
-                  ref={iframeRef}
-                  src={activePreviewItem.inspection.embedUrl}
-                  title="Batch Playback Verifier"
-                  className="w-full h-full border-0"
-                  allow="autoplay; fullscreen; picture-in-picture"
-                  referrerPolicy="strict-origin-when-cross-origin"
+          <div className="w-full rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+            <div
+              style={getAdaptiveFrameStyle(
+                resolveEffectiveAspectRatio(
+                  activePreviewItem.aspectRatio,
+                  activePreviewItem.inspection?.aspectRatioHint
+                ),
+                '260px'
+              )}
+              className="bg-black overflow-hidden"
+            >
+              {activePreviewItem.inspection?.provider === 'youtube' && (
+                <div ref={ytHostRef} className="w-full h-full" />
+              )}
+              {activePreviewItem.inspection?.provider === 'direct_video' && (
+                <video
+                  ref={htmlVideoRef}
+                  controls
+                  muted
+                  playsInline
+                  className="w-full h-full object-contain bg-black"
                 />
               )}
+              {(activePreviewItem.inspection?.provider === 'vimeo' ||
+                activePreviewItem.inspection?.provider === 'dailymotion' ||
+                activePreviewItem.inspection?.provider === 'streamable' ||
+                activePreviewItem.inspection?.provider === 'tiktok') &&
+                activePreviewItem.inspection.embedUrl && (
+                  <iframe
+                    ref={iframeRef}
+                    src={activePreviewItem.inspection.embedUrl}
+                    title="Batch Playback Verifier"
+                    className="w-full h-full border-0"
+                    allow="autoplay; fullscreen; picture-in-picture"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                  />
+                )}
+            </div>
           </div>
         </div>
       )}
@@ -1001,6 +1035,23 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5">
+                      <select
+                        aria-label={locale === 'id' ? 'Rasio video' : 'Video aspect ratio'}
+                        disabled={item.saved || savingBatch}
+                        value={item.aspectRatio}
+                        onChange={(e) =>
+                          updateItem(item.id, {
+                            aspectRatio: e.target.value as VideoAspectRatio,
+                          })
+                        }
+                        className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-mono font-semibold text-slate-700 dark:text-slate-200 cursor-pointer disabled:opacity-50"
+                      >
+                        {VIDEO_ASPECT_OPTIONS.filter((opt) => opt.value !== 'auto').map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.shortLabel}
+                          </option>
+                        ))}
+                      </select>
                       {!item.saved &&
                         item.playbackStatus !== 'verified_playing' &&
                         (item.linkStatus === 'embeddable' || item.linkStatus === 'uncertain') &&

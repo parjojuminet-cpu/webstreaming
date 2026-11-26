@@ -7,6 +7,7 @@ interface MediaImageProps {
   className?: string;
   fallbackTitle?: string;
   loading?: 'eager' | 'lazy';
+  fit?: 'cover' | 'contain';
 }
 
 export const MediaImage: React.FC<MediaImageProps> = ({
@@ -15,6 +16,7 @@ export const MediaImage: React.FC<MediaImageProps> = ({
   className = '',
   fallbackTitle,
   loading = 'lazy',
+  fit = 'cover',
 }) => {
   const [hasError, setHasError] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -42,7 +44,11 @@ export const MediaImage: React.FC<MediaImageProps> = ({
   }
 
   return (
-    <div className={`relative overflow-hidden bg-slate-100 dark:bg-slate-800 ${className}`}>
+    <div
+      className={`relative overflow-hidden ${
+        fit === 'contain' ? 'bg-slate-950' : 'bg-slate-100 dark:bg-slate-800'
+      } ${className}`}
+    >
       {!loaded && (
         <div
           className="absolute inset-0 bg-slate-200 dark:bg-slate-800 animate-pulse"
@@ -56,7 +62,9 @@ export const MediaImage: React.FC<MediaImageProps> = ({
         referrerPolicy="no-referrer"
         onLoad={() => setLoaded(true)}
         onError={() => setHasError(true)}
-        className={`w-full h-full object-cover transition-opacity duration-300 ${
+        className={`w-full h-full ${
+          fit === 'contain' ? 'object-contain' : 'object-cover'
+        } transition-opacity duration-300 ${
           loaded ? 'opacity-100' : 'opacity-0'
         }`}
       />
