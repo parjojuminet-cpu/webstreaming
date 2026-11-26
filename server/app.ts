@@ -87,7 +87,7 @@ import {
 } from './mediaLifecycle.ts';
 import { inspectUniversalVideoLink } from './videoInspector.ts';
 import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
-import { extractYouTubeVideoId } from '../src/utils/youtube.ts';
+import { extractYouTubeEmbedTarget } from '../src/utils/youtube.ts';
 import {
   extractFacebookVideoUrl,
   getFacebookEmbedUrl,
@@ -1046,15 +1046,15 @@ export function createApiApp(): Express {
       let trimmedRef = assetRef.trim();
 
       if (typedProvider === 'youtube') {
-        const ytId = extractYouTubeVideoId(trimmedRef);
-        if (!ytId) {
+        const ytTarget = extractYouTubeEmbedTarget(trimmedRef);
+        if (!ytTarget) {
           res.status(400).json({
             error:
-              'Invalid YouTube link or Video ID. Use a standard youtube.com/watch?v=... or youtu.be/... link.',
+              'Invalid YouTube link or ID. Use a standard youtube.com/watch?v=..., youtu.be/..., or youtube.com/playlist?list=... link.',
           });
           return;
         }
-        trimmedRef = ytId;
+        trimmedRef = ytTarget.canonicalRef;
       } else if (typedProvider === 'facebook') {
         const fbUrl = extractFacebookVideoUrl(trimmedRef);
         if (!fbUrl) {
@@ -1386,18 +1386,20 @@ export function createApiApp(): Express {
         (mediaBinding.provider === 'private_storage' &&
           mediaBinding.assetRef.startsWith('youtube:')))
     ) {
-      const ytId = extractYouTubeVideoId(mediaBinding.assetRef);
-      if (ytId) {
+      const ytTarget = extractYouTubeEmbedTarget(mediaBinding.assetRef);
+      if (ytTarget) {
         res.json({
           mode,
           isFree: isFreeRelease,
           streamType: 'youtube',
           provider: 'youtube',
-          youtubeVideoId: ytId,
+          ...(ytTarget.kind === 'video'
+            ? { youtubeVideoId: ytTarget.videoId }
+            : { youtubePlaylistId: ytTarget.playlistId }),
           videoId,
           previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
           resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
-          manifestUrl: `https://www.youtube-nocookie.com/embed/${ytId}`,
+          manifestUrl: ytTarget.embedUrl,
           entitlement: entitlementPayload,
           serverTimeIso: new Date(now).toISOString(),
         });

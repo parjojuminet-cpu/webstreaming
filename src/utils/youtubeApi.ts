@@ -14,7 +14,7 @@ export interface YTNamespace {
   Player: new (
     element: HTMLElement | string,
     options: {
-      videoId: string;
+      videoId?: string;
       host?: string;
       width?: string | number;
       height?: string | number;

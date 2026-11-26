@@ -2583,6 +2583,7 @@ function getFacebookEmbedUrl(rawUrl, options) {
 
 // src/utils/youtube.ts
 var YOUTUBE_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/;
+var YOUTUBE_PLAYLIST_ID_REGEX = /^[a-zA-Z0-9_-]{10,64}$/;
 var ALLOWED_YOUTUBE_HOSTS = /* @__PURE__ */ new Set([
   "youtube.com",
   "www.youtube.com",
@@ -2597,6 +2598,9 @@ function extractYouTubeVideoId(rawInput) {
   const trimmed = rawInput.trim();
   if (!trimmed) return null;
   const withoutPrefix = trimmed.startsWith("youtube:") ? trimmed.slice("youtube:".length).trim() : trimmed;
+  if (withoutPrefix.startsWith("playlist:")) {
+    return null;
+  }
   if (YOUTUBE_ID_REGEX.test(withoutPrefix)) {
     return withoutPrefix;
   }
@@ -2624,7 +2628,7 @@ function extractYouTubeVideoId(rawInput) {
       candidate = vParam;
     } else {
       const parts = parsed.pathname.split("/").filter(Boolean);
-      if (parts.length >= 2 && (parts[0] === "embed" || parts[0] === "shorts" || parts[0] === "live" || parts[0] === "v")) {
+      if (parts.length >= 2 && (parts[0] === "embed" || parts[0] === "shorts" || parts[0] === "live" || parts[0] === "v") && parts[1] !== "videoseries") {
         candidate = parts[1];
       }
     }
@@ -2634,15 +2638,66 @@ function extractYouTubeVideoId(rawInput) {
   }
   return null;
 }
+function extractYouTubePlaylistId(rawInput) {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const withoutPrefix = trimmed.startsWith("youtube:") ? trimmed.slice("youtube:".length).trim() : trimmed;
+  if (withoutPrefix.startsWith("playlist:")) {
+    const candidate = withoutPrefix.slice("playlist:".length).trim();
+    return YOUTUBE_PLAYLIST_ID_REGEX.test(candidate) ? candidate : null;
+  }
+  let parsed;
+  try {
+    const withScheme = withoutPrefix.startsWith("http://") || withoutPrefix.startsWith("https://") ? withoutPrefix : `https://${withoutPrefix}`;
+    parsed = new URL(withScheme);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return null;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (!ALLOWED_YOUTUBE_HOSTS.has(host)) {
+    return null;
+  }
+  const parts = parsed.pathname.split("/").filter(Boolean);
+  const isPlaylistPath = parts[0] === "playlist" || parts[0] === "embed" && parts[1] === "videoseries";
+  if (!isPlaylistPath) {
+    return null;
+  }
+  const listParam = parsed.searchParams.get("list")?.trim() || "";
+  if (YOUTUBE_PLAYLIST_ID_REGEX.test(listParam)) {
+    return listParam;
+  }
+  return null;
+}
+function extractYouTubeEmbedTarget(rawInput) {
+  const videoId = extractYouTubeVideoId(rawInput);
+  if (videoId) {
+    return {
+      kind: "video",
+      videoId,
+      canonicalRef: videoId,
+      canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+      embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`
+    };
+  }
+  const playlistId = extractYouTubePlaylistId(rawInput);
+  if (playlistId) {
+    return {
+      kind: "playlist",
+      playlistId,
+      canonicalRef: `playlist:${playlistId}`,
+      canonicalUrl: `https://www.youtube.com/playlist?list=${playlistId}`,
+      embedUrl: `https://www.youtube-nocookie.com/embed/videoseries?list=${playlistId}`
+    };
+  }
+  return null;
+}
 function getYouTubeThumbnailUrl(videoId) {
   const cleanId = extractYouTubeVideoId(videoId);
   if (!cleanId) return "";
   return `https://i.ytimg.com/vi/${cleanId}/hqdefault.jpg`;
-}
-function getYouTubeNoCookieEmbedUrl(videoId) {
-  const cleanId = extractYouTubeVideoId(videoId);
-  if (!cleanId) return "";
-  return `https://www.youtube-nocookie.com/embed/${cleanId}`;
 }
 
 // src/services/videoImport/urlGuards.ts
@@ -3028,16 +3083,29 @@ var youtubeAdapter = {
       const check = parseStrictHttpsUrl(trimmed, { allowBareHostname: true });
       if (!check.ok || !YOUTUBE_HOSTS.has(check.url.hostname.toLowerCase())) return null;
     }
-    const ytId = extractYouTubeVideoId(trimmed);
-    if (!ytId) return null;
+    const target = extractYouTubeEmbedTarget(trimmed);
+    if (!target) return null;
+    if (target.kind === "playlist") {
+      return {
+        provider: "youtube",
+        platformLabel: "YouTube Playlist",
+        originalUrl: trimmed,
+        canonicalRef: target.canonicalRef,
+        canonicalUrl: target.canonicalUrl,
+        embedUrl: target.embedUrl,
+        verifiability: "verifiable",
+        verifiabilityNoteId: "Menggunakan YouTube IFrame Player API resmi (Playlist). Sistem memverifikasi pemutaran nyata dan izin penyematan.",
+        verifiabilityNoteEn: "Uses official YouTube IFrame Player API (Playlist). Real playback and embed permissions are verified directly."
+      };
+    }
     return {
       provider: "youtube",
       platformLabel: "YouTube",
       originalUrl: trimmed,
-      canonicalRef: ytId,
-      canonicalUrl: `https://www.youtube.com/watch?v=${ytId}`,
-      embedUrl: getYouTubeNoCookieEmbedUrl(ytId),
-      thumbnailUrl: getYouTubeThumbnailUrl(ytId),
+      canonicalRef: target.canonicalRef,
+      canonicalUrl: target.canonicalUrl,
+      embedUrl: target.embedUrl,
+      thumbnailUrl: getYouTubeThumbnailUrl(target.videoId),
       verifiability: "verifiable",
       verifiabilityNoteId: "Menggunakan YouTube IFrame Player API resmi. Sistem dapat memverifikasi pemutaran nyata dan izin penyematan.",
       verifiabilityNoteEn: "Uses official YouTube IFrame Player API. Real playback and embed permissions are verified directly."
@@ -3375,7 +3443,7 @@ function normalizeMediaSource(rawProvider, rawRef) {
   return { provider: "unknown", assetRef: r };
 }
 function validateExternalProviderAssetRef(provider, assetRef) {
-  if (provider === "youtube") return Boolean(extractYouTubeVideoId(assetRef));
+  if (provider === "youtube") return Boolean(extractYouTubeEmbedTarget(assetRef));
   if (provider === "facebook") return Boolean(extractFacebookVideoUrl(assetRef));
   if (provider === "vimeo") return Boolean(extractVimeoVideoRef(assetRef));
   if (provider === "dailymotion") return Boolean(extractDailymotionVideoId(assetRef));
@@ -3405,8 +3473,9 @@ function buildAssetRefFingerprint(provider, assetRef) {
     return `local:${base}#${shortHash}`;
   }
   if (provider === "youtube") {
-    const ytId = extractYouTubeVideoId(clean);
-    return ytId ? `yt:${ytId}` : `yt:#${shortHash}`;
+    const target = extractYouTubeEmbedTarget(clean);
+    if (!target) return `yt:#${shortHash}`;
+    return target.kind === "playlist" ? `yt-pl:${target.playlistId.slice(0, 14)}#${shortHash}` : `yt:${target.videoId}`;
   }
   if (provider === "vimeo") {
     const vimeo = extractVimeoVideoRef(clean);
@@ -4981,14 +5050,14 @@ function createApiApp() {
       const typedProvider = provider;
       let trimmedRef = assetRef.trim();
       if (typedProvider === "youtube") {
-        const ytId = extractYouTubeVideoId(trimmedRef);
-        if (!ytId) {
+        const ytTarget = extractYouTubeEmbedTarget(trimmedRef);
+        if (!ytTarget) {
           res.status(400).json({
-            error: "Invalid YouTube link or Video ID. Use a standard youtube.com/watch?v=... or youtu.be/... link."
+            error: "Invalid YouTube link or ID. Use a standard youtube.com/watch?v=..., youtu.be/..., or youtube.com/playlist?list=... link."
           });
           return;
         }
-        trimmedRef = ytId;
+        trimmedRef = ytTarget.canonicalRef;
       } else if (typedProvider === "facebook") {
         const fbUrl = extractFacebookVideoUrl(trimmedRef);
         if (!fbUrl) {
@@ -5253,18 +5322,18 @@ function createApiApp() {
       return;
     }
     if (mediaBinding && (mediaBinding.provider === "youtube" || mediaBinding.provider === "private_storage" && mediaBinding.assetRef.startsWith("youtube:"))) {
-      const ytId = extractYouTubeVideoId(mediaBinding.assetRef);
-      if (ytId) {
+      const ytTarget = extractYouTubeEmbedTarget(mediaBinding.assetRef);
+      if (ytTarget) {
         res.json({
           mode,
           isFree: isFreeRelease,
           streamType: "youtube",
           provider: "youtube",
-          youtubeVideoId: ytId,
+          ...ytTarget.kind === "video" ? { youtubeVideoId: ytTarget.videoId } : { youtubePlaylistId: ytTarget.playlistId },
           videoId,
           previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
           resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
-          manifestUrl: `https://www.youtube-nocookie.com/embed/${ytId}`,
+          manifestUrl: ytTarget.embedUrl,
           entitlement: entitlementPayload,
           serverTimeIso: new Date(now).toISOString()
         });

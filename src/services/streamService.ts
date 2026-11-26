@@ -22,6 +22,7 @@ export interface StreamAuthorizationResponse {
     | 'direct_video';
   provider?: VideoAssetProvider;
   youtubeVideoId?: string;
+  youtubePlaylistId?: string;
   facebookVideoUrl?: string;
   vimeoVideoId?: string;
   vimeoHash?: string;

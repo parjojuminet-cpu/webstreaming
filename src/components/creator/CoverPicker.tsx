@@ -10,7 +10,7 @@ import {
 import type { LocaleCode } from '../../types/vyora';
 import { uploadCreatorMedia } from '../../services/streamService';
 import { captureVideoFrameAsFile } from '../../utils/videoThumbnail';
-import { getYouTubeThumbnailUrl } from '../../utils/youtube';
+import { extractYouTubeVideoId, getYouTubeThumbnailUrl } from '../../utils/youtube';
 import { Button } from '../ui/Button';
 import { MediaImage } from '../ui/MediaImage';
 
@@ -256,7 +256,7 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
                 : 'Custom image / video frame cover saved persistently.'
               : value}
           </p>
-          {youtubeVideoId && (
+          {youtubeVideoId && extractYouTubeVideoId(youtubeVideoId) && (
             <Button
               type="button"
               variant="outline"

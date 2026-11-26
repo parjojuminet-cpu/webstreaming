@@ -331,7 +331,7 @@ export interface CreateVideoInput {
   languages: string[];
   assetProvider: VideoAssetProvider;
   assetRef: string;
-  initialStatus: 'draft' | 'pending_review';
+  initialStatus: 'draft' | 'pending_review' | 'published';
 }
 
 export async function createCreatorVideo(
@@ -396,7 +396,8 @@ export async function createCreatorVideo(
     priceIdr: safePriceIdr,
     creditCost: safeCreditCost,
     releaseYear: safeReleaseYear,
-    publishedAt: '',
+    publishedAt:
+      input.initialStatus === 'published' ? new Date().toISOString().slice(0, 10) : '',
     resolution: input.resolution,
     audioFormat: clampString(input.audioFormat || 'Studio Stereo', 60),
     languages: input.languages.length > 0 ? input.languages.slice(0, 8) : ['Indonesian', 'English'],

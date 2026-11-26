@@ -96,7 +96,8 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   const [fbReplayNonce, setFbReplayNonce] = useState(0);
 
   const isYoutubeStream =
-    authData?.streamType === 'youtube' && Boolean(authData?.youtubeVideoId);
+    authData?.streamType === 'youtube' &&
+    Boolean(authData?.youtubeVideoId || authData?.youtubePlaylistId);
   const isVimeoStream =
     authData?.streamType === 'vimeo' && Boolean(authData?.manifestUrl);
   const isDailymotionStream =
@@ -360,6 +361,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
 
     let cancelled = false;
     const ytId = authData.youtubeVideoId;
+    const ytPlaylistId = authData.youtubePlaylistId;
 
     void loadYouTubeIframeApi()
       .then((YT) => {
@@ -379,24 +381,30 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
         ytContainerRef.current.innerHTML = '';
         ytContainerRef.current.appendChild(hostEl);
 
+        const playerVars: Record<string, string | number> = {
+          autoplay: 1,
+          controls: 0,
+          disablekb: 1,
+          fs: 0,
+          iv_load_policy: 3,
+          rel: 0,
+          modestbranding: 1,
+          playsinline: 1,
+          enablejsapi: 1,
+          start: Math.max(0, Math.floor(startSeekRef.current)),
+          origin: window.location.origin,
+        };
+        if (ytPlaylistId && !ytId) {
+          playerVars.listType = 'playlist';
+          playerVars.list = ytPlaylistId;
+        }
+
         const player = new YT.Player(hostEl, {
-          videoId: ytId,
+          ...(ytId ? { videoId: ytId } : {}),
           host: 'https://www.youtube-nocookie.com',
           width: '100%',
           height: '100%',
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            disablekb: 1,
-            fs: 0,
-            iv_load_policy: 3,
-            rel: 0,
-            modestbranding: 1,
-            playsinline: 1,
-            enablejsapi: 1,
-            start: Math.max(0, Math.floor(startSeekRef.current)),
-            origin: window.location.origin,
-          },
+          playerVars,
           events: {
             onReady: (event) => {
               if (cancelled) return;
@@ -474,7 +482,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
         ytPlayerRef.current = null;
       }
     };
-  }, [item, authData?.streamType, authData?.youtubeVideoId, locale]);
+  }, [item, authData?.streamType, authData?.youtubeVideoId, authData?.youtubePlaylistId, locale]);
 
   // Enforce 5-minute preview cap & sync playback clock for YouTube IFrame Player
   useEffect(() => {

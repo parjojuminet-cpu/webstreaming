@@ -42,6 +42,7 @@ interface UniversalVideoImportPanelProps {
   isContinued: boolean;
   onContinue: (payload: VerifiedImportedVideoPayload) => void;
   onInvalidate: () => void;
+  onSwitchToBatch?: (rawText: string) => void;
 }
 
 const LINK_STATUS_META: Record<
@@ -129,6 +130,7 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
   isContinued,
   onContinue,
   onInvalidate,
+  onSwitchToBatch,
 }) => {
   const [urlInput, setUrlInput] = useState('');
   const [linkStatus, setLinkStatus] = useState<LinkCheckStatus>('waiting');
@@ -273,7 +275,10 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
       return;
     }
     let cancelled = false;
-    const ytId = inspection.canonicalRef;
+    const rawRef = inspection.canonicalRef;
+    const isPlaylist = rawRef.startsWith('playlist:');
+    const ytPlaylistId = isPlaylist ? rawRef.slice('playlist:'.length) : undefined;
+    const ytId = isPlaylist ? undefined : rawRef;
 
     void loadYouTubeIframeApi()
       .then((YT) => {
@@ -283,19 +288,25 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
         ytHostRef.current.innerHTML = '';
         ytHostRef.current.appendChild(container);
 
+        const playerVars: Record<string, string | number> = {
+          autoplay: 0,
+          controls: 1,
+          rel: 0,
+          playsinline: 1,
+          enablejsapi: 1,
+          origin: window.location.origin,
+        };
+        if (ytPlaylistId) {
+          playerVars.listType = 'playlist';
+          playerVars.list = ytPlaylistId;
+        }
+
         const player = new YT.Player(container, {
-          videoId: ytId,
+          ...(ytId ? { videoId: ytId } : {}),
           host: 'https://www.youtube-nocookie.com',
           width: '100%',
           height: '100%',
-          playerVars: {
-            autoplay: 0,
-            controls: 1,
-            rel: 0,
-            playsinline: 1,
-            enablejsapi: 1,
-            origin: window.location.origin,
-          },
+          playerVars,
           events: {
             onReady: (ev) => {
               if (cancelled) return;
@@ -797,6 +808,10 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
     (linkStatus === 'embeddable' || linkStatus === 'uncertain');
   const canContinue =
     playbackStatus === 'verified_playing' && Boolean(inspection?.provider);
+  const detectedUrlCount = (urlInput.match(/https?:\/\//gi) || []).length;
+  const looksLikeBatchPaste =
+    Boolean(onSwitchToBatch) &&
+    (detectedUrlCount > 1 || urlInput.trim().length > 980);
 
   const linkMeta = LINK_STATUS_META[linkStatus];
   const playMeta = PLAYBACK_STATUS_META[playbackStatus];
@@ -851,9 +866,26 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
         </div>
         <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
           {locale === 'id'
-            ? 'Mendukung deteksi otomatis YouTube, Vimeo, Dailymotion, Streamable, direct MP4 / WebM / MOV / HLS (.m3u8) / MPEG-DASH (.mpd) (HTTPS). Tautan TikTok, Facebook, X, dan Instagram juga diperiksa secara jujur sesuai dukungan embed resmi.'
-            : 'Auto-detects YouTube, Vimeo, Dailymotion, Streamable, and direct HTTPS MP4 / WebM / MOV / HLS (.m3u8) / MPEG-DASH (.mpd). TikTok, Facebook, X, and Instagram URLs are also checked honestly against official embed capabilities.'}
+            ? 'Mendukung deteksi otomatis YouTube (termasuk YouTube Playlist), Vimeo, Dailymotion, Streamable, direct MP4 / WebM / MOV / HLS (.m3u8) / MPEG-DASH (.mpd) (HTTPS). Tautan TikTok, Facebook, X, dan Instagram juga diperiksa secara jujur sesuai dukungan embed resmi.'
+            : 'Auto-detects YouTube (including Playlists), Vimeo, Dailymotion, Streamable, and direct HTTPS MP4 / WebM / MOV / HLS (.m3u8) / MPEG-DASH (.mpd). TikTok, Facebook, X, and Instagram URLs are also checked honestly against official embed capabilities.'}
         </p>
+        {looksLikeBatchPaste && onSwitchToBatch && (
+          <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/70 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
+            <span>
+              {locale === 'id'
+                ? `Terdeteksi ${detectedUrlCount > 1 ? `${detectedUrlCount} tautan` : 'teks >980 karakter'}. Gunakan mode Banyak Tautan Sekaligus agar semua tautan terurai tanpa batas 980 karakter.`
+                : `Detected ${detectedUrlCount > 1 ? `${detectedUrlCount} links` : '>980 characters'}. Switch to Batch Mode to parse and import all links without the 980-character limit.`}
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => onSwitchToBatch(urlInput)}
+            >
+              {locale === 'id' ? 'Pindahkan ke Banyak Tautan' : 'Switch to Batch Mode'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Status Check Panel (Link Check Status - separate from Playback Verification) */}

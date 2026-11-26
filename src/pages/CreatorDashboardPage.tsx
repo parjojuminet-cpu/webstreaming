@@ -42,6 +42,7 @@ import {
   UniversalVideoImportPanel,
   type VerifiedImportedVideoPayload,
 } from '../components/creator/UniversalVideoImportPanel';
+import { BatchVideoImportPanel } from '../components/creator/BatchVideoImportPanel';
 import {
   CATEGORY_LIST,
   formatDuration,
@@ -170,6 +171,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   const [vPriceIdr, setVPriceIdr] = useState(75000);
   const [vCreditCost, setVCreditCost] = useState(5);
   const [vSourceMode, setVSourceMode] = useState<'device' | 'link'>('device');
+  const [vLinkImportMode, setVLinkImportMode] = useState<'single' | 'batch'>('single');
+  const [batchPrefillText, setBatchPrefillText] = useState('');
   const [vProvider, setVProvider] = useState<VideoAssetProvider>('private_storage');
   const [vAssetRef, setVAssetRef] = useState('');
   const [verifiedImportPayload, setVerifiedImportPayload] =
@@ -1329,48 +1332,131 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                   </div>
                 )}
 
-                {/* Mode B: Universal Video Link with Live Preview + Mandatory PLAY Verification */}
+                {/* Mode B: Universal Video Link (1 Link or Batch Multi-Link) with Live Preview + Mandatory PLAY Verification */}
                 {vSourceMode === 'link' && (
-                  <div className="pt-1">
-                    <UniversalVideoImportPanel
-                      locale={locale}
-                      isContinued={Boolean(verifiedImportPayload)}
-                      onContinue={(payload) => {
-                        setVideoErr(null);
-                        setVerifiedImportPayload(payload);
-                        setVProvider(payload.provider);
-                        setVAssetRef(payload.assetRef);
-                        setVUploadedFileName(null);
-                        setVUploadedMimeType(payload.mimeType);
-                        if (!vTitle.trim() && payload.titleHint) {
-                          setVTitle(payload.titleHint.slice(0, 140));
-                        }
-                        if (payload.durationMinutesHint) {
-                          setVDuration(payload.durationMinutesHint);
-                        }
-                        if (!vHasExplicitCover && payload.thumbnailUrl) {
-                          setVThumbnail(payload.thumbnailUrl);
-                        }
-                        window.requestAnimationFrame(() => {
-                          metadataSectionRef.current?.scrollIntoView({
-                            behavior: 'smooth',
-                            block: 'start',
-                          });
-                        });
-                      }}
-                      onInvalidate={() => {
-                        setVerifiedImportPayload(null);
-                        if (vSourceMode === 'link') {
+                  <div className="pt-1 space-y-4">
+                    <div className="inline-flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-slate-200/70 dark:bg-slate-900 border border-slate-300/70 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setVLinkImportMode('single')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                          vLinkImportMode === 'single'
+                            ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        {locale === 'id' ? '1 Tautan Tunggal' : 'Single Link'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVLinkImportMode('batch')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                          vLinkImportMode === 'batch'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        {locale === 'id'
+                          ? 'Banyak Tautan / Daftar Sekaligus'
+                          : 'Batch / Multiple Links'}
+                      </button>
+                    </div>
+
+                    {vLinkImportMode === 'single' ? (
+                      <UniversalVideoImportPanel
+                        locale={locale}
+                        isContinued={Boolean(verifiedImportPayload)}
+                        onSwitchToBatch={(rawText) => {
+                          setBatchPrefillText(rawText);
+                          setVerifiedImportPayload(null);
                           setVAssetRef('');
-                        }
-                      }}
-                    />
+                          setVLinkImportMode('batch');
+                        }}
+                        onContinue={(payload) => {
+                          setVideoErr(null);
+                          setVerifiedImportPayload(payload);
+                          setVProvider(payload.provider);
+                          setVAssetRef(payload.assetRef);
+                          setVUploadedFileName(null);
+                          setVUploadedMimeType(payload.mimeType);
+                          if (!vTitle.trim() && payload.titleHint) {
+                            setVTitle(payload.titleHint.slice(0, 140));
+                          }
+                          if (payload.durationMinutesHint) {
+                            setVDuration(payload.durationMinutesHint);
+                          }
+                          if (!vHasExplicitCover && payload.thumbnailUrl) {
+                            setVThumbnail(payload.thumbnailUrl);
+                          }
+                          window.requestAnimationFrame(() => {
+                            metadataSectionRef.current?.scrollIntoView({
+                              behavior: 'smooth',
+                              block: 'start',
+                            });
+                          });
+                        }}
+                        onInvalidate={() => {
+                          setVerifiedImportPayload(null);
+                          if (vSourceMode === 'link') {
+                            setVAssetRef('');
+                          }
+                        }}
+                      />
+                    ) : (
+                      <BatchVideoImportPanel
+                        locale={locale}
+                        isAdmin={isAdmin}
+                        defaultCategory={creatorProfile.specialty || 'Events'}
+                        initialText={batchPrefillText}
+                        onSaveBatchItem={async (item) => {
+                          const videoId = await createCreatorVideo(
+                            firebaseUser.uid,
+                            creatorProfile.name,
+                            {
+                              title: item.title,
+                              subtitle: item.subtitle,
+                              description: item.description,
+                              descriptionId: item.description,
+                              category: item.category,
+                              thumbnailUrl: item.thumbnailUrl,
+                              durationMinutes: item.durationMinutes,
+                              isFree: item.isFree,
+                              priceUsd: item.priceUsd,
+                              priceIdr: item.priceIdr,
+                              creditCost: item.creditCost,
+                              releaseYear: item.releaseYear,
+                              resolution: item.resolution,
+                              audioFormat: item.audioFormat,
+                              languages: item.languages,
+                              assetProvider: item.assetProvider,
+                              assetRef: item.assetRef,
+                              initialStatus: item.initialStatus,
+                            }
+                          );
+                          await registerCreatorVideoMedia({
+                            videoId,
+                            provider: item.assetProvider,
+                            assetRef: item.assetRef,
+                            mimeType: item.mimeType,
+                          });
+                        }}
+                        onBatchFinished={(savedCount) => {
+                          setVideoMsg(
+                            locale === 'id'
+                              ? `${savedCount} video dari daftar tautan berhasil disimpan ke akun Anda.`
+                              : `${savedCount} videos from your link list were saved to your account.`
+                          );
+                        }}
+                        onViewSavedContent={() => setActiveTab('content')}
+                      />
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Step 2: Metadata Form Gate */}
-              {!isStep2Unlocked ? (
+              {/* Step 2: Metadata Form Gate (shown for single device upload or single link import) */}
+              {!(vSourceMode === 'link' && vLinkImportMode === 'batch') &&
+                (!isStep2Unlocked ? (
                 <div className="p-5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-dashed border-slate-300 dark:border-slate-700 flex items-start gap-3">
                   <Lock className="w-5 h-5 text-slate-400 dark:text-slate-500 shrink-0 mt-0.5" aria-hidden="true" />
                   <div className="space-y-1">
@@ -1686,7 +1772,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                     </Button>
                   </div>
                 </div>
-              )}
+              ))}
             </div>
           </section>
         );

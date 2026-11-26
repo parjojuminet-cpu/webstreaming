@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ContentStatus, VideoAssetProvider } from '../src/types/vyora';
 import { extractFacebookVideoUrl } from '../src/utils/facebook.ts';
-import { extractYouTubeVideoId } from '../src/utils/youtube.ts';
+import { extractYouTubeEmbedTarget } from '../src/utils/youtube.ts';
 import {
   extractDailymotionVideoId,
   extractInstagramPostInfo,
@@ -206,7 +206,7 @@ export function validateExternalProviderAssetRef(
   provider: NormalizedMediaProvider,
   assetRef: string
 ): boolean {
-  if (provider === 'youtube') return Boolean(extractYouTubeVideoId(assetRef));
+  if (provider === 'youtube') return Boolean(extractYouTubeEmbedTarget(assetRef));
   if (provider === 'facebook') return Boolean(extractFacebookVideoUrl(assetRef));
   if (provider === 'vimeo') return Boolean(extractVimeoVideoRef(assetRef));
   if (provider === 'dailymotion') return Boolean(extractDailymotionVideoId(assetRef));
@@ -247,8 +247,11 @@ export function buildAssetRefFingerprint(
   }
 
   if (provider === 'youtube') {
-    const ytId = extractYouTubeVideoId(clean);
-    return ytId ? `yt:${ytId}` : `yt:#${shortHash}`;
+    const target = extractYouTubeEmbedTarget(clean);
+    if (!target) return `yt:#${shortHash}`;
+    return target.kind === 'playlist'
+      ? `yt-pl:${target.playlistId.slice(0, 14)}#${shortHash}`
+      : `yt:${target.videoId}`;
   }
 
   if (provider === 'vimeo') {

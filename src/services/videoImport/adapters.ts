@@ -1,6 +1,5 @@
 import {
-  extractYouTubeVideoId,
-  getYouTubeNoCookieEmbedUrl,
+  extractYouTubeEmbedTarget,
   getYouTubeThumbnailUrl,
 } from '../../utils/youtube';
 import { extractFacebookVideoUrl, getFacebookEmbedUrl } from '../../utils/facebook';
@@ -378,17 +377,33 @@ export const youtubeAdapter: VideoPlatformAdapter = {
       if (!check.ok || !YOUTUBE_HOSTS.has(check.url.hostname.toLowerCase())) return null;
     }
 
-    const ytId = extractYouTubeVideoId(trimmed);
-    if (!ytId) return null;
+    const target = extractYouTubeEmbedTarget(trimmed);
+    if (!target) return null;
+
+    if (target.kind === 'playlist') {
+      return {
+        provider: 'youtube',
+        platformLabel: 'YouTube Playlist',
+        originalUrl: trimmed,
+        canonicalRef: target.canonicalRef,
+        canonicalUrl: target.canonicalUrl,
+        embedUrl: target.embedUrl,
+        verifiability: 'verifiable',
+        verifiabilityNoteId:
+          'Menggunakan YouTube IFrame Player API resmi (Playlist). Sistem memverifikasi pemutaran nyata dan izin penyematan.',
+        verifiabilityNoteEn:
+          'Uses official YouTube IFrame Player API (Playlist). Real playback and embed permissions are verified directly.',
+      };
+    }
 
     return {
       provider: 'youtube',
       platformLabel: 'YouTube',
       originalUrl: trimmed,
-      canonicalRef: ytId,
-      canonicalUrl: `https://www.youtube.com/watch?v=${ytId}`,
-      embedUrl: getYouTubeNoCookieEmbedUrl(ytId),
-      thumbnailUrl: getYouTubeThumbnailUrl(ytId),
+      canonicalRef: target.canonicalRef,
+      canonicalUrl: target.canonicalUrl,
+      embedUrl: target.embedUrl,
+      thumbnailUrl: getYouTubeThumbnailUrl(target.videoId),
       verifiability: 'verifiable',
       verifiabilityNoteId:
         'Menggunakan YouTube IFrame Player API resmi. Sistem dapat memverifikasi pemutaran nyata dan izin penyematan.',
