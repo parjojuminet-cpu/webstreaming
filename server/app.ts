@@ -1632,6 +1632,64 @@ export function createApiApp(): Express {
     }
   );
 
+  const facebookMp4Cache = new Map<string, { url: string; expiresAtMs: number }>();
+
+  async function resolveFacebookDirectMp4(fbUrl: string): Promise<string | null> {
+    const canonical = extractFacebookVideoUrl(fbUrl);
+    if (!canonical) return null;
+
+    const cached = facebookMp4Cache.get(canonical);
+    if (cached && cached.expiresAtMs > Date.now()) {
+      return cached.url;
+    }
+
+    try {
+      const pluginUrl = `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(
+        canonical
+      )}&show_text=false&autoplay=true`;
+      const response = await fetch(pluginUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        signal: AbortSignal.timeout(4500),
+      });
+      if (!response.ok) return null;
+      const html = await response.text();
+
+      for (const key of ['hd_src_no_ratelimit', 'hd_src', 'sd_src']) {
+        const marker = `"${key}":"https:`;
+        const idx = html.indexOf(marker);
+        if (idx === -1) continue;
+        const start = html.indexOf('"https:', idx) + 1;
+        const end = html.indexOf('"', start);
+        if (start <= 0 || end <= start) continue;
+        const rawEncoded = html.slice(start, end);
+        try {
+          const candidateUrl = JSON.parse(`"${rawEncoded}"`) as string;
+          const parsed = new URL(candidateUrl);
+          const host = parsed.hostname.toLowerCase();
+          if (
+            parsed.protocol === 'https:' &&
+            (host.endsWith('.fbcdn.net') || host.endsWith('.facebook.com'))
+          ) {
+            facebookMp4Cache.set(canonical, {
+              url: candidateUrl,
+              expiresAtMs: Date.now() + 10 * 60 * 1000,
+            });
+            return candidateUrl;
+          }
+        } catch {
+          // Try next quality key
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   app.post('/api/stream/authorize', optionalAuth, async (req: AuthedRequest, res) => {
     const { videoId, category } = req.body as {
       videoId?: unknown;
@@ -1931,7 +1989,7 @@ export function createApiApp(): Express {
       }
     }
 
-    // Check if this video is bound to Facebook (Public Embedded Video Plugin)
+    // Check if this video is bound to Facebook (Prefer direct progressive MP4 stream; fallback to Embedded Video Plugin)
     if (
       mediaBinding &&
       (mediaBinding.provider === 'facebook' ||
@@ -1941,6 +1999,24 @@ export function createApiApp(): Express {
       const fbUrl = extractFacebookVideoUrl(mediaBinding.assetRef);
       if (fbUrl) {
         const resumeAt = hasPaidEntitlement && record ? record.resumeSeconds : 0;
+        const directMp4Url = await resolveFacebookDirectMp4(fbUrl);
+        if (directMp4Url) {
+          res.json({
+            mode,
+            isFree: isFreeRelease,
+            streamType: 'direct_video',
+            directFormat: 'mp4',
+            provider: 'facebook',
+            facebookVideoUrl: fbUrl,
+            videoId,
+            previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+            resumeSeconds: resumeAt,
+            manifestUrl: directMp4Url,
+            entitlement: entitlementPayload,
+            serverTimeIso: new Date(now).toISOString(),
+          });
+          return;
+        }
 
         res.json({
           mode,

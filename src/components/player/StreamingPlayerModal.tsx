@@ -324,7 +324,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
             'loadedmetadata',
             () => {
               if (startSeek > 0) videoEl.currentTime = startSeek;
-              void videoEl.play().catch(() => {});
+              void videoEl.play().catch(() => {
+                videoEl.muted = true;
+                setIsMuted(true);
+                void videoEl.play().catch(() => {});
+              });
             },
             { once: true }
           );
@@ -1180,6 +1184,27 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                       }}
                       onError={() => {
                         setIsPlaying(false);
+                        if (
+                          authData?.provider === 'facebook' &&
+                          authData?.facebookVideoUrl &&
+                          authData?.streamType !== 'facebook'
+                        ) {
+                          const fbUrl = authData.facebookVideoUrl;
+                          setIsSurfaceLocked(false);
+                          setAuthData((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  streamType: 'facebook',
+                                  manifestUrl: getFacebookEmbedUrl(fbUrl, {
+                                    autoplay: true,
+                                    startSeconds: startSeekRef.current,
+                                  }),
+                                }
+                              : prev
+                          );
+                          return;
+                        }
                         setStreamError(
                           locale === 'id'
                             ? 'Video tidak dapat dimuat (berkas belum tersedia di server atau format tidak didukung browser).'
