@@ -154,6 +154,7 @@ export interface CreatorProfile {
   status?: CreatorStatus;
   joinedYear: number;
   specialty: ContentCategory;
+  followerCount?: number;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -352,5 +353,28 @@ export interface AdminFinanceOverview {
   purchases: PurchaseRecord[];
   payouts: PayoutRecord[];
   activeEntitlementsCount: number;
+}
+
+export interface WatchProgressRecord {
+  id: string;
+  userId: string;
+  videoId: string;
+  resumeSeconds: number;
+  durationSeconds: number;
+  updatedAtMs: number;
+}
+
+export interface WatchlistRecord {
+  id: string;
+  userId: string;
+  videoId: string;
+  createdAtMs: number;
+}
+
+export interface CreatorFollowRecord {
+  id: string;
+  userId: string;
+  creatorId: string;
+  createdAtMs: number;
 }
 

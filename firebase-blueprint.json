@@ -655,6 +655,41 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "contentId", "authorName", "rating", "comment", "createdAt"]
+    },
+    "WatchProgress": {
+      "title": "WatchProgress",
+      "description": "Per-user playback resume position for Continue Watching across free and unlocked titles.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "videoId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "resumeSeconds": { "type": "integer" },
+        "durationSeconds": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "videoId", "resumeSeconds", "durationSeconds", "updatedAt"]
+    },
+    "WatchlistItem": {
+      "title": "WatchlistItem",
+      "description": "Viewer saved/bookmarked video release in their personal watchlist.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "videoId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "videoId", "createdAt"]
+    },
+    "CreatorFollow": {
+      "title": "CreatorFollow",
+      "description": "Viewer follow relationship to a creator profile.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "creatorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "creatorId", "createdAt"]
     }
   },
   "firestore": {
@@ -717,6 +752,18 @@
     "/admins/{adminId}": {
       "schema": { "$ref": "#/entities/AdminRegistry" },
       "description": "Trusted admin UID registry."
+    },
+    "/watch_progress/{progressId}": {
+      "schema": { "$ref": "#/entities/WatchProgress" },
+      "description": "Private user playback resume positions for Continue Watching."
+    },
+    "/watchlist/{watchlistId}": {
+      "schema": { "$ref": "#/entities/WatchlistItem" },
+      "description": "Private user saved watchlist items."
+    },
+    "/creator_follows/{followId}": {
+      "schema": { "$ref": "#/entities/CreatorFollow" },
+      "description": "Private user creator follow relationships."
     }
   }
 }

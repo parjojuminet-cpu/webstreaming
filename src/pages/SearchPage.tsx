@@ -15,9 +15,13 @@ interface SearchPageProps {
   creators: CreatorProfile[];
   locale: LocaleCode;
   currency: CurrencyCode;
+  savedVideoIds?: Set<string>;
+  followedCreatorIds?: Set<string>;
   onSelectContent: (item: ContentItem) => void;
   onWatchPreview: (item: ContentItem) => void;
   onSelectCreator: (creatorId: string) => void;
+  onToggleSave?: (item: ContentItem) => void;
+  onToggleFollow?: (creatorId: string) => void;
 }
 
 const SUGGESTED_QUERIES = [
@@ -34,9 +38,13 @@ export const SearchPage: React.FC<SearchPageProps> = ({
   creators,
   locale,
   currency,
+  savedVideoIds,
+  followedCreatorIds,
   onSelectContent,
   onWatchPreview,
   onSelectCreator,
+  onToggleSave,
+  onToggleFollow,
 }) => {
   const [query, setQuery] = useState('');
 
@@ -141,7 +149,9 @@ export const SearchPage: React.FC<SearchPageProps> = ({
                 key={creator.id}
                 creator={creator}
                 locale={locale}
+                isFollowing={followedCreatorIds?.has(creator.id)}
                 onExploreCreator={onSelectCreator}
+                onToggleFollow={onToggleFollow}
               />
             ))}
           </div>
@@ -181,9 +191,11 @@ export const SearchPage: React.FC<SearchPageProps> = ({
                 item={item}
                 locale={locale}
                 currency={currency}
+                isSaved={savedVideoIds?.has(item.id)}
                 onSelectContent={onSelectContent}
                 onWatchPreview={onWatchPreview}
                 onSelectCreator={onSelectCreator}
+                onToggleSave={onToggleSave}
               />
             ))}
           </div>

@@ -19,14 +19,16 @@ interface ExplorePageProps {
   currency: CurrencyCode;
   selectedCategory: ContentCategory | 'All';
   selectedCreatorId: string | null;
+  savedVideoIds?: Set<string>;
   onChangeCategory: (category: ContentCategory | 'All') => void;
   onClearCreator: () => void;
   onSelectContent: (item: ContentItem) => void;
   onWatchPreview: (item: ContentItem) => void;
   onSelectCreator: (creatorId: string) => void;
+  onToggleSave?: (item: ContentItem) => void;
 }
 
-type SortOption = 'trending' | 'recent' | 'price-asc' | 'duration';
+type SortOption = 'trending' | 'views' | 'recent' | 'price-asc' | 'duration';
 
 export const ExplorePage: React.FC<ExplorePageProps> = ({
   catalog,
@@ -35,11 +37,13 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
   currency,
   selectedCategory,
   selectedCreatorId,
+  savedVideoIds,
   onChangeCategory,
   onClearCreator,
   onSelectContent,
   onWatchPreview,
   onSelectCreator,
+  onToggleSave,
 }) => {
   const [sortBy, setSortBy] = useState<SortOption>('trending');
   const [filterText, setFilterText] = useState('');
@@ -66,6 +70,9 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
     });
 
     return [...list].sort((a, b) => {
+      if (sortBy === 'views') {
+        return (b.viewCount ?? 0) - (a.viewCount ?? 0);
+      }
       if (sortBy === 'recent') {
         return (Date.parse(b.publishedAt || '') || 0) - (Date.parse(a.publishedAt || '') || 0);
       }
@@ -178,6 +185,9 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
             <option value="trending">
               {locale === 'id' ? 'Urut: Tren' : 'Sort: Trending'}
             </option>
+            <option value="views">
+              {locale === 'id' ? 'Urut: Terpopuler' : 'Sort: Most Viewed'}
+            </option>
             <option value="recent">
               {locale === 'id' ? 'Urut: Terbaru' : 'Sort: Recent'}
             </option>
@@ -237,9 +247,11 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({
               item={item}
               locale={locale}
               currency={currency}
+              isSaved={savedVideoIds?.has(item.id)}
               onSelectContent={onSelectContent}
               onWatchPreview={onWatchPreview}
               onSelectCreator={onSelectCreator}
+              onToggleSave={onToggleSave}
             />
           ))}
         </div>

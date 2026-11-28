@@ -82,6 +82,8 @@ interface LedgerState {
   processedWebhooks: Record<string, number>;
   creatorMedia?: Record<string, CreatorMediaBinding>;
   videoDeletionJobs?: VideoDeletionJobRecord[];
+  videoViews?: Record<string, number>;
+  creatorFollowerIds?: Record<string, string[]>;
   platformSettings: {
     commissionPercent: number;
     minPriceUsd: number;
@@ -168,6 +170,8 @@ export function loadLedger(): LedgerState {
         processedWebhooks: parsed.processedWebhooks ?? {},
         creatorMedia: parsed.creatorMedia ?? {},
         videoDeletionJobs: parsed.videoDeletionJobs ?? [],
+        videoViews: parsed.videoViews ?? {},
+        creatorFollowerIds: parsed.creatorFollowerIds ?? {},
         platformSettings: parsed.platformSettings ?? {
           commissionPercent: 20,
           minPriceUsd: 1.99,
@@ -202,6 +206,8 @@ export function loadLedger(): LedgerState {
     processedWebhooks: {},
     creatorMedia: {},
     videoDeletionJobs: [],
+    videoViews: {},
+    creatorFollowerIds: {},
     platformSettings: {
       commissionPercent: 20,
       minPriceUsd: 1.99,
@@ -873,4 +879,81 @@ export function buildAdminFinanceOverview(state: LedgerState): AdminFinanceOverv
     payouts: state.payouts,
     activeEntitlementsCount,
   };
+}
+
+const recentVideoViewThrottle = new Map<string, number>();
+const VIEW_THROTTLE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes per viewer+video
+
+export async function recordVideoViewOnce(
+  viewerKey: string,
+  videoId: string
+): Promise<{ viewCount: number; counted: boolean }> {
+  const now = Date.now();
+  const throttleKey = `${viewerKey}:${videoId}`;
+  const lastSeen = recentVideoViewThrottle.get(throttleKey) ?? 0;
+
+  if (recentVideoViewThrottle.size > 5000) {
+    for (const [k, ts] of recentVideoViewThrottle.entries()) {
+      if (now - ts > VIEW_THROTTLE_WINDOW_MS) {
+        recentVideoViewThrottle.delete(k);
+      }
+    }
+  }
+
+  const shouldIncrement = now - lastSeen >= VIEW_THROTTLE_WINDOW_MS;
+  if (shouldIncrement) {
+    recentVideoViewThrottle.set(throttleKey, now);
+  }
+
+  return withLedgerLock(async () => {
+    const state = loadLedger();
+    if (!state.videoViews) state.videoViews = {};
+    const current = Math.max(0, Number(state.videoViews[videoId] ?? 0));
+    if (!shouldIncrement) {
+      return { viewCount: current, counted: false };
+    }
+    const next = current + 1;
+    state.videoViews[videoId] = next;
+    saveLedger(state);
+    return { viewCount: next, counted: true };
+  });
+}
+
+export async function syncCreatorFollowServer(
+  uid: string,
+  creatorId: string,
+  following: boolean
+): Promise<number> {
+  return withLedgerLock(async () => {
+    const state = loadLedger();
+    if (!state.creatorFollowerIds) state.creatorFollowerIds = {};
+    const existingList = Array.isArray(state.creatorFollowerIds[creatorId])
+      ? state.creatorFollowerIds[creatorId]
+      : [];
+    const set = new Set(existingList);
+    if (following) {
+      set.add(uid);
+    } else {
+      set.delete(uid);
+    }
+    state.creatorFollowerIds[creatorId] = Array.from(set);
+    saveLedger(state);
+    return set.size;
+  });
+}
+
+export function getPublicMetricsSnapshot(): {
+  videoViews: Record<string, number>;
+  creatorFollowers: Record<string, number>;
+} {
+  const state = loadLedger();
+  const videoViews = state.videoViews ?? {};
+  const rawFollowers = state.creatorFollowerIds ?? {};
+  const creatorFollowers: Record<string, number> = {};
+  for (const [creatorId, list] of Object.entries(rawFollowers)) {
+    if (Array.isArray(list)) {
+      creatorFollowers[creatorId] = list.length;
+    }
+  }
+  return { videoViews, creatorFollowers };
 }

@@ -375,3 +375,60 @@ export async function activatePhase3PreviewPass(input: {
   };
   return data.entitlement;
 }
+
+export interface PublicMetricsSnapshot {
+  videoViews: Record<string, number>;
+  creatorFollowers: Record<string, number>;
+}
+
+export async function fetchPublicMetrics(): Promise<PublicMetricsSnapshot> {
+  try {
+    const res = await fetch('/api/videos/metrics');
+    if (!res.ok) return { videoViews: {}, creatorFollowers: {} };
+    const data = (await res.json()) as Partial<PublicMetricsSnapshot>;
+    return {
+      videoViews: data.videoViews ?? {},
+      creatorFollowers: data.creatorFollowers ?? {},
+    };
+  } catch {
+    return { videoViews: {}, creatorFollowers: {} };
+  }
+}
+
+export async function recordVideoView(videoId: string): Promise<number | null> {
+  try {
+    const headers = await getBearerHeaders();
+    const res = await fetch(`/api/videos/${encodeURIComponent(videoId)}/view`, {
+      method: 'POST',
+      headers,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { viewCount?: number };
+    return typeof data.viewCount === 'number' ? data.viewCount : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function syncCreatorFollowCount(
+  creatorId: string,
+  following: boolean
+): Promise<number | null> {
+  if (!auth.currentUser) return null;
+  try {
+    const headers = await getBearerHeaders();
+    const res = await fetch(
+      `/api/creators/${encodeURIComponent(creatorId)}/follow-sync`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ following }),
+      }
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { followerCount?: number };
+    return typeof data.followerCount === 'number' ? data.followerCount : null;
+  } catch {
+    return null;
+  }
+}

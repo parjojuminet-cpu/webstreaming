@@ -19,10 +19,12 @@ interface CategoriesPageProps {
   catalog: ContentItem[];
   locale: LocaleCode;
   currency: CurrencyCode;
+  savedVideoIds?: Set<string>;
   onExploreCategory: (category: ContentCategory) => void;
   onSelectContent: (item: ContentItem) => void;
   onWatchPreview: (item: ContentItem) => void;
   onSelectCreator: (creatorId: string) => void;
+  onToggleSave?: (item: ContentItem) => void;
   onNavigate?: (route: ViewRoute) => void;
 }
 
@@ -30,10 +32,12 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({
   catalog,
   locale,
   currency,
+  savedVideoIds,
   onExploreCategory,
   onSelectContent,
   onWatchPreview,
   onSelectCreator,
+  onToggleSave,
   onNavigate,
 }) => {
   const nonEmptyCategories = CATEGORY_LIST.filter((category) =>
@@ -113,9 +117,11 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({
                       item={item}
                       locale={locale}
                       currency={currency}
+                      isSaved={savedVideoIds?.has(item.id)}
                       onSelectContent={onSelectContent}
                       onWatchPreview={onWatchPreview}
                       onSelectCreator={onSelectCreator}
+                      onToggleSave={onToggleSave}
                     />
                   ))}
                 </div>

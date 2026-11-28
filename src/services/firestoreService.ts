@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
@@ -21,6 +22,7 @@ import type {
   ContentCategory,
   ContentItem,
   ContentStatus,
+  CreatorFollowRecord,
   CreatorProfile,
   CreatorStatus,
   CurrencyCode,
@@ -37,6 +39,8 @@ import type {
   VideoFitMode,
   WalletRecord,
   WalletTransactionRecord,
+  WatchProgressRecord,
+  WatchlistRecord,
 } from '../types/vyora';
 import {
   normalizeVideoAspectRatio,
@@ -849,5 +853,184 @@ export async function adminSavePlatformSettings(input: {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+// VIEWER ENGAGEMENT: CONTINUE WATCHING, WATCHLIST & CREATOR FOLLOWS
+
+export function subscribeWatchProgress(
+  uid: string,
+  callback: (items: WatchProgressRecord[]) => void
+): Unsubscribe {
+  const path = 'watch_progress';
+  const q = query(collection(db, 'watch_progress'), where('userId', '==', uid));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list = snap.docs
+        .map((d) => {
+          const data = d.data() as Record<string, unknown>;
+          return {
+            id: d.id,
+            userId: String(data.userId || uid),
+            videoId: String(data.videoId || ''),
+            resumeSeconds: Math.max(0, Number(data.resumeSeconds || 0)),
+            durationSeconds: Math.max(1, Number(data.durationSeconds || 300)),
+            updatedAtMs: extractTimestampMs(data.updatedAt),
+          } satisfies WatchProgressRecord;
+        })
+        .filter((item) => item.videoId.length > 0)
+        .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+      callback(list);
+    },
+    (error) => handleFirestoreError(error, OperationType.LIST, path)
+  );
+}
+
+export async function upsertWatchProgress(
+  uid: string,
+  videoId: string,
+  resumeSeconds: number,
+  durationSeconds: number
+): Promise<void> {
+  const safeUid = sanitizeId(uid);
+  const safeVideoId = sanitizeId(videoId);
+  if (!safeUid || !safeVideoId) return;
+  const docId = `${safeUid}_${safeVideoId}`;
+  const path = `watch_progress/${docId}`;
+  const safeResume = Math.max(0, Math.min(86400, Math.floor(resumeSeconds)));
+  const safeDuration = Math.max(1, Math.min(86400, Math.floor(durationSeconds || 300)));
+  try {
+    await setDoc(doc(db, 'watch_progress', docId), {
+      userId: safeUid,
+      videoId: safeVideoId,
+      resumeSeconds: safeResume,
+      durationSeconds: safeDuration,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    // Non-fatal if user is unverified or rules reject background save
+    console.warn(`Watch progress save skipped (${path}):`, error);
+  }
+}
+
+export async function removeWatchProgress(uid: string, videoId: string): Promise<void> {
+  const safeUid = sanitizeId(uid);
+  const safeVideoId = sanitizeId(videoId);
+  if (!safeUid || !safeVideoId) return;
+  const docId = `${safeUid}_${safeVideoId}`;
+  const path = `watch_progress/${docId}`;
+  try {
+    await deleteDoc(doc(db, 'watch_progress', docId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribeWatchlist(
+  uid: string,
+  callback: (items: WatchlistRecord[]) => void
+): Unsubscribe {
+  const path = 'watchlist';
+  const q = query(collection(db, 'watchlist'), where('userId', '==', uid));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list = snap.docs
+        .map((d) => {
+          const data = d.data() as Record<string, unknown>;
+          return {
+            id: d.id,
+            userId: String(data.userId || uid),
+            videoId: String(data.videoId || ''),
+            createdAtMs: extractTimestampMs(data.createdAt),
+          } satisfies WatchlistRecord;
+        })
+        .filter((item) => item.videoId.length > 0)
+        .sort((a, b) => b.createdAtMs - a.createdAtMs);
+      callback(list);
+    },
+    (error) => handleFirestoreError(error, OperationType.LIST, path)
+  );
+}
+
+export async function setWatchlistSaved(
+  uid: string,
+  videoId: string,
+  saved: boolean
+): Promise<void> {
+  const safeUid = sanitizeId(uid);
+  const safeVideoId = sanitizeId(videoId);
+  if (!safeUid || !safeVideoId) return;
+  const docId = `${safeUid}_${safeVideoId}`;
+  const path = `watchlist/${docId}`;
+  try {
+    if (saved) {
+      await setDoc(doc(db, 'watchlist', docId), {
+        userId: safeUid,
+        videoId: safeVideoId,
+        createdAt: serverTimestamp(),
+      });
+    } else {
+      await deleteDoc(doc(db, 'watchlist', docId));
+    }
+  } catch (error) {
+    handleFirestoreError(error, saved ? OperationType.CREATE : OperationType.DELETE, path);
+  }
+}
+
+export function subscribeCreatorFollows(
+  uid: string,
+  callback: (items: CreatorFollowRecord[]) => void
+): Unsubscribe {
+  const path = 'creator_follows';
+  const q = query(collection(db, 'creator_follows'), where('userId', '==', uid));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list = snap.docs
+        .map((d) => {
+          const data = d.data() as Record<string, unknown>;
+          return {
+            id: d.id,
+            userId: String(data.userId || uid),
+            creatorId: String(data.creatorId || ''),
+            createdAtMs: extractTimestampMs(data.createdAt),
+          } satisfies CreatorFollowRecord;
+        })
+        .filter((item) => item.creatorId.length > 0)
+        .sort((a, b) => b.createdAtMs - a.createdAtMs);
+      callback(list);
+    },
+    (error) => handleFirestoreError(error, OperationType.LIST, path)
+  );
+}
+
+export async function setCreatorFollowed(
+  uid: string,
+  creatorId: string,
+  following: boolean
+): Promise<void> {
+  const safeUid = sanitizeId(uid);
+  const safeCreatorId = sanitizeId(creatorId);
+  if (!safeUid || !safeCreatorId) return;
+  const docId = `${safeUid}_${safeCreatorId}`;
+  const path = `creator_follows/${docId}`;
+  try {
+    if (following) {
+      await setDoc(doc(db, 'creator_follows', docId), {
+        userId: safeUid,
+        creatorId: safeCreatorId,
+        createdAt: serverTimestamp(),
+      });
+    } else {
+      await deleteDoc(doc(db, 'creator_follows', docId));
+    }
+  } catch (error) {
+    handleFirestoreError(
+      error,
+      following ? OperationType.CREATE : OperationType.DELETE,
+      path
+    );
   }
 }

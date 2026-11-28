@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, UserCheck, UserPlus } from 'lucide-react';
 import type { CreatorProfile, LocaleCode } from '../../types/vyora';
 import { CATEGORY_LABELS_ID, TRANSLATIONS } from '../../i18n/translations';
 import { MediaImage } from './MediaImage';
@@ -8,18 +8,23 @@ import { Button } from './Button';
 interface CreatorCardProps {
   creator: CreatorProfile;
   locale: LocaleCode;
+  isFollowing?: boolean;
   onExploreCreator: (creatorId: string) => void;
+  onToggleFollow?: (creatorId: string) => void;
 }
 
 export const CreatorCard: React.FC<CreatorCardProps> = ({
   creator,
   locale,
+  isFollowing = false,
   onExploreCreator,
+  onToggleFollow,
 }) => {
   const dict = TRANSLATIONS[locale];
   const specialtyLabel =
     locale === 'id' ? CATEGORY_LABELS_ID[creator.specialty] : creator.specialty;
   const bioText = locale === 'id' ? creator.bioId : creator.bio;
+  const followerCount = Math.max(0, creator.followerCount ?? 0);
 
   return (
     <article className="flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-600 dark:hover:border-emerald-500 rounded-xl p-3.5 sm:p-5 shadow-xs transition-colors duration-200">
@@ -47,6 +52,8 @@ export const CreatorCard: React.FC<CreatorCardProps> = ({
           <p className="text-[11px] sm:text-xs text-slate-600 dark:text-slate-400 truncate">{creator.role}</p>
           <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums truncate">
             {specialtyLabel} · {creator.contentCount} {dict.cards.titles}
+            {followerCount > 0 &&
+              ` · ${followerCount} ${locale === 'id' ? 'pengikut' : 'followers'}`}
           </p>
         </div>
       </div>
@@ -55,14 +62,40 @@ export const CreatorCard: React.FC<CreatorCardProps> = ({
         {bioText}
       </p>
 
-      <Button
-        variant="outline"
-        size="sm"
-        className="w-full"
-        onClick={() => onExploreCreator(creator.id)}
-      >
-        {dict.cards.exploreCreator}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          onClick={() => onExploreCreator(creator.id)}
+        >
+          {dict.cards.exploreCreator}
+        </Button>
+
+        {onToggleFollow && (
+          <Button
+            variant={isFollowing ? 'secondary' : 'primary'}
+            size="sm"
+            aria-pressed={isFollowing}
+            leftIcon={
+              isFollowing ? (
+                <UserCheck className="w-3.5 h-3.5" aria-hidden="true" />
+              ) : (
+                <UserPlus className="w-3.5 h-3.5" aria-hidden="true" />
+              )
+            }
+            onClick={() => onToggleFollow(creator.id)}
+          >
+            {isFollowing
+              ? locale === 'id'
+                ? 'Mengikuti'
+                : 'Following'
+              : locale === 'id'
+              ? 'Ikuti'
+              : 'Follow'}
+          </Button>
+        )}
+      </div>
     </article>
   );
 };

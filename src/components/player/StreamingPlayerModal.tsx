@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import * as dashjs from 'dashjs';
 import {
+  Bookmark,
   CheckCircle2,
   Lock,
   Maximize,
@@ -17,8 +18,10 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { upsertWatchProgress } from '../../services/firestoreService';
 import {
   authorizeVideoStream,
+  recordVideoView,
   savePlaybackProgress,
   type StreamAuthorizationResponse,
 } from '../../services/streamService';
@@ -30,7 +33,16 @@ import type {
   VideoAspectRatio,
   VideoFitMode,
 } from '../../types/vyora';
-import { formatPrice, isFreeContent } from '../../i18n/translations';
+import {
+  CATEGORY_LABELS_ID,
+  formatDuration,
+  formatPrice,
+  isFreeContent,
+} from '../../i18n/translations';
+import { buildAbsoluteShareUrl } from '../../utils/navigation';
+import { formatCompactViews } from '../../utils/share';
+import { ShareActions } from '../ui/ShareActions';
+import { MediaImage } from '../ui/MediaImage';
 import { buildTwitchEmbedUrl } from '../../services/videoImport/adapters';
 import { getFacebookEmbedUrl } from '../../utils/facebook';
 import {
@@ -48,11 +60,17 @@ import { Button } from '../ui/Button';
 
 interface StreamingPlayerModalProps {
   item: ContentItem | null;
+  relatedItems?: ContentItem[];
   locale: LocaleCode;
   currency: CurrencyCode;
   authRefreshKey?: number;
+  initialResumeSeconds?: number;
+  isSaved?: boolean;
   onClose: () => void;
   onViewDetails: (item: ContentItem) => void;
+  onSelectRelated?: (item: ContentItem) => void;
+  onToggleSave?: (item: ContentItem) => void;
+  onViewCounted?: (videoId: string, viewCount: number) => void;
   onRequireSignIn: () => void;
   onRequestCheckout: (
     item: ContentItem,
@@ -70,11 +88,17 @@ function formatClock(seconds: number): string {
 
 export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   item,
+  relatedItems = [],
   locale,
   currency,
   authRefreshKey = 0,
+  initialResumeSeconds = 0,
+  isSaved = false,
   onClose,
   onViewDetails,
+  onSelectRelated,
+  onToggleSave,
+  onViewCounted,
   onRequireSignIn,
   onRequestCheckout,
 }) => {
@@ -189,11 +213,16 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
       pos: number,
       auth: StreamAuthorizationResponse | null
     ) => {
-      if (auth?.mode === 'full' && auth.entitlement && firebaseUser) {
+      if (!firebaseUser) return;
+      const safeDur = Math.max(1, Math.floor(duration || (targetItem.durationMinutes || 5) * 60));
+      if (pos >= 2) {
+        void upsertWatchProgress(firebaseUser.uid, targetItem.id, pos, safeDur);
+      }
+      if (auth?.mode === 'full' && auth.entitlement) {
         void savePlaybackProgress(targetItem.id, pos).catch(() => {});
       }
     },
-    [firebaseUser]
+    [firebaseUser, duration]
   );
 
   const destroyAdaptiveEngines = useCallback(() => {
@@ -241,12 +270,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
           );
         }
 
+        const serverResume = authResp.mode === 'full' ? authResp.resumeSeconds : 0;
         const startSeek =
           typeof overrideSeekSeconds === 'number'
             ? overrideSeekSeconds
-            : authResp.mode === 'full'
-            ? authResp.resumeSeconds
-            : 0;
+            : Math.max(serverResume, initialResumeSeconds || 0);
         startSeekRef.current = startSeek;
         setCurrentTime(startSeek);
 
@@ -687,6 +715,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
     setLockHintVisible(false);
     setAuthData(null);
     void loadAuthorizedStream(item);
+    void recordVideoView(item.id).then((newCount) => {
+      if (typeof newCount === 'number') {
+        onViewCounted?.(item.id, newCount);
+      }
+    });
 
     return () => {
       destroyAdaptiveEngines();
@@ -723,13 +756,13 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   }, [item, authData, onClose, persistCurrentProgress, getPlaybackCurrentTime]);
 
   useEffect(() => {
-    if (!item || authData?.mode !== 'full' || !authData.entitlement || !isPlaying) return;
+    if (!item || !firebaseUser || !isPlaying) return;
     const id = window.setInterval(() => {
       const pos = getPlaybackCurrentTime();
       persistCurrentProgress(item, pos, authData);
     }, 10_000);
     return () => window.clearInterval(id);
-  }, [item, authData, isPlaying, persistCurrentProgress, getPlaybackCurrentTime]);
+  }, [item, firebaseUser, authData, isPlaying, persistCurrentProgress, getPlaybackCurrentTime]);
 
   if (!item) return null;
 
@@ -968,17 +1001,59 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
               {item.title}
             </h3>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              persistCurrentProgress(item, getPlaybackCurrentTime(), authData);
-              onClose();
-            }}
-            aria-label="Close streaming player"
-            className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {onToggleSave && (
+              <button
+                type="button"
+                onClick={() => onToggleSave(item)}
+                aria-pressed={isSaved}
+                aria-label={
+                  isSaved
+                    ? locale === 'id'
+                      ? 'Hapus dari daftar simpan'
+                      : 'Remove from watchlist'
+                    : locale === 'id'
+                    ? 'Simpan video'
+                    : 'Save video'
+                }
+                className={`min-h-[34px] inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                  isSaved
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Bookmark className={`w-3.5 h-3.5 ${isSaved ? 'fill-current' : ''}`} aria-hidden="true" />
+                <span className="hidden sm:inline">
+                  {isSaved
+                    ? locale === 'id'
+                      ? 'Tersimpan'
+                      : 'Saved'
+                    : locale === 'id'
+                    ? 'Simpan'
+                    : 'Save'}
+                </span>
+              </button>
+            )}
+
+            <ShareActions
+              title={item.title}
+              url={buildAbsoluteShareUrl({ route: 'detail', contentId: item.id })}
+              locale={locale}
+              compact
+            />
+
+            <button
+              type="button"
+              onClick={() => {
+                persistCurrentProgress(item, getPlaybackCurrentTime(), authData);
+                onClose();
+              }}
+              aria-label="Close streaming player"
+              className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Player & Paywall Region */}
@@ -1505,6 +1580,85 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                     {locale === 'id' ? 'Putar Ulang' : 'Replay Preview'}
                   </Button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Related / Putar Berikutnya Strip inside Player */}
+          {relatedItems.length > 0 && onSelectRelated && (
+            <div className="px-4 sm:px-5 py-3.5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white">
+                  {locale === 'id' ? 'Putar Berikutnya · Video Terkait' : 'Up Next · Related Videos'}
+                </h4>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {locale === 'id' ? 'Klik untuk langsung memutar' : 'Tap to switch'}
+                </span>
+              </div>
+
+              <div className="deloken-scroll flex gap-2.5 overflow-x-auto pb-1">
+                {relatedItems.slice(0, 6).map((rel) => {
+                  const relFree = isFreeContent(rel);
+                  const relCat = locale === 'id' ? CATEGORY_LABELS_ID[rel.category] : rel.category;
+                  const relPortrait =
+                    rel.aspectRatio === '9:16' ||
+                    rel.aspectRatio === '4:5' ||
+                    rel.aspectRatio === '1:1';
+                  const relViews = formatCompactViews(rel.viewCount, locale);
+                  return (
+                    <button
+                      key={rel.id}
+                      type="button"
+                      onClick={() => {
+                        persistCurrentProgress(item, getPlaybackCurrentTime(), authData);
+                        onSelectRelated(rel);
+                      }}
+                      className="group shrink-0 w-[195px] sm:w-[215px] flex flex-col rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-emerald-600 dark:hover:border-emerald-500 overflow-hidden text-left transition-colors cursor-pointer"
+                    >
+                      <div className="relative aspect-video w-full overflow-hidden bg-slate-900">
+                        {relPortrait && rel.thumbnailUrl && (
+                          <img
+                            src={rel.thumbnailUrl}
+                            alt=""
+                            aria-hidden="true"
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                            className="absolute inset-0 w-full h-full object-cover scale-125 blur-lg opacity-55 brightness-75 pointer-events-none"
+                          />
+                        )}
+                        <MediaImage
+                          src={rel.thumbnailUrl}
+                          alt={rel.title}
+                          fallbackTitle={rel.title}
+                          fit={relPortrait ? 'contain' : 'cover'}
+                          transparentBg={relPortrait}
+                          className="relative z-[1] w-full h-full group-hover:scale-[1.03] transition-transform duration-200"
+                        />
+                        <span
+                          className={`absolute z-[2] top-1.5 left-1.5 px-1.5 py-0.5 rounded-[5px] text-[9px] font-semibold leading-none ${
+                            relFree
+                              ? 'bg-emerald-600/95 text-white'
+                              : 'bg-slate-950/80 text-white border border-white/15'
+                          }`}
+                        >
+                          {relFree ? (locale === 'id' ? 'GRATIS' : 'FREE') : locale === 'id' ? 'BERBAYAR' : 'PAID'}
+                        </span>
+                        <span className="absolute z-[2] bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-slate-950/80 text-[10px] font-mono text-white">
+                          {formatDuration(rel.durationMinutes, locale)}
+                        </span>
+                      </div>
+                      <div className="p-2 space-y-0.5 min-w-0">
+                        <p className="text-[11px] font-semibold text-slate-900 dark:text-white line-clamp-2 leading-snug group-hover:text-emerald-700 dark:group-hover:text-emerald-400">
+                          {rel.title}
+                        </p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                          {relCat} · {rel.creatorName}
+                          {relViews ? ` · ${relViews}` : ''}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

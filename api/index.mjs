@@ -87,6 +87,8 @@ function loadLedger() {
         processedWebhooks: parsed.processedWebhooks ?? {},
         creatorMedia: parsed.creatorMedia ?? {},
         videoDeletionJobs: parsed.videoDeletionJobs ?? [],
+        videoViews: parsed.videoViews ?? {},
+        creatorFollowerIds: parsed.creatorFollowerIds ?? {},
         platformSettings: parsed.platformSettings ?? {
           commissionPercent: 20,
           minPriceUsd: 1.99,
@@ -118,6 +120,8 @@ function loadLedger() {
     processedWebhooks: {},
     creatorMedia: {},
     videoDeletionJobs: [],
+    videoViews: {},
+    creatorFollowerIds: {},
     platformSettings: {
       commissionPercent: 20,
       minPriceUsd: 1.99,
@@ -386,6 +390,64 @@ function verifyMidtransWebhookSignature(input) {
   const a = Buffer.from(expected, "utf8");
   const b = Buffer.from(input.signatureKey || "", "utf8");
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+var recentVideoViewThrottle = /* @__PURE__ */ new Map();
+var VIEW_THROTTLE_WINDOW_MS = 10 * 60 * 1e3;
+async function recordVideoViewOnce(viewerKey, videoId) {
+  const now = Date.now();
+  const throttleKey = `${viewerKey}:${videoId}`;
+  const lastSeen = recentVideoViewThrottle.get(throttleKey) ?? 0;
+  if (recentVideoViewThrottle.size > 5e3) {
+    for (const [k, ts] of recentVideoViewThrottle.entries()) {
+      if (now - ts > VIEW_THROTTLE_WINDOW_MS) {
+        recentVideoViewThrottle.delete(k);
+      }
+    }
+  }
+  const shouldIncrement = now - lastSeen >= VIEW_THROTTLE_WINDOW_MS;
+  if (shouldIncrement) {
+    recentVideoViewThrottle.set(throttleKey, now);
+  }
+  return withLedgerLock(async () => {
+    const state = loadLedger();
+    if (!state.videoViews) state.videoViews = {};
+    const current = Math.max(0, Number(state.videoViews[videoId] ?? 0));
+    if (!shouldIncrement) {
+      return { viewCount: current, counted: false };
+    }
+    const next = current + 1;
+    state.videoViews[videoId] = next;
+    saveLedger(state);
+    return { viewCount: next, counted: true };
+  });
+}
+async function syncCreatorFollowServer(uid, creatorId, following) {
+  return withLedgerLock(async () => {
+    const state = loadLedger();
+    if (!state.creatorFollowerIds) state.creatorFollowerIds = {};
+    const existingList = Array.isArray(state.creatorFollowerIds[creatorId]) ? state.creatorFollowerIds[creatorId] : [];
+    const set = new Set(existingList);
+    if (following) {
+      set.add(uid);
+    } else {
+      set.delete(uid);
+    }
+    state.creatorFollowerIds[creatorId] = Array.from(set);
+    saveLedger(state);
+    return set.size;
+  });
+}
+function getPublicMetricsSnapshot() {
+  const state = loadLedger();
+  const videoViews = state.videoViews ?? {};
+  const rawFollowers = state.creatorFollowerIds ?? {};
+  const creatorFollowers = {};
+  for (const [creatorId, list] of Object.entries(rawFollowers)) {
+    if (Array.isArray(list)) {
+      creatorFollowers[creatorId] = list.length;
+    }
+  }
+  return { videoViews, creatorFollowers };
 }
 
 // src/db/index.ts
@@ -6406,14 +6468,14 @@ function safeResolveUploadedAsset(baseRoot, uid, fileName) {
   return target;
 }
 function createApiApp() {
-  const app2 = express();
-  app2.set("trust proxy", 1);
-  app2.use("/api", (_req, res, next) => {
+  const app = express();
+  app.set("trust proxy", 1);
+  app.use("/api", (_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     next();
   });
-  app2.use("/api", rateLimitApi);
-  app2.post(
+  app.use("/api", rateLimitApi);
+  app.post(
     "/api/creator/upload-media",
     requireAuth,
     express.raw({
@@ -6516,7 +6578,7 @@ function createApiApp() {
       });
     }
   );
-  app2.get("/api/media/thumb/:uid/:fileName", async (req, res) => {
+  app.get("/api/media/thumb/:uid/:fileName", async (req, res) => {
     const { uid, fileName } = req.params;
     const target = safeResolveUploadedAsset(THUMBNAILS_DIR, uid, fileName);
     if (!target) {
@@ -6564,8 +6626,8 @@ function createApiApp() {
       }
     }
   });
-  app2.use(express.json({ limit: "128kb" }));
-  app2.get("/api/health", (_req, res) => {
+  app.use(express.json({ limit: "128kb" }));
+  app.get("/api/health", (_req, res) => {
     res.json({
       status: "ok",
       databaseConfigured: isSqlConfigured(),
@@ -6584,7 +6646,7 @@ function createApiApp() {
       serverTimeIso: (/* @__PURE__ */ new Date()).toISOString()
     });
   });
-  app2.post(
+  app.post(
     "/api/creator/cloudflare-direct-upload",
     requireAuth,
     async (req, res) => {
@@ -6620,7 +6682,7 @@ function createApiApp() {
       }
     }
   );
-  app2.get(
+  app.get(
     "/api/creator/cloudflare-status/:uid",
     requireAuth,
     async (req, res) => {
@@ -6644,7 +6706,7 @@ function createApiApp() {
     }
   );
   const inspectRateMap = /* @__PURE__ */ new Map();
-  app2.post(
+  app.post(
     "/api/creator/inspect-video-link",
     requireAuth,
     async (req, res) => {
@@ -6700,7 +6762,7 @@ function createApiApp() {
     "html_embed",
     "direct_video"
   ]);
-  app2.post(
+  app.post(
     "/api/creator/register-video-media",
     requireAuth,
     async (req, res) => {
@@ -6860,7 +6922,7 @@ function createApiApp() {
       }
     }
   );
-  app2.post("/api/stream/authorize", optionalAuth, async (req, res) => {
+  app.post("/api/stream/authorize", optionalAuth, async (req, res) => {
     const { videoId, category } = req.body;
     if (!isValidSafeId(videoId)) {
       res.status(400).json({ error: "Invalid videoId." });
@@ -7352,7 +7414,7 @@ function createApiApp() {
       serverTimeIso: new Date(now).toISOString()
     });
   });
-  app2.get("/api/stream/file", async (req, res) => {
+  app.get("/api/stream/file", async (req, res) => {
     const token = typeof req.query.token === "string" ? req.query.token : "";
     const payload = verifyPlaybackToken(token);
     if (!payload || payload.streamKey !== "uploaded-file" || !payload.fileRef) {
@@ -7407,7 +7469,7 @@ function createApiApp() {
     stream.pipe(res);
     res.on("close", () => stream.destroy());
   });
-  app2.get("/api/stream/master.m3u8", async (req, res) => {
+  app.get("/api/stream/master.m3u8", async (req, res) => {
     const token = typeof req.query.token === "string" ? req.query.token : "";
     const payload = verifyPlaybackToken(token);
     if (!payload) {
@@ -7432,7 +7494,7 @@ function createApiApp() {
     res.setHeader("Cache-Control", "private, no-store");
     res.send(masterPlaylist);
   });
-  app2.get("/api/stream/variant.m3u8", (req, res) => {
+  app.get("/api/stream/variant.m3u8", (req, res) => {
     const token = typeof req.query.token === "string" ? req.query.token : "";
     const quality = typeof req.query.quality === "string" ? req.query.quality : "720p";
     const payload = verifyPlaybackToken(token);
@@ -7484,7 +7546,7 @@ function createApiApp() {
     res.setHeader("Cache-Control", "private, no-store");
     res.send(outputLines.join("\n"));
   });
-  app2.get("/api/stream/segment/:index", (req, res) => {
+  app.get("/api/stream/segment/:index", (req, res) => {
     const token = typeof req.query.token === "string" ? req.query.token : "";
     const quality = typeof req.query.quality === "string" ? req.query.quality : "720p";
     const payload = verifyPlaybackToken(token);
@@ -7530,7 +7592,7 @@ function createApiApp() {
     });
     stream.pipe(res);
   });
-  app2.get("/api/entitlements/me", requireAuth, async (req, res) => {
+  app.get("/api/entitlements/me", requireAuth, async (req, res) => {
     if (!isSqlConfigured()) {
       res.json({ entitlements: [], serverTimeIso: (/* @__PURE__ */ new Date()).toISOString() });
       return;
@@ -7562,7 +7624,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/playback/progress", requireAuth, async (req, res) => {
+  app.post("/api/playback/progress", requireAuth, async (req, res) => {
     const { videoId, positionSeconds } = req.body;
     if (!isValidSafeId(videoId) || typeof positionSeconds !== "number") {
       res.status(400).json({ error: "Invalid videoId or positionSeconds." });
@@ -7595,7 +7657,60 @@ function createApiApp() {
       });
     }
   });
-  app2.post(
+  app.get("/api/videos/metrics", (_req, res) => {
+    try {
+      res.json(getPublicMetricsSnapshot());
+    } catch {
+      res.json({ videoViews: {}, creatorFollowers: {} });
+    }
+  });
+  app.post("/api/videos/:videoId/view", optionalAuth, async (req, res) => {
+    const { videoId } = req.params;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: "Invalid videoId." });
+      return;
+    }
+    try {
+      const videoState = await resolveServerVideoState(
+        videoId,
+        firebase_applet_config_default.projectId,
+        firebase_applet_config_default.firestoreDatabaseId,
+        req.user?.rawIdToken
+      );
+      if (blockedVideoStatuses.has(videoId) || videoState.state === "archived" || videoState.state === "deletion_pending" || videoState.state === "not_found") {
+        res.status(404).json({ error: "Video unavailable." });
+        return;
+      }
+      const viewerKey = req.user?.uid || String(req.headers["x-forwarded-for"] || req.ip || "guest").split(",")[0].trim().slice(0, 64);
+      const result = await recordVideoViewOnce(viewerKey, videoId);
+      res.json({ videoId, ...result });
+    } catch {
+      res.status(500).json({ error: "Failed to record view." });
+    }
+  });
+  app.post(
+    "/api/creators/:creatorId/follow-sync",
+    requireAuth,
+    async (req, res) => {
+      const { creatorId } = req.params;
+      const { following } = req.body;
+      if (!isValidSafeId(creatorId) || typeof following !== "boolean") {
+        res.status(400).json({ error: "Invalid creatorId or following boolean." });
+        return;
+      }
+      try {
+        const followerCount = await syncCreatorFollowServer(
+          req.user.uid,
+          creatorId,
+          following
+        );
+        res.json({ creatorId, following, followerCount });
+      } catch {
+        res.status(500).json({ error: "Failed to sync creator follow count." });
+      }
+    }
+  );
+  app.post(
     "/api/entitlements/activate-phase3-pass",
     requireAuth,
     async (req, res) => {
@@ -7644,7 +7759,7 @@ function createApiApp() {
       }
     }
   );
-  app2.get("/api/wallet/me", requireAuth, async (req, res) => {
+  app.get("/api/wallet/me", requireAuth, async (req, res) => {
     try {
       const snapshot = await getWalletSnapshotSql(req.user.uid);
       res.json({
@@ -7657,7 +7772,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/wallet/spend", requireAuth, async (req, res) => {
+  app.post("/api/wallet/spend", requireAuth, async (req, res) => {
     const uid = req.user.uid;
     const idemKey = getIdempotencyKey(req);
     const { videoId, resumeSeconds } = req.body;
@@ -7695,7 +7810,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/payments/paypal/create-order", requireAuth, async (req, res) => {
+  app.post("/api/payments/paypal/create-order", requireAuth, async (req, res) => {
     const uid = req.user.uid;
     const idemKey = getIdempotencyKey(req);
     const { purpose, targetId, resumeSeconds } = req.body;
@@ -7828,7 +7943,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/payments/paypal/capture", requireAuth, async (req, res) => {
+  app.post("/api/payments/paypal/capture", requireAuth, async (req, res) => {
     const uid = req.user.uid;
     const idemKey = getIdempotencyKey(req);
     const { paymentId, sandboxCaptureToken, resumeSeconds } = req.body;
@@ -7939,7 +8054,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/payments/qris/create", requireAuth, async (req, res) => {
+  app.post("/api/payments/qris/create", requireAuth, async (req, res) => {
     const uid = req.user.uid;
     const idemKey = getIdempotencyKey(req);
     const { purpose, targetId, resumeSeconds } = req.body;
@@ -8063,7 +8178,7 @@ function createApiApp() {
       });
     }
   });
-  app2.get("/api/payments/:paymentId/status", requireAuth, async (req, res) => {
+  app.get("/api/payments/:paymentId/status", requireAuth, async (req, res) => {
     const paymentId = req.params.paymentId;
     if (!isValidSafeId(paymentId)) {
       res.status(400).json({ error: "Invalid paymentId." });
@@ -8082,7 +8197,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post(
+  app.post(
     "/api/payments/qris/sandbox-settle",
     requireAuth,
     async (req, res) => {
@@ -8139,7 +8254,7 @@ function createApiApp() {
       }
     }
   );
-  app2.post("/api/webhooks/paypal", async (req, res) => {
+  app.post("/api/webhooks/paypal", async (req, res) => {
     const body = req.body;
     const webhookId = process.env.PAYPAL_WEBHOOK_ID;
     if (webhookId && isPayPalConfigured()) {
@@ -8224,7 +8339,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/webhooks/qris", async (req, res) => {
+  app.post("/api/webhooks/qris", async (req, res) => {
     const body = req.body;
     const orderId = body.order_id || "";
     const statusCode = body.status_code || "200";
@@ -8307,7 +8422,7 @@ function createApiApp() {
       });
     }
   });
-  app2.get("/api/creator/earnings/me", requireAuth, async (req, res) => {
+  app.get("/api/creator/earnings/me", requireAuth, async (req, res) => {
     try {
       const summary = await getCreatorEarningsSummarySql(req.user.uid);
       res.json(summary);
@@ -8317,7 +8432,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/creator/payouts/request", requireAuth, async (req, res) => {
+  app.post("/api/creator/payouts/request", requireAuth, async (req, res) => {
     const uid = req.user.uid;
     const idemKey = getIdempotencyKey(req);
     const { creatorName, currency, amount, method, destination } = req.body;
@@ -8344,7 +8459,7 @@ function createApiApp() {
       });
     }
   });
-  app2.get("/api/admin/finance/overview", requireAdmin, async (_req, res) => {
+  app.get("/api/admin/finance/overview", requireAdmin, async (_req, res) => {
     try {
       const overview = await getAdminFinanceOverviewSql();
       res.json(overview);
@@ -8354,7 +8469,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/admin/refunds", requireAdmin, async (req, res) => {
+  app.post("/api/admin/refunds", requireAdmin, async (req, res) => {
     const idemKey = getIdempotencyKey(req);
     const { paymentId } = req.body;
     if (!isValidSafeId(paymentId)) {
@@ -8374,7 +8489,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/admin/payments/:paymentId/approve", requireAdmin, async (req, res) => {
+  app.post("/api/admin/payments/:paymentId/approve", requireAdmin, async (req, res) => {
     const paymentId = req.params.paymentId;
     const idemKey = getIdempotencyKey(req);
     if (!isValidSafeId(paymentId)) {
@@ -8432,7 +8547,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/admin/payouts/:payoutId/status", requireAdmin, async (req, res) => {
+  app.post("/api/admin/payouts/:payoutId/status", requireAdmin, async (req, res) => {
     const payoutId = req.params.payoutId;
     const { status, adminNote } = req.body;
     if (!isValidSafeId(payoutId) || status !== "processing" && status !== "paid" && status !== "rejected") {
@@ -8452,7 +8567,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/admin/settings", requireAdmin, async (req, res) => {
+  app.post("/api/admin/settings", requireAdmin, async (req, res) => {
     const { commissionPercent, minPriceUsd, minPriceIdr } = req.body;
     if (typeof commissionPercent !== "number" || commissionPercent < 0 || commissionPercent > 50) {
       res.status(400).json({ error: "Invalid commissionPercent (0-50)." });
@@ -8471,7 +8586,7 @@ function createApiApp() {
       });
     }
   });
-  app2.get("/api/admin/video-deletion-jobs", requireAdmin, async (_req, res) => {
+  app.get("/api/admin/video-deletion-jobs", requireAdmin, async (_req, res) => {
     try {
       const jobs = await fetchDeletionJobs(40);
       res.json({ jobs });
@@ -8481,7 +8596,7 @@ function createApiApp() {
       });
     }
   });
-  app2.get("/api/admin/videos/:videoId/asset-info", requireAdmin, async (req, res) => {
+  app.get("/api/admin/videos/:videoId/asset-info", requireAdmin, async (req, res) => {
     const videoId = req.params.videoId;
     if (!isValidSafeId(videoId)) {
       res.status(400).json({ error: "Invalid videoId." });
@@ -8542,7 +8657,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/admin/videos/:videoId/archive", requireAdmin, async (req, res) => {
+  app.post("/api/admin/videos/:videoId/archive", requireAdmin, async (req, res) => {
     const videoId = req.params.videoId;
     if (!isValidSafeId(videoId)) {
       res.status(400).json({ error: "Invalid videoId." });
@@ -8597,7 +8712,7 @@ function createApiApp() {
       });
     }
   });
-  app2.post("/api/admin/videos/:videoId/restore", requireAdmin, async (req, res) => {
+  app.post("/api/admin/videos/:videoId/restore", requireAdmin, async (req, res) => {
     const videoId = req.params.videoId;
     if (!isValidSafeId(videoId)) {
       res.status(400).json({ error: "Invalid videoId." });
@@ -9022,7 +9137,7 @@ function createApiApp() {
       preservedFinancialRecords: true
     };
   };
-  app2.delete("/api/admin/videos/:videoId", requireAdmin, async (req, res) => {
+  app.delete("/api/admin/videos/:videoId", requireAdmin, async (req, res) => {
     const videoId = req.params.videoId;
     const body = req.body || {};
     const headerConf = req.headers["x-delete-confirmation"];
@@ -9044,7 +9159,7 @@ function createApiApp() {
     }
     res.json(outcome);
   });
-  app2.post("/api/admin/videos/bulk-delete", requireAdmin, async (req, res) => {
+  app.post("/api/admin/videos/bulk-delete", requireAdmin, async (req, res) => {
     const body = req.body || {};
     if (!Array.isArray(body.videoIds) || body.videoIds.length === 0) {
       res.status(400).json({ error: "Pilih minimal satu video untuk dihapus permanen." });
@@ -9111,12 +9226,8 @@ function createApiApp() {
       results
     });
   });
-  return app2;
+  return app;
 }
-
-// server/vercelEntry.ts
-var app = createApiApp();
-var vercelEntry_default = app;
 export {
-  vercelEntry_default as default
+  createApiApp
 };

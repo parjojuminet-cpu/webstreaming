@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Bookmark,
   CheckCircle2,
   Clapperboard,
   Clock,
@@ -9,6 +10,7 @@ import {
   Settings,
   Shield,
   User,
+  Users,
   Wallet,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -28,6 +30,7 @@ import {
 } from '../services/paymentService';
 import type {
   ContentItem,
+  CreatorProfile,
   CurrencyCode,
   EntitlementRecord,
   LocaleCode,
@@ -37,6 +40,8 @@ import type {
 } from '../types/vyora';
 import { formatLocalizedDate, formatPrice } from '../i18n/translations';
 import { Button } from '../components/ui/Button';
+import { ContentCard } from '../components/ui/ContentCard';
+import { CreatorCard } from '../components/ui/CreatorCard';
 import {
   DashboardSkeleton,
   ListRowSkeleton,
@@ -46,13 +51,20 @@ import { MediaImage } from '../components/ui/MediaImage';
 
 interface ViewerDashboardPageProps {
   catalog: ContentItem[];
+  creators?: CreatorProfile[];
   locale: LocaleCode;
   currency: CurrencyCode;
   entitlementRefreshKey?: number;
+  savedVideoIds?: Set<string>;
+  followedCreatorIds?: Set<string>;
   onChangeLocale: (locale: LocaleCode) => void;
   onChangeCurrency: (currency: CurrencyCode) => void;
   onNavigate: (route: ViewRoute) => void;
   onWatchContent: (item: ContentItem) => void;
+  onSelectContent?: (item: ContentItem) => void;
+  onExploreCreator?: (creatorId: string) => void;
+  onToggleSave?: (item: ContentItem) => void;
+  onToggleFollow?: (creatorId: string) => void;
 }
 
 function formatResumeClock(seconds: number): string {
@@ -62,17 +74,31 @@ function formatResumeClock(seconds: number): string {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-type ViewerTab = 'overview' | 'library' | 'wallet' | 'purchases' | 'profile';
+type ViewerTab =
+  | 'overview'
+  | 'library'
+  | 'saved'
+  | 'following'
+  | 'wallet'
+  | 'purchases'
+  | 'profile';
 
 export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
   catalog,
+  creators = [],
   locale,
   currency,
   entitlementRefreshKey = 0,
+  savedVideoIds,
+  followedCreatorIds,
   onChangeLocale,
   onChangeCurrency,
   onNavigate,
   onWatchContent,
+  onSelectContent,
+  onExploreCreator,
+  onToggleSave,
+  onToggleFollow,
 }) => {
   const { firebaseUser, userProfile, creatorProfile, wallet, isAdmin, authReady } = useAuth();
   const [activeTab, setActiveTab] = useState<ViewerTab>('overview');
@@ -184,6 +210,16 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
     return Array.from(map.values());
   }, [entitlements, serverEntitlements]);
 
+  const savedItems = useMemo(() => {
+    if (!savedVideoIds || savedVideoIds.size === 0) return [];
+    return catalog.filter((item) => savedVideoIds.has(item.id));
+  }, [catalog, savedVideoIds]);
+
+  const followedCreators = useMemo(() => {
+    if (!followedCreatorIds || followedCreatorIds.size === 0) return [];
+    return creators.filter((c) => followedCreatorIds.has(c.id));
+  }, [creators, followedCreatorIds]);
+
   if (!authReady) {
     return <DashboardSkeleton />;
   }
@@ -249,6 +285,22 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
       id: 'library',
       label: locale === 'id' ? 'Perpustakaan Saya' : 'My Library',
       icon: <Film className="w-4 h-4" aria-hidden="true" />,
+    },
+    {
+      id: 'saved',
+      label:
+        locale === 'id'
+          ? `Disimpan (${savedItems.length})`
+          : `Saved (${savedItems.length})`,
+      icon: <Bookmark className="w-4 h-4" aria-hidden="true" />,
+    },
+    {
+      id: 'following',
+      label:
+        locale === 'id'
+          ? `Mengikuti (${followedCreators.length})`
+          : `Following (${followedCreators.length})`,
+      icon: <Users className="w-4 h-4" aria-hidden="true" />,
     },
     {
       id: 'wallet',
@@ -554,6 +606,95 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                   </article>
                 );
               })}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* SAVED WATCHLIST */}
+      {activeTab === 'saved' && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
+              {locale === 'id' ? 'Daftar Tonton Disimpan' : 'Saved Watchlist'}
+            </h2>
+            <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
+              {savedItems.length} {locale === 'id' ? 'judul' : 'titles'}
+            </span>
+          </div>
+          {savedItems.length === 0 ? (
+            <EmptyState
+              title={locale === 'id' ? 'Belum ada video disimpan' : 'Your watchlist is empty'}
+              description={
+                locale === 'id'
+                  ? 'Tekan ikon Simpan di kartu tayangan atau pemutar video untuk menandai judul yang ingin Anda tonton atau beli nanti.'
+                  : 'Tap the Bookmark button on any release card or inside the player to save titles for later.'
+              }
+              actionLabel={locale === 'id' ? 'Jelajahi Katalog' : 'Browse Catalog'}
+              onAction={() => onNavigate('explore')}
+              icon={<Bookmark className="w-6 h-6" />}
+            />
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-5">
+              {savedItems.map((item) => (
+                <ContentCard
+                  key={item.id}
+                  item={item}
+                  locale={locale}
+                  currency={currency}
+                  isSaved={Boolean(savedVideoIds?.has(item.id))}
+                  onSelectContent={(selected) =>
+                    onSelectContent ? onSelectContent(selected) : onWatchContent(selected)
+                  }
+                  onWatchPreview={onWatchContent}
+                  onSelectCreator={(creatorId) =>
+                    onExploreCreator ? onExploreCreator(creatorId) : onNavigate('explore')
+                  }
+                  onToggleSave={onToggleSave}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* FOLLOWED CREATORS */}
+      {activeTab === 'following' && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
+              {locale === 'id' ? 'Kreator yang Diikuti' : 'Followed Creators'}
+            </h2>
+            <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
+              {followedCreators.length} {locale === 'id' ? 'kreator' : 'creators'}
+            </span>
+          </div>
+          {followedCreators.length === 0 ? (
+            <EmptyState
+              title={locale === 'id' ? 'Belum mengikuti kreator' : 'Not following any creators yet'}
+              description={
+                locale === 'id'
+                  ? 'Ikuti kreator favorit Anda agar profil dan rilisannya mudah ditemukan kembali kapan saja.'
+                  : 'Follow your favorite filmmakers and instructors to keep quick access to their releases.'
+              }
+              actionLabel={locale === 'id' ? 'Temukan Kreator' : 'Discover Creators'}
+              onAction={() => onNavigate('home')}
+              icon={<Users className="w-6 h-6" />}
+            />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-5">
+              {followedCreators.map((creator) => (
+                <CreatorCard
+                  key={creator.id}
+                  creator={creator}
+                  locale={locale}
+                  isFollowing={Boolean(followedCreatorIds?.has(creator.id))}
+                  onExploreCreator={(creatorId) =>
+                    onExploreCreator ? onExploreCreator(creatorId) : onNavigate('creator')
+                  }
+                  onToggleFollow={onToggleFollow}
+                />
+              ))}
             </div>
           )}
         </section>

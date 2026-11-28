@@ -15,12 +15,15 @@ import {
   createLivePayPalOrder,
   getPayPalAccessToken,
   getPayPalPaymentLink,
+  getPublicMetricsSnapshot,
   isMidtransConfigured,
   isPayPalConfigured,
   loadLedger,
+  recordVideoViewOnce,
   resolveServerVideoEntry,
   resolveServerVideoState,
   saveLedger,
+  syncCreatorFollowServer,
   verifyMidtransWebhookSignature,
   withLedgerLock,
   type CreatorMediaBinding,
@@ -2132,6 +2135,72 @@ export function createApiApp(): Express {
       });
     }
   });
+
+  app.get('/api/videos/metrics', (_req, res) => {
+    try {
+      res.json(getPublicMetricsSnapshot());
+    } catch {
+      res.json({ videoViews: {}, creatorFollowers: {} });
+    }
+  });
+
+  app.post('/api/videos/:videoId/view', optionalAuth, async (req: AuthedRequest, res) => {
+    const { videoId } = req.params;
+    if (!isValidSafeId(videoId)) {
+      res.status(400).json({ error: 'Invalid videoId.' });
+      return;
+    }
+    try {
+      const videoState = await resolveServerVideoState(
+        videoId,
+        firebaseConfig.projectId,
+        firebaseConfig.firestoreDatabaseId,
+        req.user?.rawIdToken
+      );
+      if (
+        blockedVideoStatuses.has(videoId) ||
+        videoState.state === 'archived' ||
+        videoState.state === 'deletion_pending' ||
+        videoState.state === 'not_found'
+      ) {
+        res.status(404).json({ error: 'Video unavailable.' });
+        return;
+      }
+      const viewerKey =
+        req.user?.uid ||
+        String(req.headers['x-forwarded-for'] || req.ip || 'guest')
+          .split(',')[0]
+          .trim()
+          .slice(0, 64);
+      const result = await recordVideoViewOnce(viewerKey, videoId);
+      res.json({ videoId, ...result });
+    } catch {
+      res.status(500).json({ error: 'Failed to record view.' });
+    }
+  });
+
+  app.post(
+    '/api/creators/:creatorId/follow-sync',
+    requireAuth,
+    async (req: AuthedRequest, res) => {
+      const { creatorId } = req.params;
+      const { following } = req.body as { following?: unknown };
+      if (!isValidSafeId(creatorId) || typeof following !== 'boolean') {
+        res.status(400).json({ error: 'Invalid creatorId or following boolean.' });
+        return;
+      }
+      try {
+        const followerCount = await syncCreatorFollowServer(
+          req.user!.uid,
+          creatorId,
+          following
+        );
+        res.json({ creatorId, following, followerCount });
+      } catch {
+        res.status(500).json({ error: 'Failed to sync creator follow count.' });
+      }
+    }
+  );
 
   app.post(
     '/api/entitlements/activate-phase3-pass',

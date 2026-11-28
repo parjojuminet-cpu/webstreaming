@@ -32,6 +32,10 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidCompositeId(id) {
+      return id is string && id.size() >= 3 && id.size() <= 260 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
     function isBootstrappedAdmin() {
       return isVerifiedUser() && request.auth.token.email == 'parjojuminet@gmail.com';
     }
@@ -238,6 +242,35 @@ service cloud.firestore {
         && data.authorName is string && data.authorName.size() >= 2 && data.authorName.size() <= 80
         && data.rating is int && data.rating >= 1 && data.rating <= 5
         && data.comment is string && data.comment.size() >= 5 && data.comment.size() <= 1000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWatchProgress(data, progressId) {
+      return data.keys().hasAll(['userId', 'videoId', 'resumeSeconds', 'durationSeconds', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'videoId', 'resumeSeconds', 'durationSeconds', 'updatedAt'])
+        && data.userId is string && data.userId == request.auth.uid && isValidId(data.userId)
+        && data.videoId is string && isValidId(data.videoId)
+        && progressId == data.userId + '_' + data.videoId
+        && data.resumeSeconds is int && data.resumeSeconds >= 0 && data.resumeSeconds <= 86400
+        && data.durationSeconds is int && data.durationSeconds >= 1 && data.durationSeconds <= 86400
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWatchlistItem(data, watchlistId) {
+      return data.keys().hasAll(['userId', 'videoId', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'videoId', 'createdAt'])
+        && data.userId is string && data.userId == request.auth.uid && isValidId(data.userId)
+        && data.videoId is string && isValidId(data.videoId)
+        && watchlistId == data.userId + '_' + data.videoId
+        && data.createdAt is timestamp;
+    }
+
+    function isValidCreatorFollow(data, followId) {
+      return data.keys().hasAll(['userId', 'creatorId', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'creatorId', 'createdAt'])
+        && data.userId is string && data.userId == request.auth.uid && isValidId(data.userId)
+        && data.creatorId is string && isValidId(data.creatorId)
+        && followId == data.userId + '_' + data.creatorId
         && data.createdAt is timestamp;
     }
 
@@ -550,6 +583,51 @@ service cloud.firestore {
         && isValidAdminDoc(incoming(), adminId)
         && incoming().grantedAt == request.time;
       allow delete: if isValidId(adminId) && isAdmin();
+    }
+
+    // WATCH PROGRESS (Per-user Continue Watching state)
+    match /watch_progress/{progressId} {
+      allow get: if isValidCompositeId(progressId) && isVerifiedUser() && existing().userId == request.auth.uid;
+      allow list: if isVerifiedUser() && existing().userId == request.auth.uid;
+      allow create: if isValidCompositeId(progressId)
+        && isVerifiedUser()
+        && isValidWatchProgress(incoming(), progressId)
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/videos/$(incoming().videoId));
+      allow update: if isValidCompositeId(progressId)
+        && isVerifiedUser()
+        && isValidWatchProgress(incoming(), progressId)
+        && incoming().userId == existing().userId
+        && incoming().videoId == existing().videoId
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['resumeSeconds', 'durationSeconds', 'updatedAt']);
+      allow delete: if isValidCompositeId(progressId) && isVerifiedUser() && existing().userId == request.auth.uid;
+    }
+
+    // WATCHLIST (Per-user saved videos)
+    match /watchlist/{watchlistId} {
+      allow get: if isValidCompositeId(watchlistId) && isVerifiedUser() && existing().userId == request.auth.uid;
+      allow list: if isVerifiedUser() && existing().userId == request.auth.uid;
+      allow create: if isValidCompositeId(watchlistId)
+        && isVerifiedUser()
+        && isValidWatchlistItem(incoming(), watchlistId)
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/videos/$(incoming().videoId));
+      allow update: if false;
+      allow delete: if isValidCompositeId(watchlistId) && isVerifiedUser() && existing().userId == request.auth.uid;
+    }
+
+    // CREATOR FOLLOWS (Per-user creator subscriptions)
+    match /creator_follows/{followId} {
+      allow get: if isValidCompositeId(followId) && isVerifiedUser() && existing().userId == request.auth.uid;
+      allow list: if isVerifiedUser() && existing().userId == request.auth.uid;
+      allow create: if isValidCompositeId(followId)
+        && isVerifiedUser()
+        && isValidCreatorFollow(incoming(), followId)
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/creators/$(incoming().creatorId));
+      allow update: if false;
+      allow delete: if isValidCompositeId(followId) && isVerifiedUser() && existing().userId == request.auth.uid;
     }
   }
 }

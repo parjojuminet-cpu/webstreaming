@@ -1,14 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
+  Bookmark,
   Calendar,
   CheckCircle2,
   Clock,
+  Eye,
   Film,
   Lock,
   Play,
   ShieldCheck,
   Star,
+  UserCheck,
+  UserPlus,
   Wallet,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -34,9 +38,12 @@ import {
   formatPrice,
   isFreeContent,
 } from '../i18n/translations';
+import { buildAbsoluteShareUrl } from '../utils/navigation';
+import { formatViewCount } from '../utils/share';
 import { Button } from '../components/ui/Button';
 import { ContentCard } from '../components/ui/ContentCard';
 import { MediaImage } from '../components/ui/MediaImage';
+import { ShareActions } from '../components/ui/ShareActions';
 
 interface ContentDetailPageProps {
   item: ContentItem;
@@ -46,10 +53,14 @@ interface ContentDetailPageProps {
   locale: LocaleCode;
   currency: CurrencyCode;
   entitlementRefreshKey?: number;
+  savedVideoIds?: Set<string>;
+  followedCreatorIds?: Set<string>;
   onBack: () => void;
   onWatchPreview: (item: ContentItem) => void;
   onSelectContent: (item: ContentItem) => void;
   onExploreCreator: (creatorId: string) => void;
+  onToggleSave?: (item: ContentItem) => void;
+  onToggleFollow?: (creatorId: string) => void;
   onRequestUnlock: (method: 'ppv' | 'credits', item: ContentItem) => void;
   onReportContent?: (item: ContentItem) => void;
 }
@@ -69,10 +80,14 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
   locale,
   currency,
   entitlementRefreshKey = 0,
+  savedVideoIds,
+  followedCreatorIds,
   onBack,
   onWatchPreview,
   onSelectContent,
   onExploreCreator,
+  onToggleSave,
+  onToggleFollow,
   onRequestUnlock,
   onReportContent,
 }) => {
@@ -215,6 +230,16 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                 <Star className="w-3.5 h-3.5 text-emerald-400 fill-current" aria-hidden="true" />
                 {item.rating.toFixed(1)} ({item.reviewCount})
               </span>
+              <span aria-hidden="true">·</span>
+              <span className="inline-flex items-center gap-1 font-mono tabular-nums text-slate-200">
+                <Eye className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+                {formatViewCount(item.viewCount, locale)}
+              </span>
+              {Boolean(item.trending || (item.viewCount ?? 0) >= 25) && (
+                <span className="px-1.5 py-0.5 rounded-[5px] bg-amber-500/90 text-slate-950 text-[10px] font-bold leading-none">
+                  {locale === 'id' ? 'Populer' : 'Popular'}
+                </span>
+              )}
             </div>
 
             <h1 className="font-display text-xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-white leading-tight">
@@ -225,7 +250,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
               {item.subtitle}
             </p>
 
-            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3 pt-1 sm:pt-2">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2.5 sm:gap-3 pt-1 sm:pt-2">
               <Button
                 variant="primary"
                 size="lg"
@@ -261,6 +286,41 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                     : `Unlock Title · ${formatPrice(item.priceUsd, item.priceIdr, currency)}`}
                 </Button>
               )}
+
+              <div className="flex items-center gap-2">
+                {onToggleSave && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleSave(item)}
+                    aria-pressed={Boolean(savedVideoIds?.has(item.id))}
+                    className={`min-h-[42px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      savedVideoIds?.has(item.id)
+                        ? 'bg-emerald-600 text-white border-emerald-500'
+                        : 'bg-white/95 dark:bg-slate-900/95 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-white dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Bookmark
+                      className={`w-4 h-4 ${savedVideoIds?.has(item.id) ? 'fill-current' : ''}`}
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {savedVideoIds?.has(item.id)
+                        ? locale === 'id'
+                          ? 'Tersimpan'
+                          : 'Saved'
+                        : locale === 'id'
+                        ? 'Simpan'
+                        : 'Save'}
+                    </span>
+                  </button>
+                )}
+
+                <ShareActions
+                  title={item.title}
+                  url={buildAbsoluteShareUrl({ route: 'detail', contentId: item.id })}
+                  locale={locale}
+                />
+              </div>
             </div>
 
             {isFree ? (
@@ -311,16 +371,44 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                       {locale === 'id' ? 'Dipublikasikan oleh' : 'Published by'}
                     </p>
                     <p className="text-base font-semibold text-slate-900 dark:text-white">{creator.name}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">{creator.location}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {creator.location}
+                      {(creator.followerCount ?? 0) > 0 &&
+                        ` · ${creator.followerCount} ${locale === 'id' ? 'pengikut' : 'followers'}`}
+                    </p>
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onExploreCreator(creator.id)}
-                >
-                  {locale === 'id' ? 'Lihat Profil Kreator' : 'Explore Creator'}
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  {onToggleFollow && (
+                    <Button
+                      variant={followedCreatorIds?.has(creator.id) ? 'secondary' : 'primary'}
+                      size="sm"
+                      leftIcon={
+                        followedCreatorIds?.has(creator.id) ? (
+                          <UserCheck className="w-4 h-4" aria-hidden="true" />
+                        ) : (
+                          <UserPlus className="w-4 h-4" aria-hidden="true" />
+                        )
+                      }
+                      onClick={() => onToggleFollow(creator.id)}
+                    >
+                      {followedCreatorIds?.has(creator.id)
+                        ? locale === 'id'
+                          ? 'Mengikuti'
+                          : 'Following'
+                        : locale === 'id'
+                        ? 'Ikuti'
+                        : 'Follow'}
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onExploreCreator(creator.id)}
+                  >
+                    {locale === 'id' ? 'Lihat Profil Kreator' : 'Explore Creator'}
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -682,9 +770,11 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                 item={rel}
                 locale={locale}
                 currency={currency}
+                isSaved={savedVideoIds?.has(rel.id)}
                 onSelectContent={onSelectContent}
                 onWatchPreview={onWatchPreview}
                 onSelectCreator={onExploreCreator}
+                onToggleSave={onToggleSave}
               />
             ))}
           </div>

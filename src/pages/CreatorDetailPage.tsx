@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, CheckCircle2, MapPin } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, MapPin, UserCheck, UserPlus } from 'lucide-react';
 import type {
   ContentItem,
   CreatorProfile,
@@ -7,17 +7,24 @@ import type {
   LocaleCode,
 } from '../types/vyora';
 import { CATEGORY_LABELS_ID, TRANSLATIONS } from '../i18n/translations';
+import { buildAbsoluteShareUrl } from '../utils/navigation';
+import { Button } from '../components/ui/Button';
 import { ContentCard } from '../components/ui/ContentCard';
 import { MediaImage } from '../components/ui/MediaImage';
+import { ShareActions } from '../components/ui/ShareActions';
 
 interface CreatorDetailPageProps {
   creator: CreatorProfile;
   works: ContentItem[];
   locale: LocaleCode;
   currency: CurrencyCode;
+  isFollowing?: boolean;
+  savedVideoIds?: Set<string>;
   onBack: () => void;
   onSelectContent: (item: ContentItem) => void;
   onWatchPreview: (item: ContentItem) => void;
+  onToggleFollow?: (creatorId: string) => void;
+  onToggleSave?: (item: ContentItem) => void;
 }
 
 export const CreatorDetailPage: React.FC<CreatorDetailPageProps> = ({
@@ -25,14 +32,19 @@ export const CreatorDetailPage: React.FC<CreatorDetailPageProps> = ({
   works,
   locale,
   currency,
+  isFollowing = false,
+  savedVideoIds,
   onBack,
   onSelectContent,
   onWatchPreview,
+  onToggleFollow,
+  onToggleSave,
 }) => {
   const dict = TRANSLATIONS[locale];
   const bio = locale === 'id' ? creator.bioId : creator.bio;
   const specialtyLabel =
     locale === 'id' ? CATEGORY_LABELS_ID[creator.specialty] : creator.specialty;
+  const followerCount = Math.max(0, creator.followerCount ?? 0);
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-5 sm:space-y-8">
@@ -81,11 +93,46 @@ export const CreatorDetailPage: React.FC<CreatorDetailPageProps> = ({
             <span className="font-mono tabular-nums">
               {creator.contentCount} {dict.cards.titles}
             </span>
+            <span aria-hidden="true">·</span>
+            <span className="font-mono tabular-nums">
+              {followerCount} {locale === 'id' ? 'pengikut' : 'followers'}
+            </span>
           </div>
 
           <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-3xl">
             {bio}
           </p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 w-full md:w-auto">
+          {onToggleFollow && (
+            <Button
+              variant={isFollowing ? 'secondary' : 'primary'}
+              size="md"
+              className="flex-1 md:flex-none"
+              leftIcon={
+                isFollowing ? (
+                  <UserCheck className="w-4 h-4" aria-hidden="true" />
+                ) : (
+                  <UserPlus className="w-4 h-4" aria-hidden="true" />
+                )
+              }
+              onClick={() => onToggleFollow(creator.id)}
+            >
+              {isFollowing
+                ? locale === 'id'
+                  ? 'Mengikuti'
+                  : 'Following'
+                : locale === 'id'
+                ? 'Ikuti Kreator'
+                : 'Follow Creator'}
+            </Button>
+          )}
+          <ShareActions
+            title={`${creator.name} — DELOKEN`}
+            url={buildAbsoluteShareUrl({ route: 'creator', creatorId: creator.id })}
+            locale={locale}
+          />
         </div>
       </section>
 
@@ -103,8 +150,10 @@ export const CreatorDetailPage: React.FC<CreatorDetailPageProps> = ({
               item={item}
               locale={locale}
               currency={currency}
+              isSaved={savedVideoIds?.has(item.id)}
               onSelectContent={onSelectContent}
               onWatchPreview={onWatchPreview}
+              onToggleSave={onToggleSave}
             />
           ))}
         </div>

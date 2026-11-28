@@ -8,6 +8,7 @@ interface MediaImageProps {
   fallbackTitle?: string;
   loading?: 'eager' | 'lazy';
   fit?: 'cover' | 'contain';
+  transparentBg?: boolean;
 }
 
 export const MediaImage: React.FC<MediaImageProps> = ({
@@ -17,6 +18,7 @@ export const MediaImage: React.FC<MediaImageProps> = ({
   fallbackTitle,
   loading = 'lazy',
   fit = 'cover',
+  transparentBg = false,
 }) => {
   const [hasError, setHasError] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -46,7 +48,11 @@ export const MediaImage: React.FC<MediaImageProps> = ({
   return (
     <div
       className={`relative overflow-hidden ${
-        fit === 'contain' ? 'bg-slate-950' : 'bg-slate-100 dark:bg-slate-800'
+        transparentBg
+          ? 'bg-transparent'
+          : fit === 'contain'
+          ? 'bg-slate-950'
+          : 'bg-slate-100 dark:bg-slate-800'
       } ${className}`}
     >
       {!loaded && (
