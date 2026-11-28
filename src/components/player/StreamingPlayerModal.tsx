@@ -10,7 +10,6 @@ import {
   Pause,
   Play,
   RotateCcw,
-  ShieldCheck,
   Unlock,
   Volume2,
   VolumeX,
@@ -111,7 +110,6 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   const ytContainerRef = useRef<HTMLDivElement>(null);
   const ytPlayerRef = useRef<YTPlayerInstance | null>(null);
   const startSeekRef = useRef<number>(0);
-  const lockHintTimerRef = useRef<number | null>(null);
   const fullscreenExitAtRef = useRef<number>(0);
 
   const [authData, setAuthData] = useState<StreamAuthorizationResponse | null>(null);
@@ -124,7 +122,6 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   const [duration, setDuration] = useState(300);
   const [paywallReached, setPaywallReached] = useState(false);
   const [isSurfaceLocked, setIsSurfaceLocked] = useState(true);
-  const [lockHintVisible, setLockHintVisible] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [qualityLevels, setQualityLevels] = useState<{ index: number; label: string }[]>([]);
@@ -165,16 +162,6 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   const isFullUnlockedRef = useRef(isFullUnlocked);
   isFullUnlockedRef.current = isFullUnlocked;
 
-  const showLockHint = useCallback(() => {
-    setLockHintVisible(true);
-    if (lockHintTimerRef.current) {
-      window.clearTimeout(lockHintTimerRef.current);
-    }
-    lockHintTimerRef.current = window.setTimeout(() => {
-      setLockHintVisible(false);
-    }, 2400);
-  }, []);
-
   useEffect(() => {
     const onFsChange = () => {
       const fsActive = Boolean(document.fullscreenElement);
@@ -186,9 +173,6 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
     document.addEventListener('fullscreenchange', onFsChange);
     return () => {
       document.removeEventListener('fullscreenchange', onFsChange);
-      if (lockHintTimerRef.current) {
-        window.clearTimeout(lockHintTimerRef.current);
-      }
     };
   }, []);
 
@@ -712,7 +696,6 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
     setCurrentTime(0);
     setPaywallReached(false);
     setIsSurfaceLocked(true);
-    setLockHintVisible(false);
     setAuthData(null);
     void loadAuthorizedStream(item);
     void recordVideoView(item.id).then((newCount) => {
@@ -972,27 +955,15 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
             <p className="text-[11px] sm:text-xs text-emerald-700 dark:text-emerald-400 font-semibold truncate">
               {isFreeRelease
                 ? locale === 'id'
-                  ? 'Tayangan Gratis · Akses Penuh Tanpa Batas'
-                  : 'Free Release · Unlimited Full Access'
+                  ? 'Tayangan Gratis'
+                  : 'Free Release'
                 : isFullUnlocked
                 ? locale === 'id'
                   ? `Akses Penuh 30 Hari · Tersisa ${authData?.entitlement?.remainingDays ?? 30} Hari`
                   : `30-Day Full Access · ${authData?.entitlement?.remainingDays ?? 30} Days Remaining`
-                : isYoutubeStream
-                ? locale === 'id'
-                  ? 'Pratinjau YouTube Terverifikasi · Maksimal 5 Menit'
-                  : 'Verified YouTube Stream · 5-Minute Free Preview'
-                : isGenericEmbedStream
-                ? locale === 'id'
-                  ? `Pratinjau ${authData?.provider || 'Embed'} Terproteksi · Maksimal 5 Menit`
-                  : `Protected ${authData?.provider || 'Embed'} Preview · 5-Minute Cap`
-                : authData?.streamType === 'direct_video'
-                ? locale === 'id'
-                  ? `Pratinjau Stream (${(authData.directFormat || 'video').toUpperCase()}) · Maksimal 5 Menit`
-                  : `Direct Stream (${(authData.directFormat || 'video').toUpperCase()}) · 5-Minute Preview`
                 : locale === 'id'
-                ? 'Pratinjau HLS Terenkripsi 5 Menit'
-                : 'Signed 5-Minute Adaptive HLS Preview'}
+                ? 'Pratinjau Gratis 5 Menit'
+                : '5-Minute Free Preview'}
             </p>
             <h3
               id="stream-modal-title"
@@ -1189,14 +1160,13 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                   )}
                 </div>
 
-            {/* Anti-Redirect Click-Shield over Video Area */}
+            {/* Silent Click-Shield over Video Area */}
             {!loadingStream && !streamError && !paywallReached && isSurfaceLocked && (
               <div
                 aria-hidden="true"
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  showLockHint();
                 }}
                 onDoubleClick={(e) => {
                   e.preventDefault();
@@ -1208,14 +1178,6 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                 }}
                 className="absolute inset-0 z-10 cursor-default select-none bg-transparent"
               />
-            )}
-
-            {lockHintVisible && !paywallReached && !loadingStream && !streamError && (
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 py-1.5 rounded-lg bg-slate-950/90 border border-emerald-500/40 text-[11px] font-medium text-emerald-300 shadow-lg whitespace-nowrap">
-                {locale === 'id'
-                  ? 'Area video dikunci agar tidak berpindah ke sumber eksternal · Gunakan kontrol di bawah'
-                  : 'Video area is locked to block external redirects · Use controls below'}
-              </div>
             )}
 
             {loadingStream && (
@@ -1664,56 +1626,19 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
           )}
         </div>
 
-        {/* Bottom Security & Entitlement Strip */}
-        <div className="px-4 sm:px-5 py-3.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0 pb-safe">
-          <div className="flex items-start sm:items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-            <ShieldCheck className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
-            <span>
-              {isFreeRelease
-                ? locale === 'id'
-                  ? 'Tayangan gratis · Diputar di pemutar terproteksi DELOKEN (klik area video dikunci agar tidak pindah ke situs sumber).'
-                  : 'Free release · Playing inside DELOKEN protected player (video surface locked against external redirects).'
-                : isFullUnlocked && authData?.entitlement
-                ? locale === 'id'
-                  ? `Streaming terotorisasi aktif · Berakhir ${new Date(
-                      authData.entitlement.expiresAt
-                    ).toLocaleDateString('id-ID')}`
-                  : `Signed 30-day entitlement active · Expires ${new Date(
-                      authData.entitlement.expiresAt
-                    ).toLocaleDateString('en-US')} · Progress ${Math.round(
-                      progressPct
-                    )}%`
-                : isYoutubeStream
-                ? locale === 'id'
-                  ? `Pratinjau YouTube (${formatClock(currentTime)} / 05:00) · Area video dikunci agar klik tidak membuka YouTube.`
-                  : `YouTube preview (${formatClock(currentTime)} / 05:00) · Surface locked so clicks stay inside DELOKEN.`
-                : isGenericEmbedStream
-                ? locale === 'id'
-                  ? `Pratinjau ${authData?.provider || 'Embed'} (${formatClock(currentTime)} / 05:00) · Area video dikunci agar klik tetap di DELOKEN.`
-                  : `${authData?.provider || 'Embed'} preview (${formatClock(currentTime)} / 05:00) · Surface locked inside DELOKEN.`
-                : authData?.streamType === 'direct_video'
-                ? locale === 'id'
-                  ? `Pratinjau Stream (${formatClock(currentTime)} / 05:00) hingga pembayaran terverifikasi.`
-                  : `Direct stream preview (${formatClock(currentTime)} / 05:00) until 30-day entitlement is verified.`
-                : locale === 'id'
-                ? 'Segmen HLS dibatasi ketat di server maksimal 300 detik hingga pembayaran terverifikasi.'
-                : 'HLS segments strictly capped at 300s on the server until 30-day entitlement is verified.'}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                persistCurrentProgress(item, getPlaybackCurrentTime(), authData);
-                onClose();
-                onViewDetails(item);
-              }}
-              className="min-h-[36px] text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors whitespace-nowrap shrink-0 cursor-pointer text-left sm:text-right inline-flex items-center"
-            >
-              {locale === 'id' ? 'Lihat Detail Tayangan →' : 'View Full Details →'}
-            </button>
-          </div>
+        {/* Bottom Action Strip */}
+        <div className="px-4 sm:px-5 py-2.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end shrink-0 pb-safe">
+          <button
+            type="button"
+            onClick={() => {
+              persistCurrentProgress(item, getPlaybackCurrentTime(), authData);
+              onClose();
+              onViewDetails(item);
+            }}
+            className="min-h-[36px] text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors whitespace-nowrap shrink-0 cursor-pointer inline-flex items-center"
+          >
+            {locale === 'id' ? 'Lihat Detail Tayangan →' : 'View Full Details →'}
+          </button>
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Clapperboard, Globe, LogOut, Menu, Moon, Search, Shield, Sun, User, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import type { CurrencyCode, LocaleCode, ViewRoute } from '../../types/vyora';
+import type { LocaleCode, ViewRoute } from '../../types/vyora';
 import { TRANSLATIONS } from '../../i18n/translations';
 import { DelokenLogo } from '../deloken/DelokenLogo';
 import { Button } from '../ui/Button';
@@ -9,10 +9,8 @@ import { Button } from '../ui/Button';
 interface NavbarProps {
   activeRoute: ViewRoute;
   locale: LocaleCode;
-  currency: CurrencyCode;
   theme: 'light' | 'dark';
   onChangeLocale: (locale: LocaleCode) => void;
-  onChangeCurrency: (currency: CurrencyCode) => void;
   onToggleTheme: () => void;
   onNavigate: (route: ViewRoute) => void;
 }
@@ -20,10 +18,8 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   activeRoute,
   locale,
-  currency,
   theme,
   onChangeLocale,
-  onChangeCurrency,
   onToggleTheme,
   onNavigate,
 }) => {
@@ -365,67 +361,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               })}
             </nav>
 
-            {/* Quick Language, Currency & Theme Toggle inside Mobile Drawer */}
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
-              <div
-                className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
-                role="group"
-                aria-label={dict.footer.language}
-              >
-                <Globe className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 ml-2 mr-1" aria-hidden="true" />
-                <button
-                  type="button"
-                  onClick={() => onChangeLocale('en')}
-                  className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                    locale === 'en'
-                      ? 'bg-emerald-600 text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  EN
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChangeLocale('id')}
-                  className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                    locale === 'id'
-                      ? 'bg-emerald-600 text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  ID
-                </button>
-              </div>
-
-              <div
-                className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
-                role="group"
-                aria-label={dict.footer.currency}
-              >
-                <button
-                  type="button"
-                  onClick={() => onChangeCurrency('USD')}
-                  className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer ${
-                    currency === 'USD'
-                      ? 'bg-emerald-600 text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  USD
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChangeCurrency('IDR')}
-                  className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer ${
-                    currency === 'IDR'
-                      ? 'bg-emerald-600 text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  IDR
-                </button>
-              </div>
-
+            {/* Theme Toggle inside Mobile Drawer */}
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
                 onClick={onToggleTheme}

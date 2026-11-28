@@ -57,8 +57,6 @@ interface ViewerDashboardPageProps {
   entitlementRefreshKey?: number;
   savedVideoIds?: Set<string>;
   followedCreatorIds?: Set<string>;
-  onChangeLocale: (locale: LocaleCode) => void;
-  onChangeCurrency: (currency: CurrencyCode) => void;
   onNavigate: (route: ViewRoute) => void;
   onWatchContent: (item: ContentItem) => void;
   onSelectContent?: (item: ContentItem) => void;
@@ -91,8 +89,6 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
   entitlementRefreshKey = 0,
   savedVideoIds,
   followedCreatorIds,
-  onChangeLocale,
-  onChangeCurrency,
   onNavigate,
   onWatchContent,
   onSelectContent,
@@ -113,12 +109,6 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
   const [retryTick, setRetryTick] = useState(0);
 
   const [displayName, setDisplayName] = useState(userProfile?.displayName ?? '');
-  const [prefLocale, setPrefLocale] = useState<LocaleCode>(
-    userProfile?.preferredLocale ?? locale
-  );
-  const [prefCurrency, setPrefCurrency] = useState<CurrencyCode>(
-    userProfile?.preferredCurrency ?? currency
-  );
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileFeedback, setProfileFeedback] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -126,8 +116,6 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
   useEffect(() => {
     if (userProfile) {
       setDisplayName(userProfile.displayName);
-      setPrefLocale(userProfile.preferredLocale);
-      setPrefCurrency(userProfile.preferredCurrency);
     }
   }, [userProfile]);
 
@@ -257,16 +245,14 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
     try {
       await updateUserPreferences(firebaseUser.uid, {
         displayName: displayName.trim(),
-        preferredLocale: prefLocale,
-        preferredCurrency: prefCurrency,
+        preferredLocale: userProfile?.preferredLocale ?? locale,
+        preferredCurrency: userProfile?.preferredCurrency ?? currency,
         photoURL: firebaseUser.photoURL ?? '',
       });
-      onChangeLocale(prefLocale);
-      onChangeCurrency(prefCurrency);
       setProfileFeedback(
         locale === 'id'
-          ? 'Profil dan preferensi Anda berhasil disimpan.'
-          : 'Profile and regional preferences saved.'
+          ? 'Profil Anda berhasil disimpan.'
+          : 'Profile updated successfully.'
       );
     } catch (err) {
       setProfileError(err instanceof Error ? err.message : 'Unable to save profile.');
@@ -862,44 +848,6 @@ export const ViewerDashboardPage: React.FC<ViewerDashboardPageProps> = ({
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label
-                  htmlFor="viewer-locale"
-                  className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5"
-                >
-                  {locale === 'id' ? 'Bahasa Default' : 'Preferred Language'}
-                </label>
-                <select
-                  id="viewer-locale"
-                  value={prefLocale}
-                  onChange={(e) => setPrefLocale(e.target.value as LocaleCode)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                >
-                  <option value="en">English</option>
-                  <option value="id">Bahasa Indonesia</option>
-                </select>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="viewer-currency"
-                  className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5"
-                >
-                  {locale === 'id' ? 'Mata Uang Default' : 'Preferred Currency'}
-                </label>
-                <select
-                  id="viewer-currency"
-                  value={prefCurrency}
-                  onChange={(e) => setPrefCurrency(e.target.value as CurrencyCode)}
-                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                >
-                  <option value="USD">USD ($)</option>
-                  <option value="IDR">IDR (Rp)</option>
-                </select>
-              </div>
             </div>
 
             <Button type="submit" variant="primary" size="md" className="w-full sm:w-auto" isLoading={savingProfile}>

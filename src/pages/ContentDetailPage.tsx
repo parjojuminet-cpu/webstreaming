@@ -586,14 +586,6 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                       {item.resolution} · {item.audioFormat}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
-                    <span>
-                      {locale === 'id'
-                        ? 'Pemutar terproteksi dari klik keluar sumber'
-                        : 'Protected player blocks accidental external redirects'}
-                    </span>
-                  </div>
                 </div>
 
                 <div className="space-y-2.5 pt-2">

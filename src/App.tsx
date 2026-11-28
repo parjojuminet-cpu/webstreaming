@@ -426,13 +426,11 @@ const DelokenAppShell: React.FC<{
       <Navbar
         activeRoute={route}
         locale={locale}
-        currency={currency}
         theme={theme}
         onChangeLocale={(next) => {
           onChangeLocale(next);
           onChangeCurrency(next === 'id' ? 'IDR' : 'USD');
         }}
-        onChangeCurrency={onChangeCurrency}
         onToggleTheme={onToggleTheme}
         onNavigate={navigate}
       />
@@ -684,8 +682,6 @@ const DelokenAppShell: React.FC<{
             entitlementRefreshKey={entitlementRefreshKey}
             savedVideoIds={savedVideoIds}
             followedCreatorIds={followedCreatorIds}
-            onChangeLocale={onChangeLocale}
-            onChangeCurrency={onChangeCurrency}
             onNavigate={navigate}
             onWatchContent={(item) => handleWatchPreview(item)}
             onSelectContent={handleSelectContent}
@@ -725,8 +721,6 @@ const DelokenAppShell: React.FC<{
 
       <Footer
         locale={locale}
-        currency={currency}
-        onChangeCurrency={onChangeCurrency}
         onNavigate={navigate}
       />
 
