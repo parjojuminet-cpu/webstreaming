@@ -5,10 +5,17 @@ import type { ContentStatus, VideoAssetProvider } from '../src/types/vyora';
 import { extractFacebookVideoUrl } from '../src/utils/facebook.ts';
 import { extractYouTubeEmbedTarget } from '../src/utils/youtube.ts';
 import {
+  extractArchiveOrgInfo,
+  extractBilibiliInfo,
   extractDailymotionVideoId,
+  extractGoogleDriveFileInfo,
   extractInstagramPostInfo,
+  extractLoomInfo,
+  extractOdyseeInfo,
+  extractRumbleInfo,
   extractStreamableId,
   extractTikTokVideoInfo,
+  extractTwitchRef,
   extractVimeoVideoRef,
   extractXPostInfo,
 } from '../src/services/videoImport/adapters.ts';
@@ -25,6 +32,14 @@ const EXTERNAL_LINK_PROVIDERS = new Set<VideoAssetProvider>([
   'x',
   'instagram',
   'streamable',
+  'google_drive',
+  'archive_org',
+  'twitch',
+  'rumble',
+  'odysee',
+  'loom',
+  'bilibili',
+  'html_embed',
   'direct_video',
 ]);
 
@@ -190,6 +205,54 @@ export function normalizeMediaSource(
       assetRef: r.startsWith('instagram:') ? r.slice('instagram:'.length).trim() : r,
     };
   }
+  if (p === 'google_drive' || r.startsWith('google_drive:')) {
+    return {
+      provider: 'google_drive',
+      assetRef: r.startsWith('google_drive:') ? r.slice('google_drive:'.length).trim() : r,
+    };
+  }
+  if (p === 'archive_org' || r.startsWith('archive_org:')) {
+    return {
+      provider: 'archive_org',
+      assetRef: r.startsWith('archive_org:') ? r.slice('archive_org:'.length).trim() : r,
+    };
+  }
+  if (p === 'twitch' || r.startsWith('twitch:')) {
+    return {
+      provider: 'twitch',
+      assetRef: r,
+    };
+  }
+  if (p === 'rumble' || r.startsWith('rumble:')) {
+    return {
+      provider: 'rumble',
+      assetRef: r.startsWith('rumble:') ? r.slice('rumble:'.length).trim() : r,
+    };
+  }
+  if (p === 'odysee' || r.startsWith('odysee:')) {
+    return {
+      provider: 'odysee',
+      assetRef: r.startsWith('odysee:') ? r.slice('odysee:'.length).trim() : r,
+    };
+  }
+  if (p === 'loom' || r.startsWith('loom:')) {
+    return {
+      provider: 'loom',
+      assetRef: r.startsWith('loom:') ? r.slice('loom:'.length).trim() : r,
+    };
+  }
+  if (p === 'bilibili' || r.startsWith('bilibili:')) {
+    return {
+      provider: 'bilibili',
+      assetRef: r.startsWith('bilibili:') ? r.slice('bilibili:'.length).trim() : r,
+    };
+  }
+  if (p === 'html_embed' || r.startsWith('html:')) {
+    return {
+      provider: 'html_embed',
+      assetRef: r.startsWith('html:') ? r.slice('html:'.length).trim() : r,
+    };
+  }
   if (p === 'direct_video' || r.startsWith('direct:')) {
     return {
       provider: 'direct_video',
@@ -214,7 +277,20 @@ export function validateExternalProviderAssetRef(
   if (provider === 'tiktok') return Boolean(extractTikTokVideoInfo(assetRef));
   if (provider === 'x') return Boolean(extractXPostInfo(assetRef));
   if (provider === 'instagram') return Boolean(extractInstagramPostInfo(assetRef));
-  if (provider === 'direct_video') {
+  if (provider === 'google_drive') {
+    return Boolean(extractGoogleDriveFileInfo(assetRef) || extractGoogleDriveFileInfo(`google_drive:${assetRef}`));
+  }
+  if (provider === 'archive_org') {
+    return Boolean(extractArchiveOrgInfo(assetRef) || extractArchiveOrgInfo(`archive_org:${assetRef}`));
+  }
+  if (provider === 'twitch') return Boolean(extractTwitchRef(assetRef));
+  if (provider === 'rumble') return Boolean(extractRumbleInfo(assetRef));
+  if (provider === 'odysee') return Boolean(extractOdyseeInfo(assetRef));
+  if (provider === 'loom') {
+    return Boolean(extractLoomInfo(assetRef) || extractLoomInfo(`loom:${assetRef}`));
+  }
+  if (provider === 'bilibili') return Boolean(extractBilibiliInfo(assetRef));
+  if (provider === 'html_embed' || provider === 'direct_video') {
     return parseStrictHttpsUrl(assetRef, { allowBareHostname: false }).ok;
   }
   return false;
@@ -281,6 +357,43 @@ export function buildAssetRefFingerprint(
     return `ig:#${shortHash}`;
   }
 
+  if (provider === 'google_drive') {
+    return `gdrive:#${shortHash}`;
+  }
+
+  if (provider === 'archive_org') {
+    return `archive:#${shortHash}`;
+  }
+
+  if (provider === 'twitch') {
+    return `twitch:#${shortHash}`;
+  }
+
+  if (provider === 'rumble') {
+    return `rumble:#${shortHash}`;
+  }
+
+  if (provider === 'odysee') {
+    return `odysee:#${shortHash}`;
+  }
+
+  if (provider === 'loom') {
+    return `loom:#${shortHash}`;
+  }
+
+  if (provider === 'bilibili') {
+    return `bilibili:#${shortHash}`;
+  }
+
+  if (provider === 'html_embed') {
+    try {
+      const u = new URL(clean);
+      return `html:${u.hostname}#${shortHash}`;
+    } catch {
+      return `html:#${shortHash}`;
+    }
+  }
+
   if (provider === 'direct_video') {
     try {
       const u = new URL(clean);
@@ -307,6 +420,14 @@ const PROVIDER_DISPLAY_NAMES: Partial<Record<NormalizedMediaProvider, string>> =
   x: 'X (Twitter)',
   instagram: 'Instagram',
   streamable: 'Streamable',
+  google_drive: 'Google Drive',
+  archive_org: 'Internet Archive',
+  twitch: 'Twitch',
+  rumble: 'Rumble',
+  odysee: 'Odysee',
+  loom: 'Loom',
+  bilibili: 'Bilibili',
+  html_embed: 'Halaman Web HTML',
   direct_video: 'URL Video/Stream Eksternal',
 };
 

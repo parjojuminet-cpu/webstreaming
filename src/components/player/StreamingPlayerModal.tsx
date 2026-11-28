@@ -31,6 +31,7 @@ import type {
   VideoFitMode,
 } from '../../types/vyora';
 import { formatPrice, isFreeContent } from '../../i18n/translations';
+import { buildTwitchEmbedUrl } from '../../services/videoImport/adapters';
 import { getFacebookEmbedUrl } from '../../utils/facebook';
 import {
   VIDEO_ASPECT_OPTIONS,
@@ -121,8 +122,17 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
   const isPassiveIframeStream =
     (authData?.streamType === 'facebook' &&
       Boolean(authData?.facebookVideoUrl || authData?.manifestUrl)) ||
-    ((authData?.streamType === 'streamable' || authData?.streamType === 'tiktok') &&
-      Boolean(authData?.manifestUrl));
+    ((authData?.streamType === 'streamable' ||
+      authData?.streamType === 'tiktok' ||
+      authData?.streamType === 'google_drive' ||
+      authData?.streamType === 'archive_org' ||
+      authData?.streamType === 'twitch' ||
+      authData?.streamType === 'rumble' ||
+      authData?.streamType === 'odysee' ||
+      authData?.streamType === 'loom' ||
+      authData?.streamType === 'bilibili' ||
+      authData?.streamType === 'html_embed') &&
+      Boolean(authData?.manifestUrl || authData?.twitchRef));
   const isGenericEmbedStream = isControllableEmbedStream || isPassiveIframeStream;
   const isFreeRelease = Boolean(
     authData?.isFree || (item ? isFreeContent(item) : false)
@@ -246,7 +256,15 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
           authResp.streamType === 'vimeo' ||
           authResp.streamType === 'dailymotion' ||
           authResp.streamType === 'streamable' ||
-          authResp.streamType === 'tiktok'
+          authResp.streamType === 'tiktok' ||
+          authResp.streamType === 'google_drive' ||
+          authResp.streamType === 'archive_org' ||
+          authResp.streamType === 'twitch' ||
+          authResp.streamType === 'rumble' ||
+          authResp.streamType === 'odysee' ||
+          authResp.streamType === 'loom' ||
+          authResp.streamType === 'bilibili' ||
+          authResp.streamType === 'html_embed'
         ) {
           destroyAdaptiveEngines();
           setQualityLevels([]);
@@ -1006,6 +1024,13 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                                     : startSeekRef.current,
                               })
                             : authData?.manifestUrl || ''
+                          : authData?.streamType === 'twitch'
+                          ? buildTwitchEmbedUrl(
+                              authData.twitchRef || authData.manifestUrl || '',
+                              typeof window !== 'undefined'
+                                ? window.location.hostname
+                                : 'localhost'
+                            ) || ''
                           : authData?.manifestUrl || '';
 
                       if (paywallReached || !embedSrc) {
@@ -1025,6 +1050,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                             title={`${item.title} ${authData?.provider || 'Embed'} video player`}
                             className="w-full h-full border-0 bg-black"
                             allow="autoplay; fullscreen; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                            sandbox={
+                              authData?.streamType === 'html_embed'
+                                ? 'allow-scripts allow-same-origin allow-presentation allow-forms'
+                                : undefined
+                            }
                             allowFullScreen
                             referrerPolicy="strict-origin-when-cross-origin"
                             onLoad={() => setFbIframeLoaded(true)}

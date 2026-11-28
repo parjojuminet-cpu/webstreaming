@@ -14,6 +14,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { inspectCreatorVideoLink } from '../../services/streamService';
+import { buildTwitchEmbedUrl } from '../../services/videoImport/adapters';
 import type { LinkInspectionDiagnostics } from '../../services/videoImport/types';
 import type {
   DirectStreamFormat,
@@ -150,6 +151,7 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
   const [inspectErr, setInspectErr] = useState<string | null>(null);
 
   const [previewOpened, setPreviewOpened] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
   const [playbackStatus, setPlaybackStatus] = useState<PlaybackCheckStatus>('waiting_play');
   const [playbackNote, setPlaybackNote] = useState<string>('');
   const [observedPlaySeconds, setObservedPlaySeconds] = useState(0);
@@ -213,6 +215,7 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
   const resetVerificationState = () => {
     cleanupPlayers();
     setPreviewOpened(false);
+    setIframeLoaded(false);
     setPlaybackStatus('waiting_play');
     setPlaybackNote('');
     setObservedPlaySeconds(0);
@@ -279,6 +282,7 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
     if (!inspection || !inspection.detected || linkStatus === 'unavailable') return;
     cleanupPlayers();
     setPreviewOpened(true);
+    setIframeLoaded(false);
     setObservedPlaySeconds(0);
     onInvalidate();
 
@@ -286,6 +290,17 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
       setPlaybackStatus('unverifiable');
       setPlaybackNote(
         locale === 'id' ? inspection.verifiabilityNoteId : inspection.verifiabilityNoteEn
+      );
+    } else if (
+      inspection.verifiability === 'conditional' &&
+      inspection.provider !== 'streamable' &&
+      inspection.provider !== 'tiktok'
+    ) {
+      setPlaybackStatus('waiting_play');
+      setPlaybackNote(
+        locale === 'id'
+          ? `Silakan uji tombol putar langsung di dalam frame ${inspection.platformLabel}, lalu tekan tombol Konfirmasi Video Terputar di bawah.`
+          : `Test playback directly inside the ${inspection.platformLabel} frame, then click Confirm Playback Works below.`
       );
     } else {
       setPlaybackStatus('waiting_play');
@@ -295,6 +310,20 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
           : 'Click PLAY below to start real playback and verify the player.'
       );
     }
+  };
+
+  const handleConfirmConditionalEmbed = () => {
+    if (!previewOpened || !inspection || inspection.verifiability !== 'conditional') return;
+    if (playAttemptTimeoutRef.current) {
+      window.clearTimeout(playAttemptTimeoutRef.current);
+      playAttemptTimeoutRef.current = null;
+    }
+    setPlaybackStatus('verified_playing');
+    setPlaybackNote(
+      locale === 'id'
+        ? `Pemutaran embed ${inspection.platformLabel} dikonfirmasi aktif. Tombol LANJUTKAN kini aktif.`
+        : `${inspection.platformLabel} embed playback confirmed. CONTINUE is now enabled.`
+    );
   };
 
   // Initialize official YouTube preview verifier
@@ -831,6 +860,12 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
     }
   };
 
+  const isConditionalEmbedProvider = Boolean(
+    inspection?.verifiability === 'conditional' &&
+      inspection.provider !== 'facebook' &&
+      inspection.provider !== 'x' &&
+      inspection.provider !== 'instagram'
+  );
   const canPreview =
     Boolean(inspection?.detected) &&
     (linkStatus === 'embeddable' || linkStatus === 'uncertain');
@@ -894,8 +929,8 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
         </div>
         <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
           {locale === 'id'
-            ? 'Mendukung deteksi otomatis YouTube (termasuk YouTube Playlist), Vimeo, Dailymotion, Streamable, direct MP4 / WebM / MOV / HLS (.m3u8) / MPEG-DASH (.mpd) (HTTPS). Tautan TikTok, Facebook, X, dan Instagram juga diperiksa secara jujur sesuai dukungan embed resmi.'
-            : 'Auto-detects YouTube (including Playlists), Vimeo, Dailymotion, Streamable, and direct HTTPS MP4 / WebM / MOV / HLS (.m3u8) / MPEG-DASH (.mpd). TikTok, Facebook, X, and Instagram URLs are also checked honestly against official embed capabilities.'}
+            ? 'Mendukung deteksi otomatis Halaman Web HTML (ekstraksi video otomatis atau awalan html:), YouTube (termasuk Playlist), Vimeo, Dailymotion, Dropbox, Google Drive, Internet Archive, Twitch, Rumble, Odysee, Loom, Bilibili, Streamable, serta stream langsung MP4 / WebM / MOV / HLS (.m3u8) / MPEG-DASH (.mpd).'
+            : 'Auto-detects HTML Web Pages (auto video extraction or html: prefix), YouTube (including Playlists), Vimeo, Dailymotion, Dropbox, Google Drive, Internet Archive, Twitch, Rumble, Odysee, Loom, Bilibili, Streamable, and direct HTTPS MP4 / WebM / MOV / HLS (.m3u8) / MPEG-DASH (.mpd).'}
         </p>
         {looksLikeBatchPaste && onSwitchToBatch && (
           <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/70 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
@@ -1096,23 +1131,38 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
                       <div ref={ytHostRef} className="w-full h-full" />
                     )}
 
-                    {(inspection.provider === 'vimeo' ||
-                      inspection.provider === 'dailymotion' ||
-                      inspection.provider === 'streamable' ||
-                      inspection.provider === 'tiktok' ||
-                      inspection.provider === 'facebook' ||
-                      inspection.provider === 'instagram') &&
-                      inspection.embedUrl && (
-                        <iframe
-                          ref={iframeRef}
-                          src={inspection.embedUrl}
-                          title={`${inspection.platformLabel} Preview`}
-                          className="w-full h-full border-0"
-                          allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-                          allowFullScreen
-                          referrerPolicy="strict-origin-when-cross-origin"
-                        />
-                      )}
+                    {inspection.provider !== 'youtube' &&
+                      inspection.provider !== 'direct_video' &&
+                      inspection.provider !== 'x' &&
+                      (() => {
+                        const resolvedEmbedSrc =
+                          inspection.provider === 'twitch'
+                            ? buildTwitchEmbedUrl(
+                                inspection.canonicalRef,
+                                typeof window !== 'undefined'
+                                  ? window.location.hostname
+                                  : 'localhost'
+                              )
+                            : inspection.embedUrl;
+                        if (!resolvedEmbedSrc) return null;
+                        return (
+                          <iframe
+                            ref={iframeRef}
+                            src={resolvedEmbedSrc}
+                            title={`${inspection.platformLabel} Preview`}
+                            className="w-full h-full border-0 bg-black"
+                            allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+                            sandbox={
+                              inspection.provider === 'html_embed'
+                                ? 'allow-scripts allow-same-origin allow-presentation allow-forms'
+                                : undefined
+                            }
+                            allowFullScreen
+                            referrerPolicy="strict-origin-when-cross-origin"
+                            onLoad={() => setIframeLoaded(true)}
+                          />
+                        );
+                      })()}
 
                     {inspection.provider === 'x' && (
                       <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-2 text-slate-200">
@@ -1216,17 +1266,33 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                leftIcon={<Play className="w-4 h-4 fill-current" />}
-                isLoading={playbackStatus === 'verifying'}
-                disabled={inspection.verifiability === 'unverifiable'}
-                onClick={() => void handlePlayVerifyClick()}
-              >
-                PLAY
-              </Button>
+              {(!isConditionalEmbedProvider ||
+                inspection.provider === 'streamable' ||
+                inspection.provider === 'tiktok') && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="md"
+                  leftIcon={<Play className="w-4 h-4 fill-current" />}
+                  isLoading={playbackStatus === 'verifying'}
+                  disabled={inspection.verifiability === 'unverifiable'}
+                  onClick={() => void handlePlayVerifyClick()}
+                >
+                  PLAY
+                </Button>
+              )}
+              {isConditionalEmbedProvider && playbackStatus !== 'verified_playing' && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="md"
+                  leftIcon={<CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />}
+                  disabled={!iframeLoaded}
+                  onClick={handleConfirmConditionalEmbed}
+                >
+                  {locale === 'id' ? 'Konfirmasi Video Terputar' : 'Confirm Playback Works'}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="ghost"

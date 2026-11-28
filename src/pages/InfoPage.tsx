@@ -1,13 +1,23 @@
 import React, { useState } from 'react';
-import { ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
 import type { LocaleCode, ViewRoute } from '../types/vyora';
+import { TRANSLATIONS } from '../i18n/translations';
 import { Button } from '../components/ui/Button';
 
+export type InfoSectionRoute =
+  | 'guide'
+  | 'about'
+  | 'contact'
+  | 'terms'
+  | 'privacy'
+  | 'guidelines';
+
 interface InfoPageProps {
-  section: 'about' | 'contact' | 'terms' | 'privacy' | 'guidelines';
+  section: InfoSectionRoute;
   locale: LocaleCode;
   onBack: () => void;
   onNavigate: (route: ViewRoute) => void;
+  onOpenSocialNotice?: (platformName: string) => void;
 }
 
 export const InfoPage: React.FC<InfoPageProps> = ({
@@ -15,12 +25,23 @@ export const InfoPage: React.FC<InfoPageProps> = ({
   locale,
   onBack,
   onNavigate,
+  onOpenSocialNotice,
 }) => {
+  const dict = TRANSLATIONS[locale];
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [contactError, setContactError] = useState<string | null>(null);
   const [contactSent, setContactSent] = useState(false);
+
+  const subNavTabs: { route: InfoSectionRoute; label: string }[] = [
+    { route: 'guide', label: locale === 'id' ? 'Cara Kerja & Direktori' : 'Guide & Directory' },
+    { route: 'about', label: dict.footer.about },
+    { route: 'guidelines', label: dict.footer.guidelines },
+    { route: 'contact', label: dict.footer.contact },
+    { route: 'terms', label: dict.footer.terms },
+    { route: 'privacy', label: dict.footer.privacy },
+  ];
 
   const handleContactSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,15 +61,229 @@ export const InfoPage: React.FC<InfoPageProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6">
-      <button
-        type="button"
-        onClick={onBack}
-        className="inline-flex items-center gap-1.5 min-h-[38px] text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+    <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1.5 min-h-[40px] text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+          <span>{locale === 'id' ? 'Kembali ke Beranda' : 'Back to Home'}</span>
+        </button>
+      </div>
+
+      {/* Dedicated Menu Sub-Navigation */}
+      <nav
+        aria-label={locale === 'id' ? 'Menu Panduan & Informasi' : 'Guide & Info Menu'}
+        className="deloken-scroll flex items-center gap-1.5 overflow-x-auto pb-1 -mx-3 px-3 sm:mx-0 sm:px-0"
       >
-        <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-        <span>{locale === 'id' ? 'Kembali ke Beranda' : 'Back to Home'}</span>
-      </button>
+        {subNavTabs.map((tab) => {
+          const active = section === tab.route;
+          return (
+            <button
+              key={tab.route}
+              type="button"
+              onClick={() => onNavigate(tab.route)}
+              aria-current={active ? 'page' : undefined}
+              className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                active
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {section === 'guide' && (
+        <div className="space-y-5 sm:space-y-7">
+          {/* Intro Header */}
+          <header className="space-y-1.5 pb-3 border-b border-slate-200 dark:border-slate-800">
+            <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white text-balance">
+              {locale === 'id' ? 'Panduan & Informasi DELOKEN' : 'DELOKEN Guide & Platform Info'}
+            </h1>
+            <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed">
+              {dict.tagline}
+            </p>
+          </header>
+
+          {/* 1. Cara Kerja DELOKEN */}
+          <section
+            aria-labelledby="guide-how-heading"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 shadow-xs"
+          >
+            <div className="max-w-2xl mb-4 sm:mb-6 space-y-1">
+              <h2
+                id="guide-how-heading"
+                className="font-display text-lg sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white"
+              >
+                {dict.sections.howItWorks}
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+                {dict.sections.howItWorksSubtitle}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200 dark:divide-slate-800 pt-3.5 sm:pt-5 border-t border-slate-200 dark:border-slate-800">
+              <div className="space-y-1.5 py-3.5 first:pt-0 md:py-0 md:pr-6">
+                <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
+                  {dict.howSteps.step1Title}
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                  {dict.howSteps.step1Desc}
+                </p>
+              </div>
+
+              <div className="space-y-1.5 py-3.5 md:py-0 md:px-6">
+                <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
+                  {dict.howSteps.step2Title}
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                  {dict.howSteps.step2Desc}
+                </p>
+              </div>
+
+              <div className="space-y-1.5 py-3.5 last:pb-0 md:py-0 md:pl-6">
+                <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
+                  {dict.howSteps.step3Title}
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                  {dict.howSteps.step3Desc}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* 2. DELOKEN Creator Economy */}
+          <section
+            aria-labelledby="guide-creator-cta-heading"
+            className="rounded-2xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/70 p-4 sm:p-8 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6"
+          >
+            <div className="max-w-2xl space-y-1.5 sm:space-y-2.5">
+              <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                DELOKEN Creator Economy
+              </p>
+              <h2
+                id="guide-creator-cta-heading"
+                className="font-display text-lg sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white"
+              >
+                {dict.cta.heading}
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                {dict.cta.body}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 shrink-0">
+              <Button
+                variant="primary"
+                size="md"
+                className="w-full sm:w-auto"
+                onClick={() => onNavigate('signup')}
+              >
+                {dict.cta.primaryBtn}
+              </Button>
+              <Button
+                variant="outline"
+                size="md"
+                className="w-full sm:w-auto"
+                onClick={() => onNavigate('guidelines')}
+              >
+                {dict.cta.secondaryBtn}
+              </Button>
+            </div>
+          </section>
+
+          {/* 3. Platform, Company & Legal, Social Media Directory */}
+          <section
+            aria-labelledby="guide-directory-heading"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 shadow-xs"
+          >
+            <h2 id="guide-directory-heading" className="sr-only">
+              {locale === 'id' ? 'Direktori Platform & Legal' : 'Platform & Legal Directory'}
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8">
+              <div className="space-y-2.5">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  Platform
+                </h3>
+                <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                  {(
+                    [
+                      { route: 'explore' as ViewRoute, label: dict.nav.explore },
+                      { route: 'categories' as ViewRoute, label: dict.nav.categories },
+                      { route: 'pricing' as ViewRoute, label: dict.nav.pricing },
+                      { route: 'search' as ViewRoute, label: dict.nav.search },
+                    ] as const
+                  ).map((item) => (
+                    <li key={item.route}>
+                      <button
+                        type="button"
+                        onClick={() => onNavigate(item.route)}
+                        className="min-h-[40px] w-full flex items-center justify-between py-1 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+                      >
+                        <span>{item.label}</span>
+                        <ArrowRight className="w-3.5 h-3.5 opacity-60" aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="space-y-2.5">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  Company &amp; Legal
+                </h3>
+                <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                  {(
+                    [
+                      { route: 'about' as ViewRoute, label: dict.footer.about },
+                      { route: 'contact' as ViewRoute, label: dict.footer.contact },
+                      { route: 'guidelines' as ViewRoute, label: dict.footer.guidelines },
+                      { route: 'terms' as ViewRoute, label: dict.footer.terms },
+                      { route: 'privacy' as ViewRoute, label: dict.footer.privacy },
+                    ] as const
+                  ).map((item) => (
+                    <li key={item.route}>
+                      <button
+                        type="button"
+                        onClick={() => onNavigate(item.route)}
+                        className="min-h-[40px] w-full flex items-center justify-between py-1 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+                      >
+                        <span>{item.label}</span>
+                        <ArrowRight className="w-3.5 h-3.5 opacity-60" aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="space-y-2.5">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {dict.footer.social}
+                </h3>
+                <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                  {['Instagram', 'YouTube', 'X / Twitter', 'LinkedIn'].map((platform) => (
+                    <li key={platform}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenSocialNotice?.(platform)}
+                        className="min-h-[40px] w-full flex items-center justify-between py-1 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+                      >
+                        <span>{platform}</span>
+                        <ArrowRight className="w-3.5 h-3.5 opacity-60" aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       {section === 'about' && (
         <article className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 space-y-4 sm:space-y-5 shadow-xs">

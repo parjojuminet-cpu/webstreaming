@@ -51,6 +51,14 @@ export type VideoAssetProvider =
   | 'x'
   | 'instagram'
   | 'streamable'
+  | 'google_drive'
+  | 'archive_org'
+  | 'twitch'
+  | 'rumble'
+  | 'odysee'
+  | 'loom'
+  | 'bilibili'
+  | 'html_embed'
   | 'direct_video';
 
 export type LinkCheckStatus =
@@ -112,6 +120,7 @@ export type ViewRoute =
   | 'viewer-dashboard'
   | 'creator-dashboard'
   | 'admin-dashboard'
+  | 'guide'
   | 'about'
   | 'contact'
   | 'terms'

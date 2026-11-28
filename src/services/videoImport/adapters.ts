@@ -70,6 +70,54 @@ const INSTAGRAM_HOSTS = new Set([
   'm.instagram.com',
 ]);
 
+const DROPBOX_HOSTS = new Set([
+  'dropbox.com',
+  'www.dropbox.com',
+  'dl.dropboxusercontent.com',
+]);
+
+const GOOGLE_DRIVE_HOSTS = new Set([
+  'drive.google.com',
+  'docs.google.com',
+]);
+
+const ARCHIVE_ORG_HOSTS = new Set([
+  'archive.org',
+  'www.archive.org',
+]);
+
+const TWITCH_HOSTS = new Set([
+  'twitch.tv',
+  'www.twitch.tv',
+  'm.twitch.tv',
+  'clips.twitch.tv',
+  'player.twitch.tv',
+]);
+
+const RUMBLE_HOSTS = new Set([
+  'rumble.com',
+  'www.rumble.com',
+]);
+
+const ODYSEE_HOSTS = new Set([
+  'odysee.com',
+  'www.odysee.com',
+]);
+
+const LOOM_HOSTS = new Set([
+  'loom.com',
+  'www.loom.com',
+]);
+
+const BILIBILI_HOSTS = new Set([
+  'bilibili.com',
+  'www.bilibili.com',
+  'm.bilibili.com',
+  'player.bilibili.com',
+  'bilibili.tv',
+  'www.bilibili.tv',
+]);
+
 export function extractVimeoVideoRef(rawInput: string): {
   id: string;
   hash?: string;
@@ -110,7 +158,6 @@ export function extractVimeoVideoRef(rawInput: string): {
   if (host === 'player.vimeo.com' && segments[0] === 'video' && /^\d{5,14}$/.test(segments[1] || '')) {
     id = segments[1];
   } else if (segments.length >= 1) {
-    // Handles /123456789, /123456789/unlistedhash, /channels/name/123456789, /groups/name/videos/123456789
     for (let i = 0; i < segments.length; i += 1) {
       if (/^\d{5,14}$/.test(segments[i])) {
         id = segments[i];
@@ -237,7 +284,6 @@ export function extractTikTokVideoInfo(rawInput: string): {
     };
   }
 
-  // /@handle/video/1234567890123456789 or /video/1234567890123456789
   const vidIndex = segs.indexOf('video');
   if (vidIndex >= 0 && segs[vidIndex + 1] && /^\d{15,24}$/.test(segs[vidIndex + 1])) {
     const videoId = segs[vidIndex + 1];
@@ -284,7 +330,6 @@ export function extractXPostInfo(rawInput: string): {
   if (!X_HOSTS.has(host)) return null;
 
   const segs = parsed.pathname.split('/').filter(Boolean);
-  // /{username}/status/{id} or /i/web/status/{id}
   let statusId: string | null = null;
   let username = 'i';
   if (segs.length >= 3 && (segs[1] === 'status' || segs[1] === 'statuses') && /^\d{10,24}$/.test(segs[2])) {
@@ -318,7 +363,6 @@ export function extractInstagramPostInfo(rawInput: string): {
   if (!INSTAGRAM_HOSTS.has(parsed.hostname.toLowerCase())) return null;
 
   const segs = parsed.pathname.split('/').filter(Boolean);
-  // /p/{code}, /reel/{code}, /reels/{code}, /tv/{code}
   if (segs.length < 2) return null;
   const rawKind = segs[0];
   const kind: 'p' | 'reel' | 'tv' | null =
@@ -335,6 +379,408 @@ export function extractInstagramPostInfo(rawInput: string): {
   const canonicalUrl = `https://www.instagram.com/${kind}/${shortcode}/`;
   const embedUrl = `https://www.instagram.com/${kind}/${shortcode}/embed/`;
   return { kind, shortcode, canonicalUrl, embedUrl };
+}
+
+export function normalizeDropboxDirectUrl(rawInput: string): string | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const parsedRes = parseStrictHttpsUrl(trimmed, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  const host = parsed.hostname.toLowerCase();
+  if (!DROPBOX_HOSTS.has(host)) return null;
+
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  if (host === 'dl.dropboxusercontent.com') {
+    return parsed.toString();
+  }
+  if (segs[0] === 's' || segs[0] === 'scl' || segs[0] === 'sh') {
+    if (segs[0] === 'sh') return null; // Shared folders are not single video files
+    const clone = new URL(parsed.toString());
+    clone.searchParams.delete('dl');
+    clone.searchParams.set('raw', '1');
+    return clone.toString();
+  }
+  return null;
+}
+
+export function extractGoogleDriveFileInfo(rawInput: string): {
+  id: string;
+  canonicalUrl: string;
+  embedUrl: string;
+} | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith('google_drive:')
+    ? trimmed.slice('google_drive:'.length).trim()
+    : trimmed;
+
+  if (/^[a-zA-Z0-9_-]{18,80}$/.test(cleaned) && trimmed.startsWith('google_drive:')) {
+    return {
+      id: cleaned,
+      canonicalUrl: `https://drive.google.com/file/d/${cleaned}/view`,
+      embedUrl: `https://drive.google.com/file/d/${cleaned}/preview`,
+    };
+  }
+
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  if (!GOOGLE_DRIVE_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  let id: string | null = null;
+  const dIdx = segs.indexOf('d');
+  if (dIdx >= 0 && segs[dIdx + 1] && /^[a-zA-Z0-9_-]{15,80}$/.test(segs[dIdx + 1])) {
+    id = segs[dIdx + 1];
+  } else {
+    const qpId = parsed.searchParams.get('id');
+    if (qpId && /^[a-zA-Z0-9_-]{15,80}$/.test(qpId)) {
+      id = qpId;
+    }
+  }
+  if (!id) return null;
+
+  return {
+    id,
+    canonicalUrl: `https://drive.google.com/file/d/${id}/view`,
+    embedUrl: `https://drive.google.com/file/d/${id}/preview`,
+  };
+}
+
+export function extractArchiveOrgInfo(rawInput: string): {
+  id: string;
+  canonicalUrl: string;
+  embedUrl: string;
+  metadataUrl: string;
+  thumbnailUrl: string;
+} | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith('archive_org:')
+    ? trimmed.slice('archive_org:'.length).trim()
+    : trimmed;
+
+  if (/^[a-zA-Z0-9._-]{3,120}$/.test(cleaned) && trimmed.startsWith('archive_org:')) {
+    return {
+      id: cleaned,
+      canonicalUrl: `https://archive.org/details/${encodeURIComponent(cleaned)}`,
+      embedUrl: `https://archive.org/embed/${encodeURIComponent(cleaned)}`,
+      metadataUrl: `https://archive.org/metadata/${encodeURIComponent(cleaned)}`,
+      thumbnailUrl: `https://archive.org/services/img/${encodeURIComponent(cleaned)}`,
+    };
+  }
+
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  if (!ARCHIVE_ORG_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  if (segs.length < 2) return null;
+  if (segs[0] !== 'details' && segs[0] !== 'embed' && segs[0] !== 'download') {
+    return null;
+  }
+  const id = decodeURIComponent(segs[1]);
+  if (!id || !/^[a-zA-Z0-9._-]{2,140}$/.test(id)) return null;
+
+  return {
+    id,
+    canonicalUrl: `https://archive.org/details/${encodeURIComponent(id)}`,
+    embedUrl: `https://archive.org/embed/${encodeURIComponent(id)}`,
+    metadataUrl: `https://archive.org/metadata/${encodeURIComponent(id)}`,
+    thumbnailUrl: `https://archive.org/services/img/${encodeURIComponent(id)}`,
+  };
+}
+
+export function extractTwitchRef(rawInput: string): {
+  kind: 'video' | 'clip' | 'channel';
+  target: string;
+  canonicalRef: string;
+  canonicalUrl: string;
+} | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith('twitch:')
+    ? trimmed.slice('twitch:'.length).trim()
+    : trimmed;
+
+  const directRefMatch = /^(video|clip|channel):([a-zA-Z0-9_-]{2,80})$/.exec(cleaned);
+  if (directRefMatch && trimmed.startsWith('twitch:')) {
+    const [, kind, target] = directRefMatch as unknown as [string, 'video' | 'clip' | 'channel', string];
+    const canonicalUrl =
+      kind === 'video'
+        ? `https://www.twitch.tv/videos/${target}`
+        : kind === 'clip'
+        ? `https://clips.twitch.tv/${target}`
+        : `https://www.twitch.tv/${target}`;
+    return {
+      kind,
+      target,
+      canonicalRef: `twitch:${kind}:${target}`,
+      canonicalUrl,
+    };
+  }
+
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  const host = parsed.hostname.toLowerCase();
+  if (!TWITCH_HOSTS.has(host)) return null;
+
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  if (host === 'clips.twitch.tv') {
+    const slug = segs[0] === 'embed' ? parsed.searchParams.get('clip') : segs[0];
+    if (!slug || !/^[a-zA-Z0-9_-]{4,80}$/.test(slug)) return null;
+    return {
+      kind: 'clip',
+      target: slug,
+      canonicalRef: `twitch:clip:${slug}`,
+      canonicalUrl: `https://clips.twitch.tv/${slug}`,
+    };
+  }
+
+  if (host === 'player.twitch.tv') {
+    const vid = parsed.searchParams.get('video');
+    const chan = parsed.searchParams.get('channel');
+    if (vid && /^v?\d{5,20}$/.test(vid)) {
+      const cleanId = vid.replace(/^v/, '');
+      return {
+        kind: 'video',
+        target: cleanId,
+        canonicalRef: `twitch:video:${cleanId}`,
+        canonicalUrl: `https://www.twitch.tv/videos/${cleanId}`,
+      };
+    }
+    if (chan && /^[a-zA-Z0-9_]{2,32}$/.test(chan)) {
+      return {
+        kind: 'channel',
+        target: chan,
+        canonicalRef: `twitch:channel:${chan}`,
+        canonicalUrl: `https://www.twitch.tv/${chan}`,
+      };
+    }
+    return null;
+  }
+
+  if (segs[0] === 'videos' && segs[1] && /^\d{5,20}$/.test(segs[1])) {
+    return {
+      kind: 'video',
+      target: segs[1],
+      canonicalRef: `twitch:video:${segs[1]}`,
+      canonicalUrl: `https://www.twitch.tv/videos/${segs[1]}`,
+    };
+  }
+
+  if (segs.length >= 3 && segs[1] === 'clip' && /^[a-zA-Z0-9_-]{4,80}$/.test(segs[2])) {
+    return {
+      kind: 'clip',
+      target: segs[2],
+      canonicalRef: `twitch:clip:${segs[2]}`,
+      canonicalUrl: `https://clips.twitch.tv/${segs[2]}`,
+    };
+  }
+
+  if (
+    segs.length === 1 &&
+    /^[a-zA-Z0-9_]{2,32}$/.test(segs[0]) &&
+    !['directory', 'videos', 'downloads', 'jobs', 'turbo', 'p'].includes(segs[0].toLowerCase())
+  ) {
+    return {
+      kind: 'channel',
+      target: segs[0],
+      canonicalRef: `twitch:channel:${segs[0]}`,
+      canonicalUrl: `https://www.twitch.tv/${segs[0]}`,
+    };
+  }
+
+  return null;
+}
+
+export function buildTwitchEmbedUrl(rawRefOrUrl: string, parentHostname: string): string | null {
+  const info = extractTwitchRef(rawRefOrUrl);
+  if (!info) return null;
+  const safeHost = parentHostname.trim() || 'localhost';
+  const parentParam = encodeURIComponent(safeHost);
+  if (info.kind === 'video') {
+    return `https://player.twitch.tv/?video=${encodeURIComponent(info.target)}&parent=${parentParam}&autoplay=false`;
+  }
+  if (info.kind === 'clip') {
+    return `https://clips.twitch.tv/embed?clip=${encodeURIComponent(info.target)}&parent=${parentParam}&autoplay=false`;
+  }
+  return `https://player.twitch.tv/?channel=${encodeURIComponent(info.target)}&parent=${parentParam}&autoplay=false`;
+}
+
+export function extractRumbleInfo(rawInput: string): {
+  canonicalRef: string;
+  canonicalUrl: string;
+  embedUrl?: string;
+} | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith('rumble:')
+    ? trimmed.slice('rumble:'.length).trim()
+    : trimmed;
+
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  if (!RUMBLE_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  if (segs.length === 0) return null;
+  if (segs[0] === 'embed' && segs[1] && /^v[a-zA-Z0-9_-]{3,32}$/.test(segs[1])) {
+    return {
+      canonicalRef: `https://rumble.com/embed/${segs[1]}/`,
+      canonicalUrl: `https://rumble.com/embed/${segs[1]}/`,
+      embedUrl: `https://rumble.com/embed/${segs[1]}/`,
+    };
+  }
+  if (/^v[a-zA-Z0-9_-]{3,80}\.html$/i.test(segs[0]) || /^v[a-zA-Z0-9_-]{3,80}/.test(segs[0])) {
+    const cleanUrl = `https://rumble.com/${segs.join('/')}`;
+    return {
+      canonicalRef: cleanUrl,
+      canonicalUrl: cleanUrl,
+    };
+  }
+  return null;
+}
+
+export function extractOdyseeInfo(rawInput: string): {
+  canonicalRef: string;
+  canonicalUrl: string;
+  embedUrl: string;
+} | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const parsedRes = parseStrictHttpsUrl(trimmed, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  if (!ODYSEE_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  if (segs.length === 0) return null;
+
+  if (segs[0] === '$' && segs[1] === 'embed' && segs.length >= 3) {
+    const rest = segs.slice(2).join('/');
+    const embedUrl = `https://odysee.com/$/embed/${rest}`;
+    return {
+      canonicalRef: embedUrl,
+      canonicalUrl: `https://odysee.com/${rest}`,
+      embedUrl,
+    };
+  }
+
+  if (segs.length >= 2 || segs[0].includes(':')) {
+    const pathPart = segs.join('/');
+    const canonicalUrl = `https://odysee.com/${pathPart}`;
+    const embedUrl = `https://odysee.com/$/embed/${pathPart}`;
+    return {
+      canonicalRef: canonicalUrl,
+      canonicalUrl,
+      embedUrl,
+    };
+  }
+
+  return null;
+}
+
+export function extractLoomInfo(rawInput: string): {
+  id: string;
+  canonicalUrl: string;
+  embedUrl: string;
+} | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.startsWith('loom:')
+    ? trimmed.slice('loom:'.length).trim()
+    : trimmed;
+
+  if (/^[a-fA-F0-9]{24,40}$/.test(cleaned) && trimmed.startsWith('loom:')) {
+    return {
+      id: cleaned,
+      canonicalUrl: `https://www.loom.com/share/${cleaned}`,
+      embedUrl: `https://www.loom.com/embed/${cleaned}`,
+    };
+  }
+
+  const parsedRes = parseStrictHttpsUrl(cleaned, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  if (!LOOM_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  if ((segs[0] === 'share' || segs[0] === 'embed') && segs[1] && /^[a-zA-Z0-9]{16,48}$/.test(segs[1])) {
+    return {
+      id: segs[1],
+      canonicalUrl: `https://www.loom.com/share/${segs[1]}`,
+      embedUrl: `https://www.loom.com/embed/${segs[1]}`,
+    };
+  }
+  return null;
+}
+
+export function extractBilibiliInfo(rawInput: string): {
+  kind: 'bvid' | 'tv';
+  id: string;
+  canonicalRef: string;
+  canonicalUrl: string;
+  embedUrl: string;
+} | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+  const parsedRes = parseStrictHttpsUrl(trimmed, { allowBareHostname: true });
+  if (!parsedRes.ok) return null;
+  const parsed = parsedRes.url;
+  const host = parsed.hostname.toLowerCase();
+  if (!BILIBILI_HOSTS.has(host)) return null;
+
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  if (host === 'player.bilibili.com') {
+    const bvid = parsed.searchParams.get('bvid');
+    if (bvid && /^BV[a-zA-Z0-9]{8,16}$/.test(bvid)) {
+      return {
+        kind: 'bvid',
+        id: bvid,
+        canonicalRef: `https://www.bilibili.com/video/${bvid}`,
+        canonicalUrl: `https://www.bilibili.com/video/${bvid}`,
+        embedUrl: `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&autoplay=0&danmaku=0`,
+      };
+    }
+    return null;
+  }
+
+  if (host.endsWith('bilibili.com')) {
+    const videoIdx = segs.indexOf('video');
+    const candidate = videoIdx >= 0 ? segs[videoIdx + 1] : segs[0];
+    if (candidate && /^BV[a-zA-Z0-9]{8,16}$/.test(candidate)) {
+      return {
+        kind: 'bvid',
+        id: candidate,
+        canonicalRef: `https://www.bilibili.com/video/${candidate}`,
+        canonicalUrl: `https://www.bilibili.com/video/${candidate}`,
+        embedUrl: `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(candidate)}&autoplay=0&danmaku=0`,
+      };
+    }
+    return null;
+  }
+
+  // bilibili.tv/{lang}/video/{id} or /video/{id}
+  const vIdx = segs.indexOf('video');
+  const tvId = vIdx >= 0 ? segs[vIdx + 1] : null;
+  if (tvId && /^\d{5,20}$/.test(tvId)) {
+    const lang = vIdx === 1 && /^[a-z]{2}$/i.test(segs[0]) ? segs[0].toLowerCase() : 'en';
+    const canonicalUrl = `https://www.bilibili.tv/${lang}/video/${tvId}`;
+    return {
+      kind: 'tv',
+      id: tvId,
+      canonicalRef: canonicalUrl,
+      canonicalUrl,
+      embedUrl: canonicalUrl,
+    };
+  }
+
+  return null;
 }
 
 export function inferDirectFormatFromUrl(url: URL): DirectStreamFormat | null {
@@ -367,7 +813,6 @@ export const youtubeAdapter: VideoPlatformAdapter = {
     const trimmed = rawInput.trim();
     if (!trimmed) return null;
 
-    // Enforce HTTPS if URL scheme is explicitly provided
     if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
       const check = parseStrictHttpsUrl(trimmed, { allowBareHostname: false });
       if (!check.ok) return null;
@@ -478,9 +923,9 @@ export const streamableAdapter: VideoPlatformAdapter = {
       embedUrl: `https://streamable.com/e/${id}`,
       verifiability: 'conditional',
       verifiabilityNoteId:
-        'Menggunakan embed resmi Streamable. Tombol Lanjutkan aktif hanya jika player mengirim event pemutaran nyata.',
+        'Menggunakan embed resmi Streamable. Anda dapat memutar preview atau mengonfirmasi langsung jika frame player sudah siap.',
       verifiabilityNoteEn:
-        'Uses official Streamable embed. Continue unlocks only if the embed emits real playback events.',
+        'Uses official Streamable embed. Press Play or confirm frame playback once loaded.',
     };
   },
 };
@@ -593,9 +1038,231 @@ export const instagramAdapter: VideoPlatformAdapter = {
   },
 };
 
+export const dropboxAdapter: VideoPlatformAdapter = {
+  id: 'direct_video',
+  label: 'Dropbox Video',
+  allowedHosts: DROPBOX_HOSTS,
+  verifiability: 'verifiable',
+  detect: (rawInput): DetectedVideoSource | null => {
+    const rawUrl = normalizeDropboxDirectUrl(rawInput);
+    if (!rawUrl) return null;
+    return {
+      provider: 'direct_video',
+      platformLabel: 'Dropbox Direct Video',
+      originalUrl: rawInput.trim(),
+      canonicalRef: rawUrl,
+      canonicalUrl: rawUrl,
+      directFormat: 'mp4',
+      verifiability: 'verifiable',
+      verifiabilityNoteId:
+        'Tautan Dropbox otomatis dikonversi menjadi stream video langsung (?raw=1) dan diverifikasi melalui HTML5 Video.',
+      verifiabilityNoteEn:
+        'Dropbox link is automatically converted to a direct video stream (?raw=1) and verified via HTML5 Video.',
+    };
+  },
+};
+
+export const googleDriveAdapter: VideoPlatformAdapter = {
+  id: 'google_drive',
+  label: 'Google Drive',
+  allowedHosts: GOOGLE_DRIVE_HOSTS,
+  verifiability: 'conditional',
+  detect: (rawInput): DetectedVideoSource | null => {
+    const info = extractGoogleDriveFileInfo(rawInput);
+    if (!info) return null;
+    return {
+      provider: 'google_drive',
+      platformLabel: 'Google Drive',
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.id,
+      canonicalUrl: info.canonicalUrl,
+      embedUrl: info.embedUrl,
+      verifiability: 'conditional',
+      verifiabilityNoteId:
+        'Menggunakan Google Drive Preview Embed. Pastikan akses file disetel "Siapa saja yang memiliki link" lalu buka Preview dan konfirmasi pemutaran.',
+      verifiabilityNoteEn:
+        'Uses Google Drive Preview Embed. Ensure sharing is set to "Anyone with the link", then open Preview and confirm playback.',
+    };
+  },
+};
+
+export const archiveOrgAdapter: VideoPlatformAdapter = {
+  id: 'archive_org',
+  label: 'Internet Archive',
+  allowedHosts: ARCHIVE_ORG_HOSTS,
+  verifiability: 'conditional',
+  detect: (rawInput): DetectedVideoSource | null => {
+    const info = extractArchiveOrgInfo(rawInput);
+    if (!info) return null;
+    return {
+      provider: 'archive_org',
+      platformLabel: 'Internet Archive',
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.id,
+      canonicalUrl: info.canonicalUrl,
+      embedUrl: info.embedUrl,
+      thumbnailUrl: info.thumbnailUrl,
+      verifiability: 'conditional',
+      verifiabilityNoteId:
+        'Menggunakan Internet Archive (otomatis mengambil file MP4 langsung jika tersedia atau embed resmi Archive.org).',
+      verifiabilityNoteEn:
+        'Uses Internet Archive (automatically upgrades to direct MP4 stream when available or uses official Archive.org embed).',
+    };
+  },
+};
+
+export const twitchAdapter: VideoPlatformAdapter = {
+  id: 'twitch',
+  label: 'Twitch',
+  allowedHosts: TWITCH_HOSTS,
+  verifiability: 'conditional',
+  detect: (rawInput): DetectedVideoSource | null => {
+    const info = extractTwitchRef(rawInput);
+    if (!info) return null;
+    return {
+      provider: 'twitch',
+      platformLabel: 'Twitch',
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.canonicalRef,
+      canonicalUrl: info.canonicalUrl,
+      verifiability: 'conditional',
+      verifiabilityNoteId:
+        'Menggunakan Twitch Interactive Embed Player resmi (otomatis menyesuaikan parameter parent domain aktif).',
+      verifiabilityNoteEn:
+        'Uses official Twitch Embed Player (automatically attaches the active host domain parent parameter).',
+    };
+  },
+};
+
+export const rumbleAdapter: VideoPlatformAdapter = {
+  id: 'rumble',
+  label: 'Rumble',
+  allowedHosts: RUMBLE_HOSTS,
+  verifiability: 'conditional',
+  detect: (rawInput): DetectedVideoSource | null => {
+    const info = extractRumbleInfo(rawInput);
+    if (!info) return null;
+    return {
+      provider: 'rumble',
+      platformLabel: 'Rumble',
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.canonicalRef,
+      canonicalUrl: info.canonicalUrl,
+      embedUrl: info.embedUrl,
+      verifiability: 'conditional',
+      verifiabilityNoteId:
+        'Menggunakan embed resmi Rumble melalui oEmbed API.',
+      verifiabilityNoteEn:
+        'Uses official Rumble embed resolved via oEmbed API.',
+    };
+  },
+};
+
+export const odyseeAdapter: VideoPlatformAdapter = {
+  id: 'odysee',
+  label: 'Odysee',
+  allowedHosts: ODYSEE_HOSTS,
+  verifiability: 'conditional',
+  detect: (rawInput): DetectedVideoSource | null => {
+    const info = extractOdyseeInfo(rawInput);
+    if (!info) return null;
+    return {
+      provider: 'odysee',
+      platformLabel: 'Odysee',
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.canonicalRef,
+      canonicalUrl: info.canonicalUrl,
+      embedUrl: info.embedUrl,
+      verifiability: 'conditional',
+      verifiabilityNoteId:
+        'Menggunakan Odysee Embed Player atau stream media langsung dari halaman Odysee.',
+      verifiabilityNoteEn:
+        'Uses Odysee Embed Player or direct media stream extracted from the Odysee page.',
+    };
+  },
+};
+
+export const loomAdapter: VideoPlatformAdapter = {
+  id: 'loom',
+  label: 'Loom',
+  allowedHosts: LOOM_HOSTS,
+  verifiability: 'conditional',
+  detect: (rawInput): DetectedVideoSource | null => {
+    const info = extractLoomInfo(rawInput);
+    if (!info) return null;
+    return {
+      provider: 'loom',
+      platformLabel: 'Loom',
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.id,
+      canonicalUrl: info.canonicalUrl,
+      embedUrl: info.embedUrl,
+      verifiability: 'conditional',
+      verifiabilityNoteId:
+        'Menggunakan Loom Embed Player resmi (oEmbed API).',
+      verifiabilityNoteEn:
+        'Uses official Loom Embed Player (oEmbed API).',
+    };
+  },
+};
+
+export const bilibiliAdapter: VideoPlatformAdapter = {
+  id: 'bilibili',
+  label: 'Bilibili',
+  allowedHosts: BILIBILI_HOSTS,
+  verifiability: 'conditional',
+  detect: (rawInput): DetectedVideoSource | null => {
+    const info = extractBilibiliInfo(rawInput);
+    if (!info) return null;
+    return {
+      provider: 'bilibili',
+      platformLabel: 'Bilibili',
+      originalUrl: rawInput.trim(),
+      canonicalRef: info.canonicalRef,
+      canonicalUrl: info.canonicalUrl,
+      embedUrl: info.embedUrl,
+      verifiability: 'conditional',
+      verifiabilityNoteId:
+        'Menggunakan Bilibili Video Embed Player.',
+      verifiabilityNoteEn:
+        'Uses Bilibili Video Embed Player.',
+    };
+  },
+};
+
+export const htmlEmbedPrefixAdapter: VideoPlatformAdapter = {
+  id: 'html_embed',
+  label: 'HTML Web Page',
+  verifiability: 'conditional',
+  detect: (rawInput): DetectedVideoSource | null => {
+    const trimmed = rawInput.trim();
+    if (!trimmed.startsWith('html:')) return null;
+    const clean = trimmed.slice('html:'.length).trim();
+    const parsedRes = parseStrictHttpsUrl(clean, {
+      allowBareHostname: false,
+      allowLocalHttp: false,
+    });
+    if (!parsedRes.ok) return null;
+    const urlStr = parsedRes.url.toString();
+    return {
+      provider: 'html_embed',
+      platformLabel: 'Halaman Web HTML (Embed)',
+      originalUrl: trimmed,
+      canonicalRef: urlStr,
+      canonicalUrl: urlStr,
+      embedUrl: urlStr,
+      verifiability: 'conditional',
+      verifiabilityNoteId:
+        'Halaman web HTML disematkan melalui iframe aman DELOKEN. Pastikan video tampil dan dapat diputar saat Preview.',
+      verifiabilityNoteEn:
+        'HTML web page embedded via DELOKEN sandboxed iframe. Confirm playback works inside Preview.',
+    };
+  },
+};
+
 export const directVideoAdapter: VideoPlatformAdapter = {
   id: 'direct_video',
-  label: 'Direct Video / Stream',
+  label: 'Direct Video / Web Page',
   verifiability: 'verifiable',
   detect: (rawInput): DetectedVideoSource | null => {
     const trimmed = rawInput.trim();
@@ -612,7 +1279,6 @@ export const directVideoAdapter: VideoPlatformAdapter = {
     if (!parsedRes.ok) return null;
 
     const host = parsedRes.url.hostname.toLowerCase();
-    // Never let known social/video page URLs fall through to DirectVideoAdapter
     if (
       YOUTUBE_HOSTS.has(host) ||
       VIMEO_HOSTS.has(host) ||
@@ -621,7 +1287,15 @@ export const directVideoAdapter: VideoPlatformAdapter = {
       TIKTOK_HOSTS.has(host) ||
       FACEBOOK_HOSTS.has(host) ||
       X_HOSTS.has(host) ||
-      INSTAGRAM_HOSTS.has(host)
+      INSTAGRAM_HOSTS.has(host) ||
+      DROPBOX_HOSTS.has(host) ||
+      GOOGLE_DRIVE_HOSTS.has(host) ||
+      ARCHIVE_ORG_HOSTS.has(host) ||
+      TWITCH_HOSTS.has(host) ||
+      RUMBLE_HOSTS.has(host) ||
+      ODYSEE_HOSTS.has(host) ||
+      LOOM_HOSTS.has(host) ||
+      BILIBILI_HOSTS.has(host)
     ) {
       return null;
     }
@@ -634,7 +1308,7 @@ export const directVideoAdapter: VideoPlatformAdapter = {
         ? 'Direct Stream (MPEG-DASH .mpd)'
         : directFormat === 'mp4'
         ? 'Direct Video (MP4 / WebM / MOV)'
-        : 'Direct HTTPS Video URL';
+        : 'Web / HTML / Stream URL';
 
     return {
       provider: 'direct_video',
@@ -645,9 +1319,9 @@ export const directVideoAdapter: VideoPlatformAdapter = {
       directFormat,
       verifiability: 'verifiable',
       verifiabilityNoteId:
-        'Pemutaran MP4, WebM, MOV, HLS (.m3u8), atau MPEG-DASH (.mpd) diverifikasi langsung melalui HTML5 Video, hls.js, atau dash.js.',
+        'Mendukung URL video langsung (MP4, WebM, MOV, HLS .m3u8, DASH .mpd) maupun ekstraksi otomatis video dari halaman HTML.',
       verifiabilityNoteEn:
-        'MP4, WebM, MOV, HLS (.m3u8), or MPEG-DASH (.mpd) playback is verified directly via HTML5 Video, hls.js, or dash.js.',
+        'Supports direct video URLs (MP4, WebM, MOV, HLS .m3u8, DASH .mpd) as well as automatic video extraction from HTML pages.',
     };
   },
 };
@@ -661,5 +1335,14 @@ export const VIDEO_PLATFORM_ADAPTERS: readonly VideoPlatformAdapter[] = [
   facebookAdapter,
   xAdapter,
   instagramAdapter,
+  dropboxAdapter,
+  googleDriveAdapter,
+  archiveOrgAdapter,
+  twitchAdapter,
+  rumbleAdapter,
+  odyseeAdapter,
+  loomAdapter,
+  bilibiliAdapter,
+  htmlEmbedPrefixAdapter,
   directVideoAdapter,
 ];

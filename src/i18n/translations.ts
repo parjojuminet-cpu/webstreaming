@@ -59,6 +59,7 @@ export interface Dictionary {
     explore: string;
     categories: string;
     pricing: string;
+    guide: string;
     search: string;
     login: string;
     signup: string;
@@ -130,6 +131,7 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
       explore: 'Explore',
       categories: 'Categories',
       pricing: 'Pricing',
+      guide: 'Guide',
       search: 'Search',
       login: 'Login',
       signup: 'Sign Up',
@@ -199,6 +201,7 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
       explore: 'Jelajah',
       categories: 'Kategori',
       pricing: 'Harga',
+      guide: 'Panduan',
       search: 'Cari',
       login: 'Masuk',
       signup: 'Daftar',

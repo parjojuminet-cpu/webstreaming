@@ -93,10 +93,17 @@ import {
   getFacebookEmbedUrl,
 } from '../src/utils/facebook.ts';
 import {
+  extractArchiveOrgInfo,
+  extractBilibiliInfo,
   extractDailymotionVideoId,
+  extractGoogleDriveFileInfo,
   extractInstagramPostInfo,
+  extractLoomInfo,
+  extractOdyseeInfo,
+  extractRumbleInfo,
   extractStreamableId,
   extractTikTokVideoInfo,
+  extractTwitchRef,
   extractVimeoVideoRef,
   extractXPostInfo,
   inferDirectFormatFromUrl,
@@ -1015,6 +1022,14 @@ export function createApiApp(): Express {
     'x',
     'instagram',
     'streamable',
+    'google_drive',
+    'archive_org',
+    'twitch',
+    'rumble',
+    'odysee',
+    'loom',
+    'bilibili',
+    'html_embed',
     'direct_video',
   ]);
 
@@ -1107,6 +1122,69 @@ export function createApiApp(): Express {
           return;
         }
         trimmedRef = ig.canonicalUrl;
+      } else if (typedProvider === 'google_drive') {
+        const gd =
+          extractGoogleDriveFileInfo(trimmedRef) ||
+          extractGoogleDriveFileInfo(`google_drive:${trimmedRef}`);
+        if (!gd) {
+          res.status(400).json({ error: 'Invalid Google Drive file URL or ID.' });
+          return;
+        }
+        trimmedRef = gd.id;
+      } else if (typedProvider === 'archive_org') {
+        const ao =
+          extractArchiveOrgInfo(trimmedRef) ||
+          extractArchiveOrgInfo(`archive_org:${trimmedRef}`);
+        if (!ao) {
+          res.status(400).json({ error: 'Invalid Internet Archive item URL or ID.' });
+          return;
+        }
+        trimmedRef = ao.id;
+      } else if (typedProvider === 'twitch') {
+        const tw = extractTwitchRef(trimmedRef);
+        if (!tw) {
+          res.status(400).json({ error: 'Invalid Twitch video, clip, or channel URL.' });
+          return;
+        }
+        trimmedRef = tw.canonicalRef;
+      } else if (typedProvider === 'rumble') {
+        const rb = extractRumbleInfo(trimmedRef);
+        if (!rb) {
+          res.status(400).json({ error: 'Invalid Rumble video URL.' });
+          return;
+        }
+        trimmedRef = rb.canonicalRef;
+      } else if (typedProvider === 'odysee') {
+        const od = extractOdyseeInfo(trimmedRef);
+        if (!od) {
+          res.status(400).json({ error: 'Invalid Odysee video URL.' });
+          return;
+        }
+        trimmedRef = od.canonicalRef;
+      } else if (typedProvider === 'loom') {
+        const lm = extractLoomInfo(trimmedRef) || extractLoomInfo(`loom:${trimmedRef}`);
+        if (!lm) {
+          res.status(400).json({ error: 'Invalid Loom share/embed URL.' });
+          return;
+        }
+        trimmedRef = lm.id;
+      } else if (typedProvider === 'bilibili') {
+        const bb = extractBilibiliInfo(trimmedRef);
+        if (!bb) {
+          res.status(400).json({ error: 'Invalid Bilibili video URL.' });
+          return;
+        }
+        trimmedRef = bb.canonicalRef;
+      } else if (typedProvider === 'html_embed') {
+        const cleanHtmlRef = trimmedRef.startsWith('html:')
+          ? trimmedRef.slice('html:'.length).trim()
+          : trimmedRef;
+        const guard = parseStrictHttpsUrl(cleanHtmlRef, { allowBareHostname: false });
+        if (!guard.ok) {
+          res.status(400).json({ error: guard.messageEn });
+          return;
+        }
+        trimmedRef = guard.url.toString();
       } else if (typedProvider === 'direct_video') {
         const guard = parseStrictHttpsUrl(trimmedRef, { allowBareHostname: false });
         if (!guard.ok) {
@@ -1524,6 +1602,168 @@ export function createApiApp(): Express {
           previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
           resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
           manifestUrl: `https://www.tiktok.com/player/v1/${tt.videoId}?autoplay=1&controls=1`,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    if (mediaBinding && mediaBinding.provider === 'google_drive') {
+      const gd =
+        extractGoogleDriveFileInfo(mediaBinding.assetRef) ||
+        extractGoogleDriveFileInfo(`google_drive:${mediaBinding.assetRef}`);
+      if (gd) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'google_drive',
+          provider: 'google_drive',
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: gd.embedUrl,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    if (mediaBinding && mediaBinding.provider === 'archive_org') {
+      const ao =
+        extractArchiveOrgInfo(mediaBinding.assetRef) ||
+        extractArchiveOrgInfo(`archive_org:${mediaBinding.assetRef}`);
+      if (ao) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'archive_org',
+          provider: 'archive_org',
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: ao.embedUrl,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    if (mediaBinding && mediaBinding.provider === 'twitch') {
+      const tw = extractTwitchRef(mediaBinding.assetRef);
+      if (tw) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'twitch',
+          provider: 'twitch',
+          twitchRef: tw.canonicalRef,
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: tw.canonicalUrl,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    if (mediaBinding && mediaBinding.provider === 'rumble') {
+      const rb = extractRumbleInfo(mediaBinding.assetRef);
+      if (rb) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'rumble',
+          provider: 'rumble',
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: rb.embedUrl || rb.canonicalUrl,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    if (mediaBinding && mediaBinding.provider === 'odysee') {
+      const od = extractOdyseeInfo(mediaBinding.assetRef);
+      if (od) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'odysee',
+          provider: 'odysee',
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: od.embedUrl,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    if (mediaBinding && mediaBinding.provider === 'loom') {
+      const lm =
+        extractLoomInfo(mediaBinding.assetRef) ||
+        extractLoomInfo(`loom:${mediaBinding.assetRef}`);
+      if (lm) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'loom',
+          provider: 'loom',
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: lm.embedUrl,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    if (mediaBinding && mediaBinding.provider === 'bilibili') {
+      const bb = extractBilibiliInfo(mediaBinding.assetRef);
+      if (bb) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'bilibili',
+          provider: 'bilibili',
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: bb.embedUrl,
+          entitlement: entitlementPayload,
+          serverTimeIso: new Date(now).toISOString(),
+        });
+        return;
+      }
+    }
+
+    if (mediaBinding && mediaBinding.provider === 'html_embed') {
+      const cleanHtml = mediaBinding.assetRef.startsWith('html:')
+        ? mediaBinding.assetRef.slice('html:'.length).trim()
+        : mediaBinding.assetRef.trim();
+      const guard = parseStrictHttpsUrl(cleanHtml, { allowBareHostname: false });
+      if (guard.ok) {
+        res.json({
+          mode,
+          isFree: isFreeRelease,
+          streamType: 'html_embed',
+          provider: 'html_embed',
+          videoId,
+          previewLimitSeconds: PREVIEW_LIMIT_SECONDS,
+          resumeSeconds: hasPaidEntitlement && record ? record.resumeSeconds : 0,
+          manifestUrl: guard.url.toString(),
           entitlement: entitlementPayload,
           serverTimeIso: new Date(now).toISOString(),
         });

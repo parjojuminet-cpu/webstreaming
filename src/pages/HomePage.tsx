@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import type {
   ContentCategory,
   ContentItem,
@@ -13,7 +13,6 @@ import {
   CATEGORY_LIST,
   TRANSLATIONS,
 } from '../i18n/translations';
-import { Button } from '../components/ui/Button';
 import { ContentCard } from '../components/ui/ContentCard';
 import { CreatorCard } from '../components/ui/CreatorCard';
 import { EmptyState } from '../components/ui/StateViews';
@@ -243,98 +242,6 @@ export const HomePage: React.FC<HomePageProps> = ({
             ))}
           </div>
         )}
-      </section>
-
-      {/* 3. HOW DELOKEN WORKS */}
-      <section
-        aria-labelledby="how-heading"
-        className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8"
-      >
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-8 shadow-xs">
-          <div className="max-w-2xl mb-4 sm:mb-6 space-y-1">
-            <h2
-              id="how-heading"
-              className="font-display text-lg sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white"
-            >
-              {dict.sections.howItWorks}
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-              {dict.sections.howItWorksSubtitle}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200 dark:divide-slate-800 pt-3.5 sm:pt-5 border-t border-slate-200 dark:border-slate-800">
-            <div className="space-y-1 sm:space-y-2 py-3 first:pt-0 md:py-0 md:pr-6">
-              <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
-                {dict.howSteps.step1Title}
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                {dict.howSteps.step1Desc}
-              </p>
-            </div>
-
-            <div className="space-y-1 sm:space-y-2 py-3 md:py-0 md:px-6">
-              <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
-                {dict.howSteps.step2Title}
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                {dict.howSteps.step2Desc}
-              </p>
-            </div>
-
-            <div className="space-y-1 sm:space-y-2 py-3 last:pb-0 md:py-0 md:pl-6">
-              <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
-                {dict.howSteps.step3Title}
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                {dict.howSteps.step3Desc}
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 4. CALL TO ACTION — BECOME A DELOKEN CREATOR */}
-      <section
-        aria-labelledby="creator-cta-heading"
-        className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8"
-      >
-        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/70 p-4 sm:p-8 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
-          <div className="max-w-2xl space-y-1.5 sm:space-y-2.5">
-            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-              <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>DELOKEN Creator Economy</span>
-            </div>
-            <h2
-              id="creator-cta-heading"
-              className="font-display text-lg sm:text-2xl lg:text-3xl font-bold tracking-tight text-slate-900 dark:text-white"
-            >
-              {dict.cta.heading}
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              {dict.cta.body}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 shrink-0">
-            <Button
-              variant="primary"
-              size="md"
-              className="w-full sm:w-auto"
-              onClick={() => onNavigate('signup')}
-            >
-              {dict.cta.primaryBtn}
-            </Button>
-            <Button
-              variant="outline"
-              size="md"
-              className="w-full sm:w-auto"
-              onClick={() => onNavigate('guidelines')}
-            >
-              {dict.cta.secondaryBtn}
-            </Button>
-          </div>
-        </div>
       </section>
     </div>
   );

@@ -335,6 +335,14 @@
             "x",
             "instagram",
             "streamable",
+            "google_drive",
+            "archive_org",
+            "twitch",
+            "rumble",
+            "odysee",
+            "loom",
+            "bilibili",
+            "html_embed",
             "direct_video"
           ]
         },

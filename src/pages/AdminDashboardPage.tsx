@@ -893,6 +893,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     if (provider === 'facebook') return 'Facebook (Eksternal)';
     if (provider === 'x') return 'X / Twitter (Eksternal)';
     if (provider === 'instagram') return 'Instagram (Eksternal)';
+    if (provider === 'google_drive') return 'Google Drive (Eksternal)';
+    if (provider === 'archive_org') return 'Internet Archive (Eksternal)';
+    if (provider === 'twitch') return 'Twitch (Eksternal)';
+    if (provider === 'rumble') return 'Rumble (Eksternal)';
+    if (provider === 'odysee') return 'Odysee (Eksternal)';
+    if (provider === 'loom') return 'Loom (Eksternal)';
+    if (provider === 'bilibili') return 'Bilibili (Eksternal)';
+    if (provider === 'html_embed') return locale === 'id' ? 'Halaman Web HTML (Embed)' : 'HTML Web Page (Embed)';
     if (provider === 'direct_video') return locale === 'id' ? 'URL Video / Stream Langsung (Eksternal)' : 'Direct Video / Stream URL (External)';
     return locale === 'id' ? 'Provider Tidak Dikenal' : 'Unknown Provider';
   };

@@ -19,6 +19,14 @@ export interface StreamAuthorizationResponse {
     | 'dailymotion'
     | 'streamable'
     | 'tiktok'
+    | 'google_drive'
+    | 'archive_org'
+    | 'twitch'
+    | 'rumble'
+    | 'odysee'
+    | 'loom'
+    | 'bilibili'
+    | 'html_embed'
     | 'direct_video';
   provider?: VideoAssetProvider;
   youtubeVideoId?: string;
@@ -28,6 +36,7 @@ export interface StreamAuthorizationResponse {
   vimeoHash?: string;
   dailymotionVideoId?: string;
   streamableId?: string;
+  twitchRef?: string;
   directFormat?: DirectStreamFormat;
   signedHls?: boolean;
   videoId: string;

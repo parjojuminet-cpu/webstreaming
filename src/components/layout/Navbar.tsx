@@ -61,10 +61,18 @@ export const Navbar: React.FC<NavbarProps> = ({
   const navItems: { route: ViewRoute; label: string }[] = [
     { route: 'home', label: dict.nav.home },
     { route: 'explore', label: dict.nav.explore },
-    { route: 'categories', label: dict.nav.categories },
     { route: 'pricing', label: dict.nav.pricing },
+    { route: 'guide', label: dict.nav.guide },
     { route: 'search', label: dict.nav.search },
   ];
+
+  const isGuideSection =
+    activeRoute === 'guide' ||
+    activeRoute === 'about' ||
+    activeRoute === 'contact' ||
+    activeRoute === 'terms' ||
+    activeRoute === 'privacy' ||
+    activeRoute === 'guidelines';
 
   const handleNav = (route: ViewRoute) => {
     onNavigate(route);
@@ -100,7 +108,14 @@ export const Navbar: React.FC<NavbarProps> = ({
           className="hidden md:flex items-center gap-4 lg:gap-7"
         >
           {navItems.map((item) => {
-            const isActive = activeRoute === item.route;
+            const isActive =
+              item.route === 'guide'
+                ? isGuideSection
+                : item.route === 'explore'
+                ? activeRoute === 'explore' ||
+                  activeRoute === 'categories' ||
+                  activeRoute === 'detail'
+                : activeRoute === item.route;
             return (
               <button
                 key={item.route}
@@ -323,13 +338,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             <nav aria-label="Mobile navigation" className="grid grid-cols-2 gap-2">
               {(
                 [
+                  { route: 'guide' as ViewRoute, label: dict.nav.guide },
                   { route: 'categories' as ViewRoute, label: dict.nav.categories },
                   { route: 'pricing' as ViewRoute, label: dict.nav.pricing },
-                  { route: 'guidelines' as ViewRoute, label: dict.footer.guidelines },
                   { route: 'about' as ViewRoute, label: dict.footer.about },
                 ] as const
               ).map((item) => {
-                const isActive = activeRoute === item.route;
+                const isActive =
+                  item.route === 'guide'
+                    ? activeRoute === 'guide'
+                    : activeRoute === item.route;
                 return (
                   <button
                     key={item.route}

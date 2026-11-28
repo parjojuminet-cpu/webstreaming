@@ -407,7 +407,8 @@ const DelokenAppShell: React.FC<{
           <AdminDashboardPage locale={locale} onNavigate={navigate} />
         )}
 
-        {(route === 'about' ||
+        {(route === 'guide' ||
+          route === 'about' ||
           route === 'contact' ||
           route === 'terms' ||
           route === 'privacy' ||
@@ -417,6 +418,7 @@ const DelokenAppShell: React.FC<{
             locale={locale}
             onBack={() => navigate('home')}
             onNavigate={navigate}
+            onOpenSocialNotice={(platform) => setSocialNoticePlatform(platform)}
           />
         )}
       </main>
@@ -424,15 +426,8 @@ const DelokenAppShell: React.FC<{
       <Footer
         locale={locale}
         currency={currency}
-        theme={theme}
-        onChangeLocale={(next) => {
-          onChangeLocale(next);
-          onChangeCurrency(next === 'id' ? 'IDR' : 'USD');
-        }}
         onChangeCurrency={onChangeCurrency}
-        onToggleTheme={onToggleTheme}
         onNavigate={navigate}
-        onOpenSocialNotice={(platform) => setSocialNoticePlatform(platform)}
       />
 
       <MobileBottomNav activeRoute={route} locale={locale} onNavigate={navigate} />

@@ -12,6 +12,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { inspectCreatorVideoLink } from '../../services/streamService';
+import { buildTwitchEmbedUrl } from '../../services/videoImport/adapters';
 import {
   parseBatchVideoInput,
 } from '../../services/videoImport/batchParser';
@@ -568,6 +569,79 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
       });
     }
 
+    // Passive/conditional iframe embeds (Google Drive, Internet Archive, Twitch, Rumble, Odysee, Loom, Bilibili, HTML embed)
+    if (
+      diag.provider === 'google_drive' ||
+      diag.provider === 'archive_org' ||
+      diag.provider === 'twitch' ||
+      diag.provider === 'rumble' ||
+      diag.provider === 'odysee' ||
+      diag.provider === 'loom' ||
+      diag.provider === 'bilibili' ||
+      diag.provider === 'html_embed'
+    ) {
+      return await new Promise((resolve) => {
+        const frameEl = iframeRef.current;
+        if (!frameEl) {
+          resolve({
+            ok: false,
+            status: 'play_failed',
+            note: 'Preview iframe container missing.',
+          });
+          return;
+        }
+        let settled = false;
+        let timeoutTimer: number | null = null;
+        const cleanup = () => {
+          if (timeoutTimer) window.clearTimeout(timeoutTimer);
+          frameEl.removeEventListener('load', onLoad);
+          frameEl.removeEventListener('error', onErr);
+        };
+        const finish = (res: {
+          ok: boolean;
+          status: PlaybackCheckStatus;
+          note: string;
+        }) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(res);
+        };
+        const onLoad = () => {
+          finish({
+            ok: true,
+            status: 'verified_playing',
+            note:
+              locale === 'id'
+                ? `${diag.platformLabel} frame berhasil dimuat dan siap diputar.`
+                : `${diag.platformLabel} frame loaded and ready.`,
+          });
+        };
+        const onErr = () => {
+          finish({
+            ok: false,
+            status: 'play_failed',
+            note:
+              locale === 'id'
+                ? `Gagal memuat frame ${diag.platformLabel}.`
+                : `Failed to load ${diag.platformLabel} frame.`,
+          });
+        };
+        frameEl.addEventListener('load', onLoad);
+        frameEl.addEventListener('error', onErr);
+        timeoutTimer = window.setTimeout(() => {
+          finish({
+            ok: false,
+            status: 'play_failed',
+            note:
+              locale === 'id'
+                ? `Frame ${diag.platformLabel} tidak merespons dalam 8 detik.`
+                : `${diag.platformLabel} frame did not respond within 8 seconds.`,
+          });
+        }, 8000);
+      });
+    }
+
     // Vimeo / Dailymotion / Streamable / TikTok postMessage fallback verifier
     return await new Promise((resolve) => {
       let settled = false;
@@ -823,8 +897,8 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] text-slate-500 dark:text-slate-400">
             {locale === 'id'
-              ? 'Mendukung banyak URL YouTube (termasuk YouTube Playlist), Vimeo, Dailymotion, serta stream MP4/HLS/MPEG-DASH.'
-              : 'Supports batch YouTube videos & playlists, Vimeo, Dailymotion, and direct MP4/HLS/MPEG-DASH links.'}
+              ? 'Mendukung banyak URL YouTube (termasuk Playlist), Vimeo, Dailymotion, Dropbox, Google Drive, Internet Archive, Twitch, Rumble, Odysee, Loom, Bilibili, halaman web HTML, serta stream MP4/HLS/MPEG-DASH.'
+              : 'Supports batch YouTube videos & playlists, Vimeo, Dailymotion, Dropbox, Google Drive, Internet Archive, Twitch, Rumble, Odysee, Loom, Bilibili, HTML web pages, and direct MP4/HLS/MPEG-DASH links.'}
           </p>
           <div className="flex items-center gap-2">
             {items.length > 0 && (
@@ -919,20 +993,38 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
                   className="w-full h-full object-contain bg-black"
                 />
               )}
-              {(activePreviewItem.inspection?.provider === 'vimeo' ||
-                activePreviewItem.inspection?.provider === 'dailymotion' ||
-                activePreviewItem.inspection?.provider === 'streamable' ||
-                activePreviewItem.inspection?.provider === 'tiktok') &&
-                activePreviewItem.inspection.embedUrl && (
-                  <iframe
-                    ref={iframeRef}
-                    src={activePreviewItem.inspection.embedUrl}
-                    title="Batch Playback Verifier"
-                    className="w-full h-full border-0"
-                    allow="autoplay; fullscreen; picture-in-picture"
-                    referrerPolicy="strict-origin-when-cross-origin"
-                  />
-                )}
+              {activePreviewItem.inspection?.provider !== 'youtube' &&
+                activePreviewItem.inspection?.provider !== 'direct_video' &&
+                activePreviewItem.inspection?.provider !== 'x' &&
+                (() => {
+                  const diag = activePreviewItem.inspection;
+                  if (!diag) return null;
+                  const batchEmbedSrc =
+                    diag.provider === 'twitch'
+                      ? buildTwitchEmbedUrl(
+                          diag.canonicalRef,
+                          typeof window !== 'undefined'
+                            ? window.location.hostname
+                            : 'localhost'
+                        )
+                      : diag.embedUrl;
+                  if (!batchEmbedSrc) return null;
+                  return (
+                    <iframe
+                      ref={iframeRef}
+                      src={batchEmbedSrc}
+                      title="Batch Playback Verifier"
+                      className="w-full h-full border-0 bg-black"
+                      allow="autoplay; fullscreen; picture-in-picture"
+                      sandbox={
+                        diag.provider === 'html_embed'
+                          ? 'allow-scripts allow-same-origin allow-presentation allow-forms'
+                          : undefined
+                      }
+                      referrerPolicy="strict-origin-when-cross-origin"
+                    />
+                  );
+                })()}
             </div>
           </div>
         </div>
