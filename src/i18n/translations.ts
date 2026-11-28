@@ -143,7 +143,7 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
       previewNote: '5-minute free preview · 30-day access upon unlock',
     },
     sections: {
-      galleryHeading: 'Curated Learning, DIY & Documentary Catalog',
+      galleryHeading: 'Video & Documentary Catalog',
       gallerySubtitle: 'Stream a 5-minute free preview on any documentary, workshop, or release.',
       allCategories: 'All',
       trendingNow: 'Trending Now',
@@ -213,7 +213,7 @@ export const TRANSLATIONS: Record<LocaleCode, Dictionary> = {
       previewNote: 'Pratinjau gratis 5 menit · Akses penuh 30 hari setelah dibuka',
     },
     sections: {
-      galleryHeading: 'Katalog Edukasi, DIY & Dokumenter',
+      galleryHeading: 'Katalog Video & Dokumenter',
       gallerySubtitle: 'Langsung tonton pratinjau gratis 5 menit untuk dokumenter, kelas, atau rilisan pilihan.',
       allCategories: 'Semua',
       trendingNow: 'Sedang Tren',

@@ -3,13 +3,10 @@ import React from 'react';
 export const ContentCardSkeleton: React.FC = () => (
   <div className="bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-pulse">
     <div className="aspect-video bg-slate-200 dark:bg-slate-800" />
-    <div className="p-2.5 sm:p-4 space-y-2 sm:space-y-3">
-      <div className="h-2.5 sm:h-3 w-20 sm:w-28 bg-slate-200 dark:bg-slate-800 rounded" />
-      <div className="h-4 sm:h-5 w-4/5 bg-slate-200 dark:bg-slate-800 rounded" />
-      <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t border-slate-100 dark:border-slate-800">
-        <div className="h-3.5 sm:h-4 w-16 sm:w-20 bg-slate-200 dark:bg-slate-800 rounded" />
-        <div className="hidden sm:block h-4 w-16 bg-slate-200 dark:bg-slate-800 rounded" />
-      </div>
+    <div className="p-2 sm:p-2.5 space-y-1.5">
+      <div className="h-3 sm:h-3.5 w-11/12 bg-slate-200 dark:bg-slate-800 rounded" />
+      <div className="h-3 sm:h-3.5 w-3/5 bg-slate-200 dark:bg-slate-800 rounded" />
+      <div className="h-2.5 sm:h-3 w-28 bg-slate-200 dark:bg-slate-800 rounded pt-0.5" />
     </div>
   </div>
 );

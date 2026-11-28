@@ -5,7 +5,6 @@ import {
   CATEGORY_LABELS_ID,
   TRANSLATIONS,
   formatDuration,
-  formatReleasePrice,
   isFreeContent,
 } from '../../i18n/translations';
 import { authorizeVideoStream } from '../../services/streamService';
@@ -24,7 +23,6 @@ interface ContentCardProps {
 export const ContentCard: React.FC<ContentCardProps> = ({
   item,
   locale,
-  currency,
   onSelectContent,
   onWatchPreview,
   onSelectCreator,
@@ -85,9 +83,14 @@ export const ContentCard: React.FC<ContentCardProps> = ({
     item.aspectRatio === '9:16' ||
     item.aspectRatio === '4:5' ||
     item.aspectRatio === '1:1';
-  const showCustomRatio = Boolean(
-    item.aspectRatio && item.aspectRatio !== 'auto' && item.aspectRatio !== '16:9'
-  );
+
+  const statusBadgeText = isFree
+    ? locale === 'id'
+      ? 'GRATIS'
+      : 'FREE'
+    : locale === 'id'
+    ? 'BERBAYAR'
+    : 'PAID';
 
   return (
     <article
@@ -139,14 +142,25 @@ export const ContentCard: React.FC<ContentCardProps> = ({
           )}
 
           <div
-            className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/15 to-transparent"
+            className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-transparent to-slate-950/30"
             aria-hidden="true"
           />
         </button>
 
-        {/* Bottom overlay row: unboxed duration + compact mobile play button */}
-        <div className="absolute inset-x-2 sm:inset-x-3 bottom-1.5 sm:bottom-2.5 flex items-center justify-between gap-1.5 sm:gap-2 pointer-events-none">
-          <span className="text-[10px] sm:text-xs font-mono tabular-nums text-white font-medium tracking-tight drop-shadow-xs">
+        {/* Top-left corner status tag (Free / Paid) */}
+        <span
+          className={`pointer-events-none select-none absolute top-1.5 left-1.5 sm:top-2 sm:left-2 px-1.5 py-0.5 rounded-[5px] text-[9px] sm:text-[10px] font-semibold tracking-wide leading-none shadow-xs ${
+            isFree
+              ? 'bg-emerald-600/95 text-white'
+              : 'bg-slate-950/80 text-white/95 border border-white/15 backdrop-blur-[2px]'
+          }`}
+        >
+          {statusBadgeText}
+        </span>
+
+        {/* Bottom overlay row: duration + compact play trigger */}
+        <div className="absolute inset-x-1.5 sm:inset-x-2.5 bottom-1.5 sm:bottom-2 flex items-center justify-between gap-1.5 sm:gap-2 pointer-events-none">
+          <span className="text-[10px] sm:text-[11px] font-mono tabular-nums text-white font-medium tracking-tight drop-shadow-xs">
             {formatDuration(item.durationMinutes, locale)}
           </span>
 
@@ -157,9 +171,9 @@ export const ContentCard: React.FC<ContentCardProps> = ({
               onWatchPreview(item);
             }}
             aria-label={`${isFree ? dict.cards.watchFree : dict.cards.watchPreview}: ${item.title}`}
-            className="pointer-events-auto inline-flex items-center justify-center gap-1.5 w-8 h-8 sm:w-auto sm:h-auto sm:min-h-[34px] sm:px-3 sm:py-1 rounded-lg bg-slate-900/85 hover:bg-emerald-600 active:bg-emerald-700 text-white text-xs font-medium border border-white/20 transition-colors duration-150 cursor-pointer whitespace-nowrap shrink-0"
+            className="pointer-events-auto inline-flex items-center justify-center gap-1 w-7 h-7 sm:w-auto sm:h-auto sm:min-h-[30px] sm:px-2.5 sm:py-1 rounded-md bg-slate-900/85 hover:bg-emerald-600 active:bg-emerald-700 text-white text-[11px] font-medium border border-white/20 transition-colors duration-150 cursor-pointer whitespace-nowrap shrink-0"
           >
-            <Play className="w-3.5 h-3.5 sm:w-3 sm:h-3 fill-current" aria-hidden="true" />
+            <Play className="w-3 h-3 fill-current" aria-hidden="true" />
             <span className="hidden sm:inline">
               {isFree ? dict.cards.watchFree : dict.cards.watchPreview}
             </span>
@@ -167,67 +181,36 @@ export const ContentCard: React.FC<ContentCardProps> = ({
         </div>
       </div>
 
-      {/* Card Body: Compact 2-col mobile & full desktop layout */}
-      <div className="flex flex-col flex-1 p-2.5 sm:p-4 min-w-0">
-        <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mb-0.5 sm:mb-1.5 truncate">
-          <span className="text-emerald-700 dark:text-emerald-400 font-semibold truncate">{categoryLabel}</span>
-          {showCustomRatio && (
-            <>
-              <span aria-hidden="true">·</span>
-              <span className="font-mono tabular-nums shrink-0">{item.aspectRatio}</span>
-            </>
-          )}
-          <span className="hidden sm:inline" aria-hidden="true">·</span>
-          <span className="hidden sm:inline tabular-nums shrink-0">{item.resolution}</span>
-        </div>
-
-        <h3 className="text-xs sm:text-base font-semibold text-slate-900 dark:text-white leading-snug mb-0.5 sm:mb-1">
+      {/* Compact Card Body: 2-line small title + single-line Category · Creator */}
+      <div className="flex flex-col flex-1 p-2 sm:p-2.5 gap-1 min-w-0">
+        <h3 className="text-[11px] sm:text-[13px] font-semibold text-slate-900 dark:text-white leading-[1.3]">
           <button
             type="button"
             onClick={() => onSelectContent(item)}
-            className="w-full text-left line-clamp-2 sm:line-clamp-1 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors cursor-pointer"
+            className="w-full text-left line-clamp-2 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors cursor-pointer"
           >
             {item.title}
           </button>
         </h3>
 
-        <div className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mb-2 sm:mb-3.5 truncate">
+        <div className="mt-auto flex items-center gap-1 text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 truncate">
+          <span className="text-emerald-700 dark:text-emerald-400 font-medium shrink-0">
+            {categoryLabel}
+          </span>
+          <span aria-hidden="true" className="shrink-0">
+            ·
+          </span>
           {onSelectCreator ? (
             <button
               type="button"
               onClick={() => onSelectCreator(item.creatorId)}
-              className="hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer truncate max-w-full"
+              className="hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer truncate min-w-0"
             >
               {item.creatorName}
             </button>
           ) : (
-            <span className="truncate block">{item.creatorName}</span>
+            <span className="truncate min-w-0">{item.creatorName}</span>
           )}
-        </div>
-
-        <div className="mt-auto pt-1.5 sm:pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-          <div className="flex flex-col min-w-0">
-            <span
-              className={`text-xs sm:text-sm font-semibold font-mono tabular-nums truncate ${
-                isFree
-                  ? 'text-emerald-700 dark:text-emerald-400'
-                  : 'text-slate-900 dark:text-white'
-              }`}
-            >
-              {formatReleasePrice(item, locale, currency)}
-            </span>
-            <span className="hidden sm:block text-[11px] text-slate-500 dark:text-slate-400 truncate">
-              {isFree ? dict.cards.freeAccess : dict.cards.access30Days}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => onSelectContent(item)}
-            className="hidden sm:inline-flex items-center justify-center min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-800 dark:text-slate-100 bg-slate-50 dark:bg-slate-800 hover:bg-emerald-600 dark:hover:bg-emerald-600 hover:text-white border border-slate-200 dark:border-slate-700 hover:border-transparent transition-colors duration-150 cursor-pointer whitespace-nowrap shrink-0"
-          >
-            {dict.cards.viewDetails}
-          </button>
         </div>
       </div>
     </article>

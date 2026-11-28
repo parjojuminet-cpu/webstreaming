@@ -29,6 +29,24 @@ interface HomePageProps {
   onNavigate: (route: ViewRoute) => void;
 }
 
+// Fresh random seed per browser open/reload so home catalog order always randomizes on arrival
+const SESSION_SHUFFLE_SEED = `${Math.floor(Math.random() * 1_000_000_000).toString(36)}-${Date.now().toString(36)}`;
+
+function computeRandomRank(seed: string, itemId: string): number {
+  const input = `${seed}:${itemId}`;
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
 export const HomePage: React.FC<HomePageProps> = ({
   catalog,
   creators,
@@ -43,38 +61,35 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<ContentCategory | 'All'>('All');
 
   const galleryItems = useMemo(() => {
-    const sorted = [...catalog].sort((a, b) => {
-      if (Boolean(b.featuredHero) !== Boolean(a.featuredHero)) {
-        return b.featuredHero ? 1 : -1;
-      }
-      if (Boolean(b.trending) !== Boolean(a.trending)) {
-        return b.trending ? 1 : -1;
-      }
-      return (Date.parse(b.publishedAt || '') || 0) - (Date.parse(a.publishedAt || '') || 0);
+    const randomized = [...catalog].sort((a, b) => {
+      const rankA = computeRandomRank(SESSION_SHUFFLE_SEED, a.id);
+      const rankB = computeRandomRank(SESSION_SHUFFLE_SEED, b.id);
+      if (rankA !== rankB) return rankA - rankB;
+      return a.id.localeCompare(b.id);
     });
 
     if (selectedCategory === 'All') {
-      return sorted;
+      return randomized;
     }
-    return sorted.filter((item) => item.category === selectedCategory);
+    return randomized.filter((item) => item.category === selectedCategory);
   }, [catalog, selectedCategory]);
 
   return (
-    <div className="space-y-7 sm:space-y-12 lg:space-y-14 pb-4 sm:pb-8">
+    <div className="space-y-6 sm:space-y-10 lg:space-y-12 pb-4 sm:pb-8">
       {/* 1. INITIAL MOVIE & STREAMING GALLERY (Above the fold on open) */}
       <section
         aria-labelledby="movie-gallery-heading"
-        className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-3 sm:pt-7 space-y-3 sm:space-y-5"
+        className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-2 sm:pt-5 space-y-2.5 sm:space-y-4"
       >
-        <div className="flex items-start sm:items-end justify-between gap-2.5 pb-2.5 sm:pb-4 border-b border-slate-200 dark:border-slate-800">
-          <div className="space-y-0.5 sm:space-y-1 min-w-0">
+        <div className="flex items-center justify-between gap-2.5 pb-2 sm:pb-3 border-b border-slate-200 dark:border-slate-800">
+          <div className="space-y-0.5 min-w-0">
             <h1
               id="movie-gallery-heading"
-              className="font-display text-base sm:text-2xl lg:text-3xl font-bold tracking-tight text-slate-900 dark:text-white leading-snug"
+              className="font-display text-sm sm:text-xl lg:text-2xl font-bold tracking-tight text-slate-900 dark:text-white leading-tight truncate"
             >
               {dict.sections.galleryHeading}
             </h1>
-            <p className="text-[11px] sm:text-sm text-slate-600 dark:text-slate-400 leading-snug line-clamp-2 sm:line-clamp-none max-w-2xl">
+            <p className="hidden sm:block text-xs text-slate-500 dark:text-slate-400 leading-snug truncate max-w-2xl">
               {dict.sections.gallerySubtitle}
             </p>
           </div>
@@ -82,7 +97,7 @@ export const HomePage: React.FC<HomePageProps> = ({
           <button
             type="button"
             onClick={() => onNavigate('explore')}
-            className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[40px] -mt-1 sm:mt-0 text-xs sm:text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1 min-h-[32px] sm:min-h-[36px] text-xs sm:text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
             <span>{dict.sections.viewAll}</span>
             <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" aria-hidden="true" />
@@ -100,7 +115,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             role="tab"
             aria-selected={selectedCategory === 'All'}
             onClick={() => setSelectedCategory('All')}
-            className={`min-h-[34px] sm:min-h-[38px] px-3 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            className={`min-h-[32px] sm:min-h-[36px] px-2.5 sm:px-3.5 py-1 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
               selectedCategory === 'All'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
@@ -121,7 +136,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 role="tab"
                 aria-selected={active}
                 onClick={() => setSelectedCategory(category)}
-                className={`min-h-[34px] sm:min-h-[38px] px-3 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                className={`min-h-[32px] sm:min-h-[36px] px-2.5 sm:px-3.5 py-1 rounded-lg text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                   active
                     ? 'bg-emerald-600 text-white shadow-xs'
                     : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
@@ -172,7 +187,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             }}
           />
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
             {galleryItems.map((item) => (
               <ContentCard
                 key={item.id}
