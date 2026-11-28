@@ -620,6 +620,93 @@ var videoDeletionJobs = pgTable("video_deletion_jobs", {
 });
 
 // src/db/index.ts
+var TRANSIENT_SQL_CODES = /* @__PURE__ */ new Set([
+  "57P01",
+  // admin_shutdown
+  "57P02",
+  // crash_shutdown
+  "57P03",
+  // cannot_connect_now (Cloud SQL waking up from scale-to-zero)
+  "08000",
+  // connection_exception
+  "08001",
+  // sqlclient_unable_to_establish_sqlconnection
+  "08003",
+  // connection_does_not_exist
+  "08006",
+  // connection_failure
+  "ECONNRESET",
+  "EPIPE",
+  "ETIMEDOUT",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN"
+]);
+var NON_RETRYABLE_SQL_CODES = /* @__PURE__ */ new Set([
+  "28P01",
+  // invalid_password
+  "28000",
+  // invalid_authorization_specification
+  "42P01",
+  // undefined_table
+  "42703",
+  // undefined_column
+  "42601",
+  // syntax_error
+  "42501",
+  // insufficient_privilege
+  "23505",
+  // unique_violation
+  "23503",
+  // foreign_key_violation
+  "23502",
+  // not_null_violation
+  "22P02"
+  // invalid_text_representation
+]);
+function isTransientSqlConnectionError(err) {
+  let cursor = err;
+  for (let depth = 0; depth < 5 && cursor; depth += 1) {
+    if (typeof cursor === "object" && cursor !== null) {
+      const rec = cursor;
+      const code = typeof rec.code === "string" ? rec.code : "";
+      if (NON_RETRYABLE_SQL_CODES.has(code)) {
+        return false;
+      }
+      if (TRANSIENT_SQL_CODES.has(code)) {
+        return true;
+      }
+      const msg = typeof rec.message === "string" ? rec.message.toLowerCase() : "";
+      if (msg.includes("connection terminated unexpectedly") || msg.includes("connection terminated") || msg.includes("client has encountered a connection error") || msg.includes("timeout exceeded when trying to connect") || msg.includes("terminating connection due to administrator command") || msg.includes("the database system is starting up") || msg.includes("socket hang up") || msg.includes("econnreset")) {
+        return true;
+      }
+      cursor = rec.cause;
+    } else {
+      break;
+    }
+  }
+  return false;
+}
+async function withSqlRetry(operationName, fn, maxAttempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts || !isTransientSqlConnectionError(error)) {
+        throw error;
+      }
+      const jitterMs = Math.floor(Math.random() * 250);
+      const delayMs = 500 * Math.pow(2, attempt - 1) + jitterMs;
+      console.warn(
+        `[SQL retry ${attempt}/${maxAttempts - 1}] ${operationName} hit transient connection drop; retrying in ${delayMs}ms`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
 function isSqlConfigured() {
   return Boolean(
     process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim() || process.env.SQL_HOST?.trim()
@@ -628,13 +715,20 @@ function isSqlConfigured() {
 var createPool = () => {
   if (!global._postgresPool) {
     const connectionString = process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim();
+    const sharedPoolOptions = {
+      max: 5,
+      idleTimeoutMillis: 5e3,
+      connectionTimeoutMillis: 3e4,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 5e3,
+      allowExitOnIdle: false
+    };
     if (connectionString) {
       const isLocal = connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
       global._postgresPool = new Pool({
         connectionString,
         ssl: isLocal ? void 0 : { rejectUnauthorized: false },
-        max: 10,
-        connectionTimeoutMillis: 15e3
+        ...sharedPoolOptions
       });
     } else {
       global._postgresPool = new Pool({
@@ -642,11 +736,14 @@ var createPool = () => {
         user: process.env.SQL_USER,
         password: process.env.SQL_PASSWORD,
         database: process.env.SQL_DB_NAME,
-        max: 10,
-        connectionTimeoutMillis: 15e3
+        ...sharedPoolOptions
       });
     }
     global._postgresPool.on("error", (err) => {
+      if (isTransientSqlConnectionError(err)) {
+        console.warn("SQL pool idle client closed after disconnect:", err.message);
+        return;
+      }
       console.error("Unexpected error on idle SQL pool client:", err);
     });
   }
@@ -903,13 +1000,15 @@ async function ensureLegacyLedgerMigrated() {
   if (!migrationPromise) {
     migrationPromise = (async () => {
       try {
-        await ensureSqlTablesExist();
-        await db.insert(platformSettings).values({
-          id: "global",
-          commissionPercent: 20,
-          minPriceUsd: 1.99,
-          minPriceIdr: 29e3
-        }).onConflictDoNothing();
+        await withSqlRetry("ensureLegacyLedgerMigrated", async () => {
+          await ensureSqlTablesExist();
+          await db.insert(platformSettings).values({
+            id: "global",
+            commissionPercent: 20,
+            minPriceUsd: 1.99,
+            minPriceIdr: 29e3
+          }).onConflictDoNothing();
+        });
         if (!fs2.existsSync(LEGACY_LEDGER_FILE)) return;
         const raw = fs2.readFileSync(LEGACY_LEDGER_FILE, "utf-8");
         const parsed = JSON.parse(raw);
@@ -1140,23 +1239,26 @@ function makeIdemKey(scope, userId, key) {
 async function upsertCreatorMediaSql(binding) {
   try {
     await ensureLegacyLedgerMigrated();
-    await db.insert(creatorMedia).values({
-      videoId: binding.videoId,
-      creatorId: binding.creatorId,
-      provider: binding.provider,
-      assetRef: binding.assetRef,
-      mimeType: binding.mimeType ?? null,
-      updatedAtIso: binding.updatedAtIso
-    }).onConflictDoUpdate({
-      target: creatorMedia.videoId,
-      set: {
+    await withSqlRetry(
+      "upsertCreatorMediaSql",
+      () => db.insert(creatorMedia).values({
+        videoId: binding.videoId,
         creatorId: binding.creatorId,
         provider: binding.provider,
         assetRef: binding.assetRef,
         mimeType: binding.mimeType ?? null,
         updatedAtIso: binding.updatedAtIso
-      }
-    });
+      }).onConflictDoUpdate({
+        target: creatorMedia.videoId,
+        set: {
+          creatorId: binding.creatorId,
+          provider: binding.provider,
+          assetRef: binding.assetRef,
+          mimeType: binding.mimeType ?? null,
+          updatedAtIso: binding.updatedAtIso
+        }
+      })
+    );
   } catch (error) {
     console.error("upsertCreatorMediaSql failed:", error);
     throw new Error("Failed to persist creator media reference.", { cause: error });
@@ -1165,23 +1267,26 @@ async function upsertCreatorMediaSql(binding) {
 async function saveThumbnailAssetSql(input) {
   try {
     await ensureLegacyLedgerMigrated();
-    await db.insert(creatorMedia).values({
-      videoId: input.key,
-      creatorId: input.creatorId,
-      provider: "thumbnail",
-      assetRef: input.base64Data,
-      mimeType: input.mimeType,
-      updatedAtIso: input.updatedAtIso
-    }).onConflictDoUpdate({
-      target: creatorMedia.videoId,
-      set: {
+    await withSqlRetry(
+      "saveThumbnailAssetSql",
+      () => db.insert(creatorMedia).values({
+        videoId: input.key,
         creatorId: input.creatorId,
         provider: "thumbnail",
         assetRef: input.base64Data,
         mimeType: input.mimeType,
         updatedAtIso: input.updatedAtIso
-      }
-    });
+      }).onConflictDoUpdate({
+        target: creatorMedia.videoId,
+        set: {
+          creatorId: input.creatorId,
+          provider: "thumbnail",
+          assetRef: input.base64Data,
+          mimeType: input.mimeType,
+          updatedAtIso: input.updatedAtIso
+        }
+      })
+    );
   } catch (error) {
     console.error("saveThumbnailAssetSql failed:", error);
   }
@@ -1189,7 +1294,10 @@ async function saveThumbnailAssetSql(input) {
 async function getThumbnailAssetSql(key) {
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db.select().from(creatorMedia).where(and(eq(creatorMedia.videoId, key), eq(creatorMedia.provider, "thumbnail")));
+    const rows = await withSqlRetry(
+      "getThumbnailAssetSql",
+      () => db.select().from(creatorMedia).where(and(eq(creatorMedia.videoId, key), eq(creatorMedia.provider, "thumbnail")))
+    );
     const row = rows[0];
     if (!row || !row.assetRef) return null;
     return {
@@ -1204,10 +1312,13 @@ async function getThumbnailAssetSql(key) {
 async function getStreamAuthContextSql(uid, videoId) {
   try {
     await ensureLegacyLedgerMigrated();
-    const [mediaRows, entRows] = await Promise.all([
-      db.select().from(creatorMedia).where(eq(creatorMedia.videoId, videoId)),
-      uid ? db.select().from(entitlements).where(eq(entitlements.compositeKey, entitlementKey(uid, videoId))) : Promise.resolve([])
-    ]);
+    const [mediaRows, entRows] = await withSqlRetry(
+      "getStreamAuthContextSql",
+      () => Promise.all([
+        db.select().from(creatorMedia).where(eq(creatorMedia.videoId, videoId)),
+        uid ? db.select().from(entitlements).where(eq(entitlements.compositeKey, entitlementKey(uid, videoId))) : Promise.resolve([])
+      ])
+    );
     const m = mediaRows[0];
     const e = entRows[0];
     return {
@@ -1229,7 +1340,10 @@ async function getStreamAuthContextSql(uid, videoId) {
 async function getUserEntitlementsSql(uid) {
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db.select().from(entitlements).where(eq(entitlements.userId, uid));
+    const rows = await withSqlRetry(
+      "getUserEntitlementsSql",
+      () => db.select().from(entitlements).where(eq(entitlements.userId, uid))
+    );
     return rows.map(mapEntitlementRow);
   } catch (error) {
     console.error("getUserEntitlementsSql failed:", error);
@@ -1293,18 +1407,23 @@ async function upsertTrialEntitlementSql(record) {
 async function getWalletSnapshotSql(uid) {
   try {
     await ensureLegacyLedgerMigrated();
-    await db.insert(wallets).values({
-      userId: uid,
-      balanceCredits: 0,
-      totalSpentCredits: 0,
-      updatedAtMs: Date.now()
-    }).onConflictDoNothing();
-    const [walletRows, txRows, purchaseRows, paymentRows] = await Promise.all([
-      db.select().from(wallets).where(eq(wallets.userId, uid)),
-      db.select().from(walletTransactions).where(eq(walletTransactions.userId, uid)).orderBy(desc(walletTransactions.createdAt)),
-      db.select().from(purchases).where(eq(purchases.userId, uid)).orderBy(desc(purchases.createdAt)),
-      db.select().from(payments).where(eq(payments.userId, uid)).orderBy(desc(payments.createdAt))
-    ]);
+    const [walletRows, txRows, purchaseRows, paymentRows] = await withSqlRetry(
+      "getWalletSnapshotSql",
+      async () => {
+        await db.insert(wallets).values({
+          userId: uid,
+          balanceCredits: 0,
+          totalSpentCredits: 0,
+          updatedAtMs: Date.now()
+        }).onConflictDoNothing();
+        return Promise.all([
+          db.select().from(wallets).where(eq(wallets.userId, uid)),
+          db.select().from(walletTransactions).where(eq(walletTransactions.userId, uid)).orderBy(desc(walletTransactions.createdAt)),
+          db.select().from(purchases).where(eq(purchases.userId, uid)).orderBy(desc(purchases.createdAt)),
+          db.select().from(payments).where(eq(payments.userId, uid)).orderBy(desc(payments.createdAt))
+        ]);
+      }
+    );
     const w = walletRows[0] ?? {
       userId: uid,
       balanceCredits: 0,
@@ -1614,7 +1733,10 @@ async function checkIdempotencySql(scope, uid, idemKey) {
   if (!idemKey) return null;
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db.select().from(idempotencyRecords).where(eq(idempotencyRecords.fullKey, makeIdemKey(scope, uid, idemKey)));
+    const rows = await withSqlRetry(
+      "checkIdempotencySql",
+      () => db.select().from(idempotencyRecords).where(eq(idempotencyRecords.fullKey, makeIdemKey(scope, uid, idemKey)))
+    );
     return rows[0] ? { status: rows[0].status, body: rows[0].bodyJson } : null;
   } catch (error) {
     console.error("checkIdempotencySql failed:", error);
@@ -1624,7 +1746,10 @@ async function checkIdempotencySql(scope, uid, idemKey) {
 async function getPaymentByIdSql(paymentId) {
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db.select().from(payments).where(eq(payments.id, paymentId));
+    const rows = await withSqlRetry(
+      "getPaymentByIdSql",
+      () => db.select().from(payments).where(eq(payments.id, paymentId))
+    );
     return rows[0] ? mapPaymentRow(rows[0]) : null;
   } catch (error) {
     console.error("getPaymentByIdSql failed:", error);
@@ -1634,41 +1759,43 @@ async function getPaymentByIdSql(paymentId) {
 async function getPaymentStatusSnapshotSql(paymentId, uid) {
   try {
     await ensureLegacyLedgerMigrated();
-    const payRows = await db.select().from(payments).where(eq(payments.id, paymentId));
-    const payRow = payRows[0];
-    if (!payRow || payRow.userId !== uid) return null;
-    await db.insert(wallets).values({
-      userId: uid,
-      balanceCredits: 0,
-      totalSpentCredits: 0,
-      updatedAtMs: Date.now()
-    }).onConflictDoNothing();
-    const [walletRows, entRows] = await Promise.all([
-      db.select().from(wallets).where(eq(wallets.userId, uid)),
-      payRow.purpose === "video_unlock" ? db.select().from(entitlements).where(eq(entitlements.compositeKey, entitlementKey(uid, payRow.targetId))) : Promise.resolve([])
-    ]);
-    const w = walletRows[0] ?? {
-      userId: uid,
-      balanceCredits: 0,
-      totalSpentCredits: 0
-    };
-    const ent = entRows[0] ? mapEntitlementRow(entRows[0]) : null;
-    return {
-      payment: mapPaymentRow(payRow),
-      wallet: {
-        userId: w.userId,
-        balanceCredits: w.balanceCredits,
-        totalSpentCredits: w.totalSpentCredits
-      },
-      entitlement: ent ? {
-        ...ent,
-        expiresAt: new Date(ent.expiresAtMs).toISOString(),
-        remainingDays: Math.max(
-          0,
-          Math.ceil((ent.expiresAtMs - Date.now()) / (24 * 60 * 60 * 1e3))
-        )
-      } : null
-    };
+    return await withSqlRetry("getPaymentStatusSnapshotSql", async () => {
+      const payRows = await db.select().from(payments).where(eq(payments.id, paymentId));
+      const payRow = payRows[0];
+      if (!payRow || payRow.userId !== uid) return null;
+      await db.insert(wallets).values({
+        userId: uid,
+        balanceCredits: 0,
+        totalSpentCredits: 0,
+        updatedAtMs: Date.now()
+      }).onConflictDoNothing();
+      const [walletRows, entRows] = await Promise.all([
+        db.select().from(wallets).where(eq(wallets.userId, uid)),
+        payRow.purpose === "video_unlock" ? db.select().from(entitlements).where(eq(entitlements.compositeKey, entitlementKey(uid, payRow.targetId))) : Promise.resolve([])
+      ]);
+      const w = walletRows[0] ?? {
+        userId: uid,
+        balanceCredits: 0,
+        totalSpentCredits: 0
+      };
+      const ent = entRows[0] ? mapEntitlementRow(entRows[0]) : null;
+      return {
+        payment: mapPaymentRow(payRow),
+        wallet: {
+          userId: w.userId,
+          balanceCredits: w.balanceCredits,
+          totalSpentCredits: w.totalSpentCredits
+        },
+        entitlement: ent ? {
+          ...ent,
+          expiresAt: new Date(ent.expiresAtMs).toISOString(),
+          remainingDays: Math.max(
+            0,
+            Math.ceil((ent.expiresAtMs - Date.now()) / (24 * 60 * 60 * 1e3))
+          )
+        } : null
+      };
+    });
   } catch (error) {
     console.error("getPaymentStatusSnapshotSql failed:", error);
     throw new Error("Failed to load payment status.", { cause: error });
@@ -1677,15 +1804,17 @@ async function getPaymentStatusSnapshotSql(paymentId, uid) {
 async function findPaymentForWebhookSql(targetPaymentId, gatewayOrderId) {
   try {
     await ensureLegacyLedgerMigrated();
-    if (targetPaymentId) {
-      const byId = await db.select().from(payments).where(eq(payments.id, targetPaymentId));
-      if (byId[0]) return mapPaymentRow(byId[0]);
-    }
-    if (gatewayOrderId) {
-      const byGw = await db.select().from(payments).where(eq(payments.gatewayOrderId, gatewayOrderId));
-      if (byGw[0]) return mapPaymentRow(byGw[0]);
-    }
-    return null;
+    return await withSqlRetry("findPaymentForWebhookSql", async () => {
+      if (targetPaymentId) {
+        const byId = await db.select().from(payments).where(eq(payments.id, targetPaymentId));
+        if (byId[0]) return mapPaymentRow(byId[0]);
+      }
+      if (gatewayOrderId) {
+        const byGw = await db.select().from(payments).where(eq(payments.gatewayOrderId, gatewayOrderId));
+        if (byGw[0]) return mapPaymentRow(byGw[0]);
+      }
+      return null;
+    });
   } catch (error) {
     console.error("findPaymentForWebhookSql failed:", error);
     throw new Error("Failed to query payment for webhook.", { cause: error });
@@ -1694,7 +1823,10 @@ async function findPaymentForWebhookSql(targetPaymentId, gatewayOrderId) {
 async function isWebhookProcessedSql(eventKey) {
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db.select().from(processedWebhooks).where(eq(processedWebhooks.eventKey, eventKey));
+    const rows = await withSqlRetry(
+      "isWebhookProcessedSql",
+      () => db.select().from(processedWebhooks).where(eq(processedWebhooks.eventKey, eventKey))
+    );
     return Boolean(rows[0]);
   } catch (error) {
     console.error("isWebhookProcessedSql failed:", error);
@@ -1982,11 +2114,14 @@ function computeCreatorEarningsSummaryFromRows(commissionPercent, earningRows, p
 async function getCreatorEarningsSummarySql(creatorId) {
   try {
     await ensureLegacyLedgerMigrated();
-    const [settingsRows, earnRows, payoutRows] = await Promise.all([
-      db.select().from(platformSettings).where(eq(platformSettings.id, "global")),
-      db.select().from(creatorEarnings).where(eq(creatorEarnings.creatorId, creatorId)).orderBy(desc(creatorEarnings.createdAt)),
-      db.select().from(payouts).where(eq(payouts.creatorId, creatorId)).orderBy(desc(payouts.createdAt))
-    ]);
+    const [settingsRows, earnRows, payoutRows] = await withSqlRetry(
+      "getCreatorEarningsSummarySql",
+      () => Promise.all([
+        db.select().from(platformSettings).where(eq(platformSettings.id, "global")),
+        db.select().from(creatorEarnings).where(eq(creatorEarnings.creatorId, creatorId)).orderBy(desc(creatorEarnings.createdAt)),
+        db.select().from(payouts).where(eq(payouts.creatorId, creatorId)).orderBy(desc(payouts.createdAt))
+      ])
+    );
     const commissionPercent = settingsRows[0]?.commissionPercent ?? 20;
     return computeCreatorEarningsSummaryFromRows(
       commissionPercent,
@@ -2121,7 +2256,10 @@ async function computeAdminOverviewFromDb(executor) {
 async function getAdminFinanceOverviewSql() {
   try {
     await ensureLegacyLedgerMigrated();
-    return await computeAdminOverviewFromDb(db);
+    return await withSqlRetry(
+      "getAdminFinanceOverviewSql",
+      () => computeAdminOverviewFromDb(db)
+    );
   } catch (error) {
     console.error("getAdminFinanceOverviewSql failed:", error);
     throw new Error("Failed to load admin finance overview.", { cause: error });
@@ -2345,17 +2483,26 @@ async function updateVideoDeletionJobSql(operationId, patch) {
 }
 async function getLatestVideoDeletionJobSql(videoId) {
   await ensureLegacyLedgerMigrated();
-  const rows = await db.select().from(videoDeletionJobs).where(eq(videoDeletionJobs.videoId, videoId)).orderBy(desc(videoDeletionJobs.requestedAt));
+  const rows = await withSqlRetry(
+    "getLatestVideoDeletionJobSql",
+    () => db.select().from(videoDeletionJobs).where(eq(videoDeletionJobs.videoId, videoId)).orderBy(desc(videoDeletionJobs.requestedAt))
+  );
   return rows[0] ? mapDeletionJobRow(rows[0]) : null;
 }
 async function listVideoDeletionJobsSql(limitCount = 40) {
   await ensureLegacyLedgerMigrated();
-  const rows = await db.select().from(videoDeletionJobs).orderBy(desc(videoDeletionJobs.requestedAt)).limit(Math.max(1, Math.min(100, limitCount)));
+  const rows = await withSqlRetry(
+    "listVideoDeletionJobsSql",
+    () => db.select().from(videoDeletionJobs).orderBy(desc(videoDeletionJobs.requestedAt)).limit(Math.max(1, Math.min(100, limitCount)))
+  );
   return rows.map(mapDeletionJobRow);
 }
 async function getCreatorMediaByVideoIdSql(videoId) {
   await ensureLegacyLedgerMigrated();
-  const rows = await db.select().from(creatorMedia).where(eq(creatorMedia.videoId, videoId));
+  const rows = await withSqlRetry(
+    "getCreatorMediaByVideoIdSql",
+    () => db.select().from(creatorMedia).where(eq(creatorMedia.videoId, videoId))
+  );
   const m = rows[0];
   if (!m || m.provider === "thumbnail") return null;
   return {
@@ -2382,16 +2529,18 @@ async function deleteThumbnailAssetSql(key) {
 async function getOrCreateSqlUser(uid, email) {
   try {
     const safeEmail = (email || "").slice(0, 160);
-    const result = await db.insert(users).values({
-      uid,
-      email: safeEmail
-    }).onConflictDoUpdate({
-      target: users.uid,
-      set: {
+    return await withSqlRetry("getOrCreateSqlUser", async () => {
+      const result = await db.insert(users).values({
+        uid,
         email: safeEmail
-      }
-    }).returning();
-    return result[0];
+      }).onConflictDoUpdate({
+        target: users.uid,
+        set: {
+          email: safeEmail
+        }
+      }).returning();
+      return result[0];
+    });
   } catch (error) {
     console.error("Failed to upsert SQL user:", error);
     throw new Error("Failed to synchronize user account.", { cause: error });

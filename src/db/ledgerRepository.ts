@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
-import { db, isSqlConfigured } from './index.ts';
+import { db, isSqlConfigured, withSqlRetry } from './index.ts';
 import {
   creatorEarnings,
   creatorMedia,
@@ -311,17 +311,19 @@ async function ensureLegacyLedgerMigrated(): Promise<void> {
   if (!migrationPromise) {
     migrationPromise = (async () => {
       try {
-        await ensureSqlTablesExist();
-        // Ensure default global platform_settings row always exists
-        await db
-          .insert(platformSettings)
-          .values({
-            id: 'global',
-            commissionPercent: 20,
-            minPriceUsd: 1.99,
-            minPriceIdr: 29000,
-          })
-          .onConflictDoNothing();
+        await withSqlRetry('ensureLegacyLedgerMigrated', async () => {
+          await ensureSqlTablesExist();
+          // Ensure default global platform_settings row always exists
+          await db
+            .insert(platformSettings)
+            .values({
+              id: 'global',
+              commissionPercent: 20,
+              minPriceUsd: 1.99,
+              minPriceIdr: 29000,
+            })
+            .onConflictDoNothing();
+        });
 
         if (!fs.existsSync(LEGACY_LEDGER_FILE)) return;
 
@@ -601,26 +603,28 @@ function makeIdemKey(scope: string, userId: string, key: string): string {
 export async function upsertCreatorMediaSql(binding: CreatorMediaBinding): Promise<void> {
   try {
     await ensureLegacyLedgerMigrated();
-    await db
-      .insert(creatorMedia)
-      .values({
-        videoId: binding.videoId,
-        creatorId: binding.creatorId,
-        provider: binding.provider,
-        assetRef: binding.assetRef,
-        mimeType: binding.mimeType ?? null,
-        updatedAtIso: binding.updatedAtIso,
-      })
-      .onConflictDoUpdate({
-        target: creatorMedia.videoId,
-        set: {
+    await withSqlRetry('upsertCreatorMediaSql', () =>
+      db
+        .insert(creatorMedia)
+        .values({
+          videoId: binding.videoId,
           creatorId: binding.creatorId,
           provider: binding.provider,
           assetRef: binding.assetRef,
           mimeType: binding.mimeType ?? null,
           updatedAtIso: binding.updatedAtIso,
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: creatorMedia.videoId,
+          set: {
+            creatorId: binding.creatorId,
+            provider: binding.provider,
+            assetRef: binding.assetRef,
+            mimeType: binding.mimeType ?? null,
+            updatedAtIso: binding.updatedAtIso,
+          },
+        })
+    );
   } catch (error) {
     console.error('upsertCreatorMediaSql failed:', error);
     throw new Error('Failed to persist creator media reference.', { cause: error });
@@ -636,26 +640,28 @@ export async function saveThumbnailAssetSql(input: {
 }): Promise<void> {
   try {
     await ensureLegacyLedgerMigrated();
-    await db
-      .insert(creatorMedia)
-      .values({
-        videoId: input.key,
-        creatorId: input.creatorId,
-        provider: 'thumbnail',
-        assetRef: input.base64Data,
-        mimeType: input.mimeType,
-        updatedAtIso: input.updatedAtIso,
-      })
-      .onConflictDoUpdate({
-        target: creatorMedia.videoId,
-        set: {
+    await withSqlRetry('saveThumbnailAssetSql', () =>
+      db
+        .insert(creatorMedia)
+        .values({
+          videoId: input.key,
           creatorId: input.creatorId,
           provider: 'thumbnail',
           assetRef: input.base64Data,
           mimeType: input.mimeType,
           updatedAtIso: input.updatedAtIso,
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: creatorMedia.videoId,
+          set: {
+            creatorId: input.creatorId,
+            provider: 'thumbnail',
+            assetRef: input.base64Data,
+            mimeType: input.mimeType,
+            updatedAtIso: input.updatedAtIso,
+          },
+        })
+    );
   } catch (error) {
     console.error('saveThumbnailAssetSql failed:', error);
   }
@@ -666,10 +672,12 @@ export async function getThumbnailAssetSql(
 ): Promise<{ mimeType: string; base64Data: string } | null> {
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db
-      .select()
-      .from(creatorMedia)
-      .where(and(eq(creatorMedia.videoId, key), eq(creatorMedia.provider, 'thumbnail')));
+    const rows = await withSqlRetry('getThumbnailAssetSql', () =>
+      db
+        .select()
+        .from(creatorMedia)
+        .where(and(eq(creatorMedia.videoId, key), eq(creatorMedia.provider, 'thumbnail')))
+    );
     const row = rows[0];
     if (!row || !row.assetRef) return null;
     return {
@@ -691,15 +699,17 @@ export async function getStreamAuthContextSql(
 }> {
   try {
     await ensureLegacyLedgerMigrated();
-    const [mediaRows, entRows] = await Promise.all([
-      db.select().from(creatorMedia).where(eq(creatorMedia.videoId, videoId)),
-      uid
-        ? db
-            .select()
-            .from(entitlements)
-            .where(eq(entitlements.compositeKey, entitlementKey(uid, videoId)))
-        : Promise.resolve([]),
-    ]);
+    const [mediaRows, entRows] = await withSqlRetry('getStreamAuthContextSql', () =>
+      Promise.all([
+        db.select().from(creatorMedia).where(eq(creatorMedia.videoId, videoId)),
+        uid
+          ? db
+              .select()
+              .from(entitlements)
+              .where(eq(entitlements.compositeKey, entitlementKey(uid, videoId)))
+          : Promise.resolve([]),
+      ])
+    );
 
     const m = mediaRows[0];
     const e = entRows[0];
@@ -729,10 +739,9 @@ export async function getStreamAuthContextSql(
 export async function getUserEntitlementsSql(uid: string): Promise<ServerEntitlement[]> {
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db
-      .select()
-      .from(entitlements)
-      .where(eq(entitlements.userId, uid));
+    const rows = await withSqlRetry('getUserEntitlementsSql', () =>
+      db.select().from(entitlements).where(eq(entitlements.userId, uid))
+    );
     return rows.map(mapEntitlementRow);
   } catch (error) {
     console.error('getUserEntitlementsSql failed:', error);
@@ -820,34 +829,39 @@ export async function getWalletSnapshotSql(uid: string): Promise<{
 }> {
   try {
     await ensureLegacyLedgerMigrated();
-    await db
-      .insert(wallets)
-      .values({
-        userId: uid,
-        balanceCredits: 0,
-        totalSpentCredits: 0,
-        updatedAtMs: Date.now(),
-      })
-      .onConflictDoNothing();
+    const [walletRows, txRows, purchaseRows, paymentRows] = await withSqlRetry(
+      'getWalletSnapshotSql',
+      async () => {
+        await db
+          .insert(wallets)
+          .values({
+            userId: uid,
+            balanceCredits: 0,
+            totalSpentCredits: 0,
+            updatedAtMs: Date.now(),
+          })
+          .onConflictDoNothing();
 
-    const [walletRows, txRows, purchaseRows, paymentRows] = await Promise.all([
-      db.select().from(wallets).where(eq(wallets.userId, uid)),
-      db
-        .select()
-        .from(walletTransactions)
-        .where(eq(walletTransactions.userId, uid))
-        .orderBy(desc(walletTransactions.createdAt)),
-      db
-        .select()
-        .from(purchases)
-        .where(eq(purchases.userId, uid))
-        .orderBy(desc(purchases.createdAt)),
-      db
-        .select()
-        .from(payments)
-        .where(eq(payments.userId, uid))
-        .orderBy(desc(payments.createdAt)),
-    ]);
+        return Promise.all([
+          db.select().from(wallets).where(eq(wallets.userId, uid)),
+          db
+            .select()
+            .from(walletTransactions)
+            .where(eq(walletTransactions.userId, uid))
+            .orderBy(desc(walletTransactions.createdAt)),
+          db
+            .select()
+            .from(purchases)
+            .where(eq(purchases.userId, uid))
+            .orderBy(desc(purchases.createdAt)),
+          db
+            .select()
+            .from(payments)
+            .where(eq(payments.userId, uid))
+            .orderBy(desc(payments.createdAt)),
+        ]);
+      }
+    );
 
     const w = walletRows[0] ?? {
       userId: uid,
@@ -1257,10 +1271,12 @@ export async function checkIdempotencySql(
   if (!idemKey) return null;
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db
-      .select()
-      .from(idempotencyRecords)
-      .where(eq(idempotencyRecords.fullKey, makeIdemKey(scope, uid, idemKey)));
+    const rows = await withSqlRetry('checkIdempotencySql', () =>
+      db
+        .select()
+        .from(idempotencyRecords)
+        .where(eq(idempotencyRecords.fullKey, makeIdemKey(scope, uid, idemKey)))
+    );
     return rows[0] ? { status: rows[0].status, body: rows[0].bodyJson } : null;
   } catch (error) {
     console.error('checkIdempotencySql failed:', error);
@@ -1273,10 +1289,9 @@ export async function getPaymentByIdSql(
 ): Promise<PaymentOrderRecord | null> {
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db
-      .select()
-      .from(payments)
-      .where(eq(payments.id, paymentId));
+    const rows = await withSqlRetry('getPaymentByIdSql', () =>
+      db.select().from(payments).where(eq(payments.id, paymentId))
+    );
     return rows[0] ? mapPaymentRow(rows[0]) : null;
   } catch (error) {
     console.error('getPaymentByIdSql failed:', error);
@@ -1294,58 +1309,60 @@ export async function getPaymentStatusSnapshotSql(
 } | null> {
   try {
     await ensureLegacyLedgerMigrated();
-    const payRows = await db
-      .select()
-      .from(payments)
-      .where(eq(payments.id, paymentId));
-    const payRow = payRows[0];
-    if (!payRow || payRow.userId !== uid) return null;
+    return await withSqlRetry('getPaymentStatusSnapshotSql', async () => {
+      const payRows = await db
+        .select()
+        .from(payments)
+        .where(eq(payments.id, paymentId));
+      const payRow = payRows[0];
+      if (!payRow || payRow.userId !== uid) return null;
 
-    await db
-      .insert(wallets)
-      .values({
+      await db
+        .insert(wallets)
+        .values({
+          userId: uid,
+          balanceCredits: 0,
+          totalSpentCredits: 0,
+          updatedAtMs: Date.now(),
+        })
+        .onConflictDoNothing();
+
+      const [walletRows, entRows] = await Promise.all([
+        db.select().from(wallets).where(eq(wallets.userId, uid)),
+        payRow.purpose === 'video_unlock'
+          ? db
+              .select()
+              .from(entitlements)
+              .where(eq(entitlements.compositeKey, entitlementKey(uid, payRow.targetId)))
+          : Promise.resolve([]),
+      ]);
+
+      const w = walletRows[0] ?? {
         userId: uid,
         balanceCredits: 0,
         totalSpentCredits: 0,
-        updatedAtMs: Date.now(),
-      })
-      .onConflictDoNothing();
+      };
+      const ent = entRows[0] ? mapEntitlementRow(entRows[0]) : null;
 
-    const [walletRows, entRows] = await Promise.all([
-      db.select().from(wallets).where(eq(wallets.userId, uid)),
-      payRow.purpose === 'video_unlock'
-        ? db
-            .select()
-            .from(entitlements)
-            .where(eq(entitlements.compositeKey, entitlementKey(uid, payRow.targetId)))
-        : Promise.resolve([]),
-    ]);
-
-    const w = walletRows[0] ?? {
-      userId: uid,
-      balanceCredits: 0,
-      totalSpentCredits: 0,
-    };
-    const ent = entRows[0] ? mapEntitlementRow(entRows[0]) : null;
-
-    return {
-      payment: mapPaymentRow(payRow),
-      wallet: {
-        userId: w.userId,
-        balanceCredits: w.balanceCredits,
-        totalSpentCredits: w.totalSpentCredits,
-      },
-      entitlement: ent
-        ? {
-            ...ent,
-            expiresAt: new Date(ent.expiresAtMs).toISOString(),
-            remainingDays: Math.max(
-              0,
-              Math.ceil((ent.expiresAtMs - Date.now()) / (24 * 60 * 60 * 1000))
-            ),
-          }
-        : null,
-    };
+      return {
+        payment: mapPaymentRow(payRow),
+        wallet: {
+          userId: w.userId,
+          balanceCredits: w.balanceCredits,
+          totalSpentCredits: w.totalSpentCredits,
+        },
+        entitlement: ent
+          ? {
+              ...ent,
+              expiresAt: new Date(ent.expiresAtMs).toISOString(),
+              remainingDays: Math.max(
+                0,
+                Math.ceil((ent.expiresAtMs - Date.now()) / (24 * 60 * 60 * 1000))
+              ),
+            }
+          : null,
+      };
+    });
   } catch (error) {
     console.error('getPaymentStatusSnapshotSql failed:', error);
     throw new Error('Failed to load payment status.', { cause: error });
@@ -1358,21 +1375,23 @@ export async function findPaymentForWebhookSql(
 ): Promise<PaymentOrderRecord | null> {
   try {
     await ensureLegacyLedgerMigrated();
-    if (targetPaymentId) {
-      const byId = await db
-        .select()
-        .from(payments)
-        .where(eq(payments.id, targetPaymentId));
-      if (byId[0]) return mapPaymentRow(byId[0]);
-    }
-    if (gatewayOrderId) {
-      const byGw = await db
-        .select()
-        .from(payments)
-        .where(eq(payments.gatewayOrderId, gatewayOrderId));
-      if (byGw[0]) return mapPaymentRow(byGw[0]);
-    }
-    return null;
+    return await withSqlRetry('findPaymentForWebhookSql', async () => {
+      if (targetPaymentId) {
+        const byId = await db
+          .select()
+          .from(payments)
+          .where(eq(payments.id, targetPaymentId));
+        if (byId[0]) return mapPaymentRow(byId[0]);
+      }
+      if (gatewayOrderId) {
+        const byGw = await db
+          .select()
+          .from(payments)
+          .where(eq(payments.gatewayOrderId, gatewayOrderId));
+        if (byGw[0]) return mapPaymentRow(byGw[0]);
+      }
+      return null;
+    });
   } catch (error) {
     console.error('findPaymentForWebhookSql failed:', error);
     throw new Error('Failed to query payment for webhook.', { cause: error });
@@ -1382,10 +1401,12 @@ export async function findPaymentForWebhookSql(
 export async function isWebhookProcessedSql(eventKey: string): Promise<boolean> {
   try {
     await ensureLegacyLedgerMigrated();
-    const rows = await db
-      .select()
-      .from(processedWebhooks)
-      .where(eq(processedWebhooks.eventKey, eventKey));
+    const rows = await withSqlRetry('isWebhookProcessedSql', () =>
+      db
+        .select()
+        .from(processedWebhooks)
+        .where(eq(processedWebhooks.eventKey, eventKey))
+    );
     return Boolean(rows[0]);
   } catch (error) {
     console.error('isWebhookProcessedSql failed:', error);
@@ -1822,19 +1843,23 @@ function computeCreatorEarningsSummaryFromRows(
 export async function getCreatorEarningsSummarySql(creatorId: string) {
   try {
     await ensureLegacyLedgerMigrated();
-    const [settingsRows, earnRows, payoutRows] = await Promise.all([
-      db.select().from(platformSettings).where(eq(platformSettings.id, 'global')),
-      db
-        .select()
-        .from(creatorEarnings)
-        .where(eq(creatorEarnings.creatorId, creatorId))
-        .orderBy(desc(creatorEarnings.createdAt)),
-      db
-        .select()
-        .from(payouts)
-        .where(eq(payouts.creatorId, creatorId))
-        .orderBy(desc(payouts.createdAt)),
-    ]);
+    const [settingsRows, earnRows, payoutRows] = await withSqlRetry(
+      'getCreatorEarningsSummarySql',
+      () =>
+        Promise.all([
+          db.select().from(platformSettings).where(eq(platformSettings.id, 'global')),
+          db
+            .select()
+            .from(creatorEarnings)
+            .where(eq(creatorEarnings.creatorId, creatorId))
+            .orderBy(desc(creatorEarnings.createdAt)),
+          db
+            .select()
+            .from(payouts)
+            .where(eq(payouts.creatorId, creatorId))
+            .orderBy(desc(payouts.createdAt)),
+        ])
+    );
 
     const commissionPercent = settingsRows[0]?.commissionPercent ?? 20;
     return computeCreatorEarningsSummaryFromRows(
@@ -2020,7 +2045,9 @@ async function computeAdminOverviewFromDb(
 export async function getAdminFinanceOverviewSql(): Promise<AdminFinanceOverview> {
   try {
     await ensureLegacyLedgerMigrated();
-    return await computeAdminOverviewFromDb(db);
+    return await withSqlRetry('getAdminFinanceOverviewSql', () =>
+      computeAdminOverviewFromDb(db)
+    );
   } catch (error) {
     console.error('getAdminFinanceOverviewSql failed:', error);
     throw new Error('Failed to load admin finance overview.', { cause: error });
@@ -2363,11 +2390,13 @@ export async function getLatestVideoDeletionJobSql(
   videoId: string
 ): Promise<VideoDeletionJobRecord | null> {
   await ensureLegacyLedgerMigrated();
-  const rows = await db
-    .select()
-    .from(videoDeletionJobs)
-    .where(eq(videoDeletionJobs.videoId, videoId))
-    .orderBy(desc(videoDeletionJobs.requestedAt));
+  const rows = await withSqlRetry('getLatestVideoDeletionJobSql', () =>
+    db
+      .select()
+      .from(videoDeletionJobs)
+      .where(eq(videoDeletionJobs.videoId, videoId))
+      .orderBy(desc(videoDeletionJobs.requestedAt))
+  );
   return rows[0] ? mapDeletionJobRow(rows[0]) : null;
 }
 
@@ -2375,11 +2404,13 @@ export async function listVideoDeletionJobsSql(
   limitCount = 40
 ): Promise<VideoDeletionJobRecord[]> {
   await ensureLegacyLedgerMigrated();
-  const rows = await db
-    .select()
-    .from(videoDeletionJobs)
-    .orderBy(desc(videoDeletionJobs.requestedAt))
-    .limit(Math.max(1, Math.min(100, limitCount)));
+  const rows = await withSqlRetry('listVideoDeletionJobsSql', () =>
+    db
+      .select()
+      .from(videoDeletionJobs)
+      .orderBy(desc(videoDeletionJobs.requestedAt))
+      .limit(Math.max(1, Math.min(100, limitCount)))
+  );
   return rows.map(mapDeletionJobRow);
 }
 
@@ -2387,10 +2418,9 @@ export async function getCreatorMediaByVideoIdSql(
   videoId: string
 ): Promise<CreatorMediaBinding | null> {
   await ensureLegacyLedgerMigrated();
-  const rows = await db
-    .select()
-    .from(creatorMedia)
-    .where(eq(creatorMedia.videoId, videoId));
+  const rows = await withSqlRetry('getCreatorMediaByVideoIdSql', () =>
+    db.select().from(creatorMedia).where(eq(creatorMedia.videoId, videoId))
+  );
   const m = rows[0];
   if (!m || m.provider === 'thumbnail') return null;
   return {
