@@ -37,6 +37,9 @@ import {
   fetchAdminFinanceOverview,
   syncAdminPlatformSettings,
 } from '../services/paymentService';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { adminSyncCreatorMediaBatch } from '../services/streamService';
 import {
   AdminVideoApiError,
   adminArchiveVideoApi,
@@ -192,6 +195,69 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     }
   };
 
+  const [syncingSqlMedia, setSyncingSqlMedia] = useState(false);
+
+  const runAdminSqlMediaSync = async (silent = false) => {
+    if (syncingSqlMedia) return;
+    setSyncingSqlMedia(true);
+    try {
+      const snap = await getDocs(collection(db, 'video_assets'));
+      const items = snap.docs
+        .map((d) => {
+          const data = d.data() as {
+            videoId?: string;
+            creatorId?: string;
+            provider?: string;
+            assetRef?: string;
+          };
+          if (!data.creatorId || !data.assetRef) return null;
+          return {
+            videoId: data.videoId || d.id,
+            creatorId: data.creatorId,
+            provider: data.provider || 'private_storage',
+            assetRef: data.assetRef,
+          };
+        })
+        .filter((it): it is NonNullable<typeof it> => it !== null);
+      if (items.length === 0) {
+        if (!silent) {
+          setVideoActionFeedback({
+            type: 'success',
+            message:
+              locale === 'id'
+                ? 'Tidak ada aset video di Firestore untuk disinkronkan.'
+                : 'No video_assets entries found in Firestore to sync.',
+          });
+        }
+        return;
+      }
+      const res = await adminSyncCreatorMediaBatch(items);
+      if (!silent) {
+        setVideoActionFeedback({
+          type: res.failed > 0 && res.synced === 0 ? 'error' : 'success',
+          message:
+            locale === 'id'
+              ? `Sinkronisasi SQL selesai: ${res.synced} video tersinkron, ${res.skipped} dilewati, ${res.failed} gagal.`
+              : `SQL media sync finished: ${res.synced} synced, ${res.skipped} skipped, ${res.failed} failed.`,
+        });
+      }
+    } catch (err) {
+      if (!silent) {
+        setVideoActionFeedback({
+          type: 'error',
+          message:
+            err instanceof Error
+              ? err.message
+              : locale === 'id'
+              ? 'Gagal menyinkronkan aset video ke SQL.'
+              : 'Failed to sync video assets to SQL.',
+        });
+      }
+    } finally {
+      setSyncingSqlMedia(false);
+    }
+  };
+
   useEffect(() => {
     if (!authReady || !firebaseUser || !isAdmin) return;
     const u1 = subscribeAllUsers(setUsers);
@@ -222,6 +288,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         if (!cancelled) setLoadingFinance(false);
       });
     void refreshDeletionJobs();
+    void runAdminSqlMediaSync(true);
     return () => {
       cancelled = true;
       u1();
@@ -1275,6 +1342,24 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               </button>
             </div>
           )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5">
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              {locale === 'id'
+                ? 'Sinkronkan sumber video Firestore (video_assets) ke tabel SQL pemutar jika ada video lama belum terhubung.'
+                : 'Sync Firestore video_assets to the SQL playback table if legacy videos show missing media source.'}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              leftIcon={<RefreshCw className={`w-3.5 h-3.5 ${syncingSqlMedia ? 'animate-spin' : ''}`} />}
+              isLoading={syncingSqlMedia}
+              onClick={() => void runAdminSqlMediaSync(false)}
+            >
+              {locale === 'id' ? 'Sinkronkan Media SQL' : 'Sync SQL Media'}
+            </Button>
+          </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
             {/* LEFT PANEL: ACTIVE & PENDING MODERATION TABLE */}

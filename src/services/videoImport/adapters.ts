@@ -960,7 +960,7 @@ export const facebookAdapter: VideoPlatformAdapter = {
   id: 'facebook',
   label: 'Facebook',
   allowedHosts: FACEBOOK_HOSTS,
-  verifiability: 'unverifiable',
+  verifiability: 'conditional',
   detect: (rawInput): DetectedVideoSource | null => {
     const trimmed = rawInput.trim();
     if (!trimmed) return null;
@@ -982,11 +982,11 @@ export const facebookAdapter: VideoPlatformAdapter = {
       canonicalRef: fbUrl,
       canonicalUrl: fbUrl,
       embedUrl: getFacebookEmbedUrl(fbUrl, { autoplay: false }),
-      verifiability: 'unverifiable',
+      verifiability: 'conditional',
       verifiabilityNoteId:
-        'Facebook Video Plugin berjalan di iframe terisolasi dan tidak menyediakan konfirmasi status PLAY lintas-domain. Pemutaran video ini tidak dapat diverifikasi otomatis oleh sistem.',
+        'Facebook Video Plugin berjalan di iframe resmi. Uji pemutaran di dalam frame Preview lalu tekan Konfirmasi Video Terputar.',
       verifiabilityNoteEn:
-        'Facebook Video Plugin runs in an isolated iframe without reliable cross-origin PLAY verification. Playback cannot be automatically confirmed.',
+        'Facebook Video Plugin runs in an official iframe. Test playback inside Preview and click Confirm Playback Works.',
     };
   },
 };
@@ -995,7 +995,7 @@ export const xAdapter: VideoPlatformAdapter = {
   id: 'x',
   label: 'X (Twitter)',
   allowedHosts: X_HOSTS,
-  verifiability: 'unverifiable',
+  verifiability: 'conditional',
   detect: (rawInput): DetectedVideoSource | null => {
     const info = extractXPostInfo(rawInput);
     if (!info) return null;
@@ -1005,11 +1005,12 @@ export const xAdapter: VideoPlatformAdapter = {
       originalUrl: rawInput.trim(),
       canonicalRef: info.canonicalUrl,
       canonicalUrl: info.canonicalUrl,
-      verifiability: 'unverifiable',
+      embedUrl: `https://platform.twitter.com/embed/Tweet.html?id=${encodeURIComponent(info.statusId)}&theme=dark`,
+      verifiability: 'conditional',
       verifiabilityNoteId:
-        'X (Twitter) hanya menyediakan embed postingan (oEmbed) tanpa API verifikasi playback video langsung yang andal lintas-domain.',
+        'Menggunakan kartu embed resmi X (Twitter). Buka Preview untuk memastikan postingan/video tampil lalu tekan Konfirmasi Video Terputar.',
       verifiabilityNoteEn:
-        'X (Twitter) provides post oEmbed cards without a reliable cross-origin HTML5 video playback confirmation API.',
+        'Uses official X (Twitter) embed frame. Open Preview to confirm the post/video loads, then click Confirm Playback Works.',
     };
   },
 };
@@ -1018,7 +1019,7 @@ export const instagramAdapter: VideoPlatformAdapter = {
   id: 'instagram',
   label: 'Instagram',
   allowedHosts: INSTAGRAM_HOSTS,
-  verifiability: 'unverifiable',
+  verifiability: 'conditional',
   detect: (rawInput): DetectedVideoSource | null => {
     const info = extractInstagramPostInfo(rawInput);
     if (!info) return null;
@@ -1029,11 +1030,11 @@ export const instagramAdapter: VideoPlatformAdapter = {
       canonicalRef: info.canonicalUrl,
       canonicalUrl: info.canonicalUrl,
       embedUrl: info.embedUrl,
-      verifiability: 'unverifiable',
+      verifiability: 'conditional',
       verifiabilityNoteId:
-        'Embed Instagram tidak menyediakan API status pemutaran lintas-domain dan sering meminta login Instagram.',
+        'Menggunakan embed resmi Instagram. Buka Preview untuk memastikan Reel/Post tampil lalu tekan Konfirmasi Video Terputar.',
       verifiabilityNoteEn:
-        'Instagram embeds expose no cross-origin playback verification API and frequently trigger login walls.',
+        'Uses official Instagram embed frame. Open Preview to confirm the Reel/Post displays, then click Confirm Playback Works.',
     };
   },
 };

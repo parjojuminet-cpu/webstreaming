@@ -1719,31 +1719,33 @@ export async function inspectUniversalVideoLink(
         platformLabel: 'X (Twitter)',
         canonicalRef: source.canonicalRef,
         canonicalUrl: source.canonicalUrl,
+        embedUrl: source.embedUrl,
         linkStatus: 'embeddable',
         reasonCode: 'OEMBED_POST_FOUND',
         messageId:
-          'Postingan X ditemukan melalui oEmbed resmi. Catatan: X tidak menyediakan konfirmasi status pemutaran video lintas-domain yang dapat diverifikasi.',
+          'Postingan X ditemukan melalui oEmbed resmi. Buka PREVIEW untuk memastikan video tampil lalu klik Konfirmasi Video Terputar.',
         messageEn:
-          'X post confirmed via official oEmbed. Note: X does not provide verifiable cross-origin video playback state.',
+          'X post confirmed via official oEmbed. Open PREVIEW to confirm playback, then click Confirm Playback Works.',
         authorHint: probe.authorName,
-        verifiability: 'unverifiable',
+        verifiability: 'conditional',
         verifiabilityNoteId: source.verifiabilityNoteId,
         verifiabilityNoteEn: source.verifiabilityNoteEn,
       };
     }
 
-    if (probe.status === 'not_found' || probe.status === 'blocked') {
+    if (probe.status === 'not_found') {
       return {
         detected: true,
         provider: 'x',
         platformLabel: 'X (Twitter)',
         canonicalRef: source.canonicalRef,
         canonicalUrl: source.canonicalUrl,
+        embedUrl: source.embedUrl,
         linkStatus: 'unavailable',
         reasonCode: 'X_POST_UNAVAILABLE',
         messageId: `Postingan X tidak ditemukan atau bersifat privat (HTTP ${probe.httpStatus}).`,
         messageEn: `X post not found or protected (HTTP ${probe.httpStatus}).`,
-        verifiability: 'unverifiable',
+        verifiability: 'conditional',
         verifiabilityNoteId: source.verifiabilityNoteId,
         verifiabilityNoteEn: source.verifiabilityNoteEn,
       };
@@ -1755,12 +1757,14 @@ export async function inspectUniversalVideoLink(
       platformLabel: 'X (Twitter)',
       canonicalRef: source.canonicalRef,
       canonicalUrl: source.canonicalUrl,
+      embedUrl: source.embedUrl,
       linkStatus: 'uncertain',
       reasonCode: 'X_OEMBED_UNCERTAIN',
       messageId:
-        'Pemeriksaan oEmbed X belum dapat dipastikan karena batas akses jaringan/platform.',
-      messageEn: 'X oEmbed verification was inconclusive due to network or platform limits.',
-      verifiability: 'unverifiable',
+        'Tautan X dikenali. Klik PREVIEW untuk menguji tampilan embed langsung di browser Anda.',
+      messageEn:
+        'X link recognized. Click PREVIEW to verify embedded playback directly in your browser.',
+      verifiability: 'conditional',
       verifiabilityNoteId: source.verifiabilityNoteId,
       verifiabilityNoteEn: source.verifiabilityNoteEn,
     };
@@ -1778,11 +1782,11 @@ export async function inspectUniversalVideoLink(
         provider: source.provider,
         url: rawUrl,
       }),
-      linkStatus: 'uncertain',
-      reasonCode: 'PLATFORM_NO_PUBLIC_OEMBED',
-      messageId: `Tautan ${source.platformLabel} dikenali, tetapi ketersediaan privasi dan status putar lintas-domain tidak dapat dipastikan dari server. Anda dapat mencoba PREVIEW, namun pemutaran di iframe ${source.platformLabel} tidak dapat diverifikasi oleh sistem.`,
-      messageEn: `${source.platformLabel} URL recognized, but privacy and cross-origin playback cannot be verified automatically. You may try PREVIEW, though playback inside ${source.platformLabel} iframe cannot be confirmed.`,
-      verifiability: 'unverifiable',
+      linkStatus: 'embeddable',
+      reasonCode: 'PLATFORM_EMBED_READY',
+      messageId: `Tautan ${source.platformLabel} dikenali dan siap disematkan. Klik PREVIEW lalu tekan Konfirmasi Video Terputar setelah video tampil.`,
+      messageEn: `${source.platformLabel} URL recognized and ready to embed. Click PREVIEW and confirm playback once the video loads.`,
+      verifiability: 'conditional',
       verifiabilityNoteId: source.verifiabilityNoteId,
       verifiabilityNoteEn: source.verifiabilityNoteEn,
     };

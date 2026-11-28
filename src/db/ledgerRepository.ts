@@ -35,6 +35,7 @@ import type {
   PaymentStatus,
   PayoutRecord,
   PurchaseRecord,
+  VideoAssetProvider,
   VideoDeletionJobRecord,
   VideoDeletionJobStatus,
   WalletTransactionRecord,
@@ -718,11 +719,7 @@ export async function getStreamAuthContextSql(
         ? {
             videoId: m.videoId,
             creatorId: m.creatorId,
-            provider: m.provider as
-              | 'cloudflare_stream'
-              | 'private_storage'
-              | 'youtube'
-              | 'facebook',
+            provider: m.provider as VideoAssetProvider,
             assetRef: m.assetRef,
             mimeType: m.mimeType ?? undefined,
             updatedAtIso: m.updatedAtIso,

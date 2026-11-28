@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import QRCode from 'qrcode';
+import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
 import type {
   AdminFinanceOverview,
   CreatorEarningRecord,
@@ -312,11 +313,14 @@ export async function resolveServerVideoState(
   }
 
   try {
-    const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    const baseUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
       projectId
     )}/databases/${encodeURIComponent(databaseId)}/documents/videos/${encodeURIComponent(
       videoId
     )}`;
+    const url = callerIdToken
+      ? baseUrl
+      : `${baseUrl}?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
     const res = await fetch(
       url,
       callerIdToken

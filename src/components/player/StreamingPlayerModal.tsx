@@ -145,6 +145,8 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
       Boolean(authData?.facebookVideoUrl || authData?.manifestUrl)) ||
     ((authData?.streamType === 'streamable' ||
       authData?.streamType === 'tiktok' ||
+      authData?.streamType === 'x' ||
+      authData?.streamType === 'instagram' ||
       authData?.streamType === 'google_drive' ||
       authData?.streamType === 'archive_org' ||
       authData?.streamType === 'twitch' ||
@@ -269,6 +271,8 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
           authResp.streamType === 'dailymotion' ||
           authResp.streamType === 'streamable' ||
           authResp.streamType === 'tiktok' ||
+          authResp.streamType === 'x' ||
+          authResp.streamType === 'instagram' ||
           authResp.streamType === 'google_drive' ||
           authResp.streamType === 'archive_org' ||
           authResp.streamType === 'twitch' ||
@@ -411,7 +415,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
 
   // Initialize YouTube IFrame Player API when streamType === 'youtube'
   useEffect(() => {
-    if (!item || authData?.streamType !== 'youtube' || !authData.youtubeVideoId) {
+    if (
+      !item ||
+      authData?.streamType !== 'youtube' ||
+      (!authData.youtubeVideoId && !authData.youtubePlaylistId)
+    ) {
       if (ytPlayerRef.current) {
         try {
           ytPlayerRef.current.destroy();
@@ -1152,6 +1160,14 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                         if (!isFullUnlocked) {
                           setPaywallReached(true);
                         }
+                      }}
+                      onError={() => {
+                        setIsPlaying(false);
+                        setStreamError(
+                          locale === 'id'
+                            ? 'Video tidak dapat dimuat (berkas belum tersedia di server atau format tidak didukung browser).'
+                            : 'Video could not be loaded (file unavailable on server or unsupported format).'
+                        );
                       }}
                       className={`w-full h-full bg-black pointer-events-none ${
                         videoFitMode === 'cover' ? 'object-cover' : 'object-contain'

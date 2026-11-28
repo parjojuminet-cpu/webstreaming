@@ -152,6 +152,7 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
 
   const [previewOpened, setPreviewOpened] = useState(false);
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [previewGraceReady, setPreviewGraceReady] = useState(false);
   const [playbackStatus, setPlaybackStatus] = useState<PlaybackCheckStatus>('waiting_play');
   const [playbackNote, setPlaybackNote] = useState<string>('');
   const [observedPlaySeconds, setObservedPlaySeconds] = useState(0);
@@ -278,11 +279,21 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
     }
   };
 
+  useEffect(() => {
+    if (!previewOpened) {
+      setPreviewGraceReady(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setPreviewGraceReady(true), 2000);
+    return () => window.clearTimeout(timer);
+  }, [previewOpened]);
+
   const handleOpenPreview = () => {
     if (!inspection || !inspection.detected || linkStatus === 'unavailable') return;
     cleanupPlayers();
     setPreviewOpened(true);
     setIframeLoaded(false);
+    setPreviewGraceReady(false);
     setObservedPlaySeconds(0);
     onInvalidate();
 
@@ -780,22 +791,22 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
     playAttemptTimeoutRef.current = window.setTimeout(() => {
       if (playbackStatusRef.current === 'verifying') {
         if (inspection.verifiability === 'conditional') {
-          setPlaybackStatus('unverifiable');
+          setPlaybackStatus('waiting_play');
           setPlaybackNote(
             locale === 'id'
-              ? `${inspection.platformLabel} tidak mengirim konfirmasi pemutaran lintas-domain. Anda tetap dapat menekan tombol play langsung di dalam iframe jika tersedia, namun tanpa konfirmasi API resmi tombol Lanjutkan tetap dinonaktifkan.`
-              : `${inspection.platformLabel} did not emit cross-origin playback events. Without verifiable playback confirmation, Continue remains disabled.`
+              ? `${inspection.platformLabel} tidak mengirim konfirmasi otomatis. Uji pemutaran langsung di frame di atas lalu klik Konfirmasi Video Terputar.`
+              : `${inspection.platformLabel} did not emit automatic events. Play directly inside the frame above, then click Confirm Playback Works.`
           );
         } else {
           setPlaybackStatus('play_failed');
           setPlaybackNote(
             locale === 'id'
-              ? 'Pemutaran tidak dimulai dalam 8 detik. Pastikan video publik/izinkan embed atau periksa koneksi/CORS.'
-              : 'Playback did not advance within 8 seconds. Check embed privacy, CORS headers, or press Play inside the player.'
+              ? 'Pemutaran tidak dimulai dalam 15 detik. Pastikan video publik/izinkan embed atau periksa koneksi/CORS.'
+              : 'Playback did not advance within 15 seconds. Check embed privacy, CORS headers, or press Play inside the player.'
           );
         }
       }
-    }, 8000);
+    }, 15000);
 
     if (inspection.provider === 'youtube') {
       try {
@@ -842,30 +853,32 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
       try {
         await htmlVideoRef.current.play();
       } catch (err) {
-        if (playAttemptTimeoutRef.current) {
-          window.clearTimeout(playAttemptTimeoutRef.current);
-          playAttemptTimeoutRef.current = null;
+        // Retry muted in case browser autoplay policy blocks unmuted play()
+        try {
+          htmlVideoRef.current.muted = true;
+          await htmlVideoRef.current.play();
+        } catch (mutedErr) {
+          if (playAttemptTimeoutRef.current) {
+            window.clearTimeout(playAttemptTimeoutRef.current);
+            playAttemptTimeoutRef.current = null;
+          }
+          const finalErr = mutedErr instanceof Error ? mutedErr : err;
+          setPlaybackStatus('play_failed');
+          setPlaybackNote(
+            finalErr instanceof Error
+              ? locale === 'id'
+                ? `Browser gagal memutar media: ${finalErr.message}`
+                : `Browser failed to play media: ${finalErr.message}`
+              : locale === 'id'
+              ? 'Browser gagal memutar stream video ini.'
+              : 'Browser failed to play this video stream.'
+          );
         }
-        setPlaybackStatus('play_failed');
-        setPlaybackNote(
-          err instanceof Error
-            ? locale === 'id'
-              ? `Browser gagal memutar media: ${err.message}`
-              : `Browser failed to play media: ${err.message}`
-            : locale === 'id'
-            ? 'Browser gagal memutar stream video ini.'
-            : 'Browser failed to play this video stream.'
-        );
       }
     }
   };
 
-  const isConditionalEmbedProvider = Boolean(
-    inspection?.verifiability === 'conditional' &&
-      inspection.provider !== 'facebook' &&
-      inspection.provider !== 'x' &&
-      inspection.provider !== 'instagram'
-  );
+  const isConditionalEmbedProvider = Boolean(inspection?.verifiability === 'conditional');
   const canPreview =
     Boolean(inspection?.detected) &&
     (linkStatus === 'embeddable' || linkStatus === 'uncertain');
@@ -1133,7 +1146,6 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
 
                     {inspection.provider !== 'youtube' &&
                       inspection.provider !== 'direct_video' &&
-                      inspection.provider !== 'x' &&
                       (() => {
                         const resolvedEmbedSrc =
                           inspection.provider === 'twitch'
@@ -1163,22 +1175,6 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
                           />
                         );
                       })()}
-
-                    {inspection.provider === 'x' && (
-                      <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-2 text-slate-200">
-                        <ShieldAlert className="w-7 h-7 text-amber-400" />
-                        <p className="text-xs font-semibold">
-                          {locale === 'id'
-                            ? 'Preview Kartu X (Twitter) Tidak Dapat Diverifikasi Otomatis'
-                            : 'X (Twitter) Card Preview Cannot Verify Video Playback'}
-                        </p>
-                        <p className="text-[11px] text-slate-400 max-w-md">
-                          {locale === 'id'
-                            ? 'X tidak menyediakan API status PLAY lintas-domain untuk memverifikasi pemutaran video pada tautan eksternal.'
-                            : 'X provides no cross-origin video PLAY state API to confirm playback.'}
-                        </p>
-                      </div>
-                    )}
 
                     {inspection.provider === 'direct_video' && (
                       <video
@@ -1287,7 +1283,7 @@ export const UniversalVideoImportPanel: React.FC<UniversalVideoImportPanelProps>
                   variant="secondary"
                   size="md"
                   leftIcon={<CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />}
-                  disabled={!iframeLoaded}
+                  disabled={!iframeLoaded && !previewGraceReady}
                   onClick={handleConfirmConditionalEmbed}
                 >
                   {locale === 'id' ? 'Konfirmasi Video Terputar' : 'Confirm Playback Works'}

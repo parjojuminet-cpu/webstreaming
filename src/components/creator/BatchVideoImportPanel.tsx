@@ -443,10 +443,10 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
             status: 'play_failed',
             note:
               locale === 'id'
-                ? 'Pemutaran YouTube tidak dimulai dalam 8 detik.'
-                : 'YouTube playback did not start within 8 seconds.',
+                ? 'Pemutaran YouTube tidak dimulai dalam 15 detik.'
+                : 'YouTube playback did not start within 15 seconds.',
           });
-        }, 8000);
+        }, 15000);
       });
     }
 
@@ -562,15 +562,20 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
             status: 'play_failed',
             note:
               locale === 'id'
-                ? 'Stream tidak berjalan dalam 8 detik.'
-                : 'Stream did not start within 8 seconds.',
+                ? 'Stream tidak berjalan dalam 15 detik.'
+                : 'Stream did not start within 15 seconds.',
           });
-        }, 8000);
+        }, 15000);
       });
     }
 
-    // Passive/conditional iframe embeds (Google Drive, Internet Archive, Twitch, Rumble, Odysee, Loom, Bilibili, HTML embed)
+    // Passive/conditional iframe embeds (Facebook, X, Instagram, Streamable, TikTok, Google Drive, Internet Archive, Twitch, Rumble, Odysee, Loom, Bilibili, HTML embed)
     if (
+      diag.provider === 'facebook' ||
+      diag.provider === 'x' ||
+      diag.provider === 'instagram' ||
+      diag.provider === 'streamable' ||
+      diag.provider === 'tiktok' ||
       diag.provider === 'google_drive' ||
       diag.provider === 'archive_org' ||
       diag.provider === 'twitch' ||
@@ -635,10 +640,10 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
             status: 'play_failed',
             note:
               locale === 'id'
-                ? `Frame ${diag.platformLabel} tidak merespons dalam 8 detik.`
-                : `${diag.platformLabel} frame did not respond within 8 seconds.`,
+                ? `Frame ${diag.platformLabel} tidak merespons dalam 15 detik.`
+                : `${diag.platformLabel} frame did not respond within 15 seconds.`,
           });
-        }, 8000);
+        }, 15000);
       });
     }
 
@@ -712,10 +717,10 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
           status: diag.verifiability === 'conditional' ? 'unverifiable' : 'play_failed',
           note:
             locale === 'id'
-              ? 'Player tidak mengirim konfirmasi pemutaran dalam 8 detik.'
-              : 'Player did not confirm playback within 8 seconds.',
+              ? 'Player tidak mengirim konfirmasi pemutaran dalam 15 detik.'
+              : 'Player did not confirm playback within 15 seconds.',
         });
-      }, 8000);
+      }, 15000);
     });
   };
 
@@ -995,7 +1000,6 @@ export const BatchVideoImportPanel: React.FC<BatchVideoImportPanelProps> = ({
               )}
               {activePreviewItem.inspection?.provider !== 'youtube' &&
                 activePreviewItem.inspection?.provider !== 'direct_video' &&
-                activePreviewItem.inspection?.provider !== 'x' &&
                 (() => {
                   const diag = activePreviewItem.inspection;
                   if (!diag) return null;

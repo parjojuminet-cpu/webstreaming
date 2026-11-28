@@ -19,6 +19,8 @@ export interface StreamAuthorizationResponse {
     | 'dailymotion'
     | 'streamable'
     | 'tiktok'
+    | 'x'
+    | 'instagram'
     | 'google_drive'
     | 'archive_org'
     | 'twitch'
@@ -32,6 +34,7 @@ export interface StreamAuthorizationResponse {
   youtubeVideoId?: string;
   youtubePlaylistId?: string;
   facebookVideoUrl?: string;
+  xPostUrl?: string;
   vimeoVideoId?: string;
   vimeoHash?: string;
   dailymotionVideoId?: string;
@@ -101,9 +104,13 @@ function inferUploadMimeType(file: File): string {
     return file.type;
   }
   const lower = file.name.toLowerCase();
-  if (lower.endsWith('.mp4')) return 'video/mp4';
+  if (lower.endsWith('.mp4') || lower.endsWith('.m4v')) return 'video/mp4';
   if (lower.endsWith('.webm')) return 'video/webm';
   if (lower.endsWith('.mov')) return 'video/quicktime';
+  if (lower.endsWith('.mkv')) return 'video/x-matroska';
+  if (lower.endsWith('.ogv')) return 'video/ogg';
+  if (lower.endsWith('.3gp')) return 'video/3gpp';
+  if (lower.endsWith('.avi')) return 'video/x-msvideo';
   if (lower.endsWith('.png')) return 'image/png';
   if (lower.endsWith('.webp')) return 'image/webp';
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
@@ -239,33 +246,129 @@ export async function fetchCloudflareVideoStatus(
   return (await res.json()) as CloudflareVideoStatus;
 }
 
+async function readUploadErrorMessage(res: Response, fallback: string): Promise<string> {
+  const rawText = await res.text().catch(() => '');
+  if (rawText) {
+    try {
+      const parsed = JSON.parse(rawText) as { error?: string };
+      if (parsed.error) return parsed.error;
+    } catch {
+      // Non-JSON proxy error (e.g. HTTP 413/502 HTML)
+    }
+  }
+  if (res.status === 413) {
+    return 'Ukuran permintaan unggahan melebihi batas server (HTTP 413).';
+  }
+  return `${fallback} (HTTP ${res.status})`;
+}
+
 export async function uploadCreatorMedia(
-  file: File
+  file: File,
+  onProgress?: (percent: number) => void
 ): Promise<UploadedVideoMediaResult | UploadedThumbnailMediaResult> {
   const currentUser = auth.currentUser;
   if (!currentUser) {
     throw new Error('Authentication required before uploading media.');
   }
   const idToken = await currentUser.getIdToken();
-  const safeHeaderName = file.name
+  const safeAsciiName = file.name.replace(/[^\x20-\x7E]/g, '-').slice(0, 160) || 'video.mp4';
+  const safeHeaderSlug = safeAsciiName
     .replace(/\.[^/.]+$/, '')
     .replace(/[^a-zA-Z0-9_-]/g, '-')
     .slice(0, 48);
   const contentType = inferUploadMimeType(file);
+
+  // Use 8MB chunked upload for local video files > 8MB so requests stay safely under Cloud Run 32MB limit
+  const LOCAL_CHUNK_BYTES = 8 * 1024 * 1024;
+  if (file.size > LOCAL_CHUNK_BYTES && !contentType.startsWith('image/')) {
+    const totalChunks = Math.ceil(file.size / LOCAL_CHUNK_BYTES);
+    onProgress?.(0);
+
+    const initRes = await fetch('/api/creator/upload-media/init', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filename: safeAsciiName,
+        mimeType: contentType,
+        totalBytes: file.size,
+        totalChunks,
+      }),
+    });
+    if (!initRes.ok) {
+      throw new Error(await readUploadErrorMessage(initRes, 'Failed to initialize video upload'));
+    }
+    const { uploadId } = (await initRes.json()) as { uploadId: string };
+
+    for (let idx = 0; idx < totalChunks; idx += 1) {
+      const start = idx * LOCAL_CHUNK_BYTES;
+      const end = Math.min(file.size, start + LOCAL_CHUNK_BYTES);
+      const slice = file.slice(start, end);
+
+      let uploaded = false;
+      let lastErr: Error | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const chunkRes = await fetch('/api/creator/upload-media/chunk', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+              'Content-Type': 'application/octet-stream',
+              'x-upload-id': uploadId,
+              'x-chunk-index': String(idx),
+            },
+            body: slice,
+          });
+          if (!chunkRes.ok) {
+            throw new Error(
+              await readUploadErrorMessage(chunkRes, `Chunk #${idx + 1} upload failed`)
+            );
+          }
+          uploaded = true;
+          break;
+        } catch (err) {
+          lastErr = err instanceof Error ? err : new Error('Chunk upload error');
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+          }
+        }
+      }
+      if (!uploaded) {
+        throw lastErr || new Error('Failed to upload video chunk.');
+      }
+      onProgress?.(Math.min(96, Math.round((end / file.size) * 96)));
+    }
+
+    const completeRes = await fetch('/api/creator/upload-media/complete', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ uploadId }),
+    });
+    if (!completeRes.ok) {
+      throw new Error(await readUploadErrorMessage(completeRes, 'Failed to finalize video upload'));
+    }
+    onProgress?.(100);
+    return (await completeRes.json()) as UploadedVideoMediaResult;
+  }
 
   const res = await fetch('/api/creator/upload-media', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${idToken}`,
       'Content-Type': contentType,
-      'x-deloken-filename': safeHeaderName || 'deloken-media',
+      'x-deloken-filename': safeHeaderSlug || 'deloken-media',
+      'x-deloken-original-filename': safeAsciiName,
     },
     body: file,
   });
 
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error || 'Media upload failed.');
+    throw new Error(await readUploadErrorMessage(res, 'Media upload failed'));
   }
 
   return (await res.json()) as
@@ -303,16 +406,96 @@ export async function registerCreatorVideoMedia(input: {
 }): Promise<void> {
   const currentUser = auth.currentUser;
   if (!currentUser) return;
-  const headers = await getBearerHeaders();
-  const res = await fetch('/api/creator/register-video-media', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error || 'Failed to register creator media mapping.');
+
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const headers = await getBearerHeaders();
+      const res = await fetch('/api/creator/register-video-media', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(input),
+      });
+      if (res.ok) return;
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      lastError = new Error(body.error || `Failed to register creator media mapping (${res.status}).`);
+      if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+        break;
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error('Network error registering media.');
+    }
+    if (attempt < 2) {
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
   }
+  throw lastError || new Error('Failed to register creator media mapping.');
+}
+
+export interface MediaSyncBatchItem {
+  videoId: string;
+  creatorId: string;
+  provider: string;
+  assetRef: string;
+  mimeType?: string;
+}
+
+export async function syncCreatorVideoMediaBatch(
+  items: MediaSyncBatchItem[]
+): Promise<{ synced: number; skipped: number; failed: number }> {
+  if (!auth.currentUser || items.length === 0) {
+    return { synced: 0, skipped: 0, failed: 0 };
+  }
+  const headers = await getBearerHeaders();
+  let synced = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (let i = 0; i < items.length; i += 150) {
+    const chunk = items.slice(i, i + 150);
+    const res = await fetch('/api/creator/sync-video-media-batch', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ items: chunk }),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { synced?: number; skipped?: number; failed?: number };
+      synced += data.synced ?? 0;
+      skipped += data.skipped ?? 0;
+      failed += data.failed ?? 0;
+    } else {
+      failed += chunk.length;
+    }
+  }
+  return { synced, skipped, failed };
+}
+
+export async function adminSyncCreatorMediaBatch(
+  items: MediaSyncBatchItem[]
+): Promise<{ synced: number; skipped: number; failed: number }> {
+  if (!auth.currentUser || items.length === 0) {
+    return { synced: 0, skipped: 0, failed: 0 };
+  }
+  const headers = await getBearerHeaders();
+  let synced = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (let i = 0; i < items.length; i += 200) {
+    const chunk = items.slice(i, i + 200);
+    const res = await fetch('/api/admin/sync-creator-media', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ items: chunk }),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { synced?: number; skipped?: number; failed?: number };
+      synced += data.synced ?? 0;
+      skipped += data.skipped ?? 0;
+      failed += data.failed ?? 0;
+    } else {
+      failed += chunk.length;
+    }
+  }
+  return { synced, skipped, failed };
 }
 
 export async function authorizeVideoStream(

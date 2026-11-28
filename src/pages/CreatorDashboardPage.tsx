@@ -30,9 +30,12 @@ import {
   requestCreatorPayout,
   type CreatorEarningsSummary,
 } from '../services/paymentService';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import {
   fetchStreamCapabilities,
   registerCreatorVideoMedia,
+  syncCreatorVideoMediaBatch,
   uploadCreatorMedia,
   uploadVideoToCloudflareStream,
   type StreamCapabilities,
@@ -252,6 +255,36 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
   useEffect(() => {
     if (!authReady || !firebaseUser || !creatorProfile) return;
     const unsub = subscribeCreatorVideos(firebaseUser.uid, setVideos);
+
+    // Backfill SQL creator_media from Firestore video_assets for this creator
+    void getDocs(
+      query(collection(db, 'video_assets'), where('creatorId', '==', firebaseUser.uid))
+    )
+      .then((snap) => {
+        const items = snap.docs
+          .map((d) => {
+            const data = d.data() as {
+              videoId?: string;
+              creatorId?: string;
+              provider?: string;
+              assetRef?: string;
+            };
+            if (!data.assetRef) return null;
+            return {
+              videoId: data.videoId || d.id,
+              creatorId: data.creatorId || firebaseUser.uid,
+              provider: data.provider || 'private_storage',
+              assetRef: data.assetRef,
+            };
+          })
+          .filter((item): item is NonNullable<typeof item> => item !== null);
+        if (items.length > 0) {
+          return syncCreatorVideoMediaBatch(items);
+        }
+        return null;
+      })
+      .catch(() => {});
+
     return () => unsub();
   }, [authReady, firebaseUser, creatorProfile]);
 
@@ -487,7 +520,9 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
         ? await uploadVideoToCloudflareStream(file, (pct) => {
             setVideoUploadProgress(pct);
           })
-        : await uploadCreatorMedia(file);
+        : await uploadCreatorMedia(file, (pct) => {
+            setVideoUploadProgress(pct);
+          });
 
       if (uploaded.kind === 'video') {
         setVProvider(uploaded.provider);
@@ -1270,7 +1305,7 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                       <input
                         ref={videoFileInputRef}
                         type="file"
-                        accept="video/*,.mp4,.webm,.mov"
+                        accept="video/*,.mp4,.m4v,.webm,.mov,.mkv,.ogv,.3gp"
                         disabled={uploadingVideoFile}
                         onChange={(e) => void handleVideoFileChange(e)}
                         aria-label={
@@ -1286,8 +1321,8 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                           {uploadingVideoFile
                             ? videoUploadProgress !== null
                               ? locale === 'id'
-                                ? `Mengunggah langsung ke Cloudflare Stream... ${videoUploadProgress}%`
-                                : `Uploading directly to Cloudflare Stream... ${videoUploadProgress}%`
+                                ? `Mengunggah ke ${streamCaps.cloudflareStreamConfigured ? 'Cloudflare Stream' : 'Server DELOKEN'}... ${videoUploadProgress}%`
+                                : `Uploading to ${streamCaps.cloudflareStreamConfigured ? 'Cloudflare Stream' : 'DELOKEN Server'}... ${videoUploadProgress}%`
                               : locale === 'id'
                               ? 'Sedang mengunggah video ke server...'
                               : 'Uploading video file to server...'
@@ -1297,11 +1332,11 @@ export const CreatorDashboardPage: React.FC<CreatorDashboardPageProps> = ({
                               : `Uploaded: ${vUploadedFileName}`
                             : streamCaps.cloudflareStreamConfigured
                             ? locale === 'id'
-                              ? 'Pilih Film Panjang (.MP4, .WebM, .MOV · maks 10GB via Cloudflare HLS)'
-                              : 'Select Feature Film (.MP4, .WebM, .MOV · up to 10GB via Cloudflare HLS)'
+                              ? 'Pilih Film Panjang (.MP4, .WebM, .MOV, .MKV · maks 10GB via Cloudflare HLS)'
+                              : 'Select Feature Film (.MP4, .WebM, .MOV, .MKV · up to 10GB via Cloudflare HLS)'
                             : locale === 'id'
-                            ? 'Pilih File Video dari HP / Laptop (.MP4, .WebM, .MOV · maks 100MB)'
-                            : 'Select Video File from Device (.MP4, .WebM, .MOV · max 100MB)'}
+                            ? 'Pilih File Video dari HP / Laptop (.MP4, .M4V, .WebM, .MOV, .MKV · maks 100MB)'
+                            : 'Select Video File from Device (.MP4, .M4V, .WebM, .MOV, .MKV · max 100MB)'}
                         </span>
                         <span className="text-[11px] text-slate-500 dark:text-slate-400">
                           {vAssetRef && vUploadedFileName

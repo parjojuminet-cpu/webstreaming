@@ -20,6 +20,7 @@ import {
   extractXPostInfo,
 } from '../src/services/videoImport/adapters.ts';
 import { parseStrictHttpsUrl } from '../src/services/videoImport/urlGuards.ts';
+import { detectVideoSourceFromInput } from '../src/services/videoImport/registry.ts';
 
 export type NormalizedMediaProvider = VideoAssetProvider | 'unknown';
 
@@ -155,6 +156,15 @@ export function normalizeMediaSource(
   const r = (rawRef || '').trim();
 
   if (p === 'cloudflare_stream') {
+    if (/^https?:\/\//i.test(r)) {
+      const recovered = detectVideoSourceFromInput(r);
+      if (recovered.detected) {
+        return {
+          provider: recovered.detected.provider,
+          assetRef: recovered.detected.canonicalRef,
+        };
+      }
+    }
     return { provider: 'cloudflare_stream', assetRef: r };
   }
   if (p === 'youtube' || r.startsWith('youtube:')) {
@@ -260,7 +270,25 @@ export function normalizeMediaSource(
     };
   }
   if (p === 'private_storage') {
+    if (/^https?:\/\//i.test(r)) {
+      const recovered = detectVideoSourceFromInput(r);
+      if (recovered.detected) {
+        return {
+          provider: recovered.detected.provider,
+          assetRef: recovered.detected.canonicalRef,
+        };
+      }
+    }
     return { provider: 'private_storage', assetRef: r };
+  }
+  if (/^https?:\/\//i.test(r)) {
+    const recovered = detectVideoSourceFromInput(r);
+    if (recovered.detected) {
+      return {
+        provider: recovered.detected.provider,
+        assetRef: recovered.detected.canonicalRef,
+      };
+    }
   }
   return { provider: 'unknown', assetRef: r };
 }
