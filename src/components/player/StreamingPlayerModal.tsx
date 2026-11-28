@@ -247,6 +247,23 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
       try {
         const authResp = await authorizeVideoStream(targetItem.id, targetItem.category);
         setAuthData(authResp);
+        const isPassiveEmbed =
+          (authResp.streamType === 'facebook' &&
+            Boolean(authResp.facebookVideoUrl || authResp.manifestUrl)) ||
+          ((authResp.streamType === 'streamable' ||
+            authResp.streamType === 'tiktok' ||
+            authResp.streamType === 'x' ||
+            authResp.streamType === 'instagram' ||
+            authResp.streamType === 'google_drive' ||
+            authResp.streamType === 'archive_org' ||
+            authResp.streamType === 'twitch' ||
+            authResp.streamType === 'rumble' ||
+            authResp.streamType === 'odysee' ||
+            authResp.streamType === 'loom' ||
+            authResp.streamType === 'bilibili' ||
+            authResp.streamType === 'html_embed') &&
+            Boolean(authResp.manifestUrl || authResp.twitchRef));
+        setIsSurfaceLocked(!isPassiveEmbed);
         if (!targetItem.aspectRatio || targetItem.aspectRatio === 'auto') {
           setAutoAspectRatio(
             inferAspectRatioFromUrlOrProvider({
@@ -1246,7 +1263,7 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
 
                 <div
                   className={`space-y-1.5 sm:space-y-2 ${
-                    isPassiveIframeStream && !isSurfaceLocked ? 'pointer-events-auto' : ''
+                    isPassiveIframeStream && !isSurfaceLocked ? 'pointer-events-none' : ''
                   }`}
                 >
                   {!isPassiveIframeStream && (
@@ -1262,7 +1279,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                   )}
 
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono tabular-nums text-white">
-                    <div className="flex items-center gap-1.5 sm:gap-2.5">
+                    <div
+                      className={`flex items-center gap-1.5 sm:gap-2.5 ${
+                        isPassiveIframeStream && !isSurfaceLocked ? 'pointer-events-auto' : ''
+                      }`}
+                    >
                       {!isPassiveIframeStream ? (
                         <>
                           <button
@@ -1325,7 +1346,11 @@ export const StreamingPlayerModal: React.FC<StreamingPlayerModalProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 sm:gap-2">
+                    <div
+                      className={`flex items-center gap-1.5 sm:gap-2 ${
+                        isPassiveIframeStream && !isSurfaceLocked ? 'pointer-events-auto' : ''
+                      }`}
+                    >
                       <select
                         aria-label={locale === 'id' ? 'Rasio layar video' : 'Video aspect ratio'}
                         value={aspectRatio}
